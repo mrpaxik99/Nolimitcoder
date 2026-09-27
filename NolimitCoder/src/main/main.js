@@ -13,6 +13,7 @@ const https = require('https');
 const http = require('http');
 const T = require('./tools');
 const PX = require('./proxy');
+const VX = require('./video-export');
 
 // Download/install progress (download widget at bottom left) — tools.js calls the hook, we forward it to the window.
 if (T.setProgressHook) T.setProgressHook((p) => {
@@ -974,9 +975,7 @@ function freePort() {
     });
   });
 }
-ipcMain.handle('preview:start', async (_, dirPath) => {
-  const root = path.resolve(String(dirPath || ''));
-  if (!root || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
+async function ensurePreview(root) {
   const cur = previewServers.get(root);
   if (cur) return { ok: true, port: cur.port, url: `http://127.0.0.1:${cur.port}/` };
   const port = await freePort();
@@ -1044,6 +1043,11 @@ ipcMain.handle('preview:start', async (_, dirPath) => {
     return { ok: true, port, url: `http://127.0.0.1:${port}/` };
   }
   return { ok: false, error: 'Failed to start the server' };
+}
+ipcMain.handle('preview:start', async (_, dirPath) => {
+  const root = path.resolve(String(dirPath || ''));
+  if (!root || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
+  return ensurePreview(root);
 });
 ipcMain.handle('preview:stop', async (_, dirPath) => {
   const root = path.resolve(String(dirPath || ''));
@@ -1053,6 +1057,44 @@ ipcMain.handle('preview:stop', async (_, dirPath) => {
     previewServers.delete(root);
   }
   return true;
+});
+
+// ===== AI COMMERCIAL VIDEO → MP4 (local machine power) =====
+// Records the ad HTML in a hidden window at the exact resolution (capturePage
+// frames) and encodes with a portable ffmpeg (downloaded once into userData).
+function safeBase(s) {
+  return String(s || 'video').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 60) || 'video';
+}
+ipcMain.handle('video:export', async (event, p) => {
+  const sender = event.sender;
+  const prog = (d) => { try { sender.send('video:progress', d || {}); } catch {} };
+  try {
+    const d = p || {};
+    const root = path.resolve(String(d.root || ''));
+    if (!root || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
+    const width = Math.min(Math.max(parseInt(d.width) || 1920, 160), 3840);
+    const height = Math.min(Math.max(parseInt(d.height) || 1080, 160), 2160);
+    const durationSec = Math.min(Math.max(parseInt(d.durationSec) || 10, 1), 120);
+    const fps = 30;
+    const prev = await ensurePreview(root);
+    if (!prev.ok) return { ok: false, error: 'Preview server failed' };
+    const ff = await VX.ensureFfmpeg(app.getPath('userData'), prog);
+    if (!ff.ok) return { ok: false, error: ff.error };
+    const file = `${safeBase(path.basename(root))}-${width}x${height}-${durationSec}s.mp4`;
+    const outPath = path.join(root, file);
+    const r = await VX.exportVideo({
+      url: prev.url, width, height, durationSec, fps, outPath,
+      userDataDir: app.getPath('userData'), onProg: prog
+    });
+    if (!r.ok) return r;
+    let mb = '';
+    try { mb = (fs.statSync(outPath).size / 1048576).toFixed(1) + ' MB'; } catch {}
+    try { T.dbgLog('video', { act: 'export-ok', file, mb, width, height, durationSec }); } catch {}
+    return { ok: true, path: outPath, file, mb };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('video:reveal', (_, fp) => {
+  try { shell.showItemInFolder(String(fp)); return true; } catch { return false; }
 });
 app.on('before-quit', () => {
   for (const [, s] of previewServers) { try { s.server.close(); } catch {} }

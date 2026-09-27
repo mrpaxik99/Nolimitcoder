@@ -58,7 +58,7 @@ body:hover .cursor-glow{opacity:1}
 .nav{position:sticky;top:0;z-index:20;background:#101010cc;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-bottom:1px solid var(--border-weaker);transition:box-shadow .3s,background .3s}
 .nav.scrolled{background:#0c0c0cf2;box-shadow:0 10px 40px #00000088}
-.nav-inner{max-width:var(--max);margin:0 auto;padding:12px 32px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:20px;width:100%}
+.nav-inner{max-width:none;margin:0;padding:12px 32px 12px 14px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:20px;width:100%}
 .nav-inner .brand{justify-self:start}
 .nav-inner .nav-cta{justify-self:end}
 .brand{display:flex;align-items:center;gap:10px}
