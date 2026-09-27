@@ -414,6 +414,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 /* Website & video projects: chat on the RIGHT, preview on the LEFT */
 .chat-view.flip .preview-pane{order:-1;border-left:none;border-right:1px solid var(--border-weaker)}
 .chat-view.flip .term-pane{order:2}
+/* Panel s chaty (Project / Create chat / Chaty) vždy úplně vlevo */
+.chat-view.flip .sidebar{order:-2}
 /* Video projects: chat half as wide, preview gets the room */
 .chat-view.flip.video .sidebar{width:170px;min-width:170px}
 .chat-view.flip.video .main{flex:0.55}
@@ -432,13 +434,23 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 /* Video mode: exact-size frame scaled to fit, covered by a click blocker */
 .preview-pane.video .preview-frame{flex:none;align-self:center;transform-origin:center center;box-shadow:0 0 0 1px #ffffff22,0 12px 50px #00000088}
 .video-blocker{position:absolute;inset:0;z-index:5;cursor:default}
-/* Empty video project: animated waiting background instead of any code/404 */
-.video-empty{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;overflow:hidden;
-  background:linear-gradient(120deg,#0b1026,#141b3d,#0b1026);background-size:220% 220%;animation:ve-bg 9s ease-in-out infinite}
-@keyframes ve-bg{0%,100%{background-position:0% 40%}50%{background-position:100% 60%}}
-.ve-title{font-size:19px;font-weight:700;color:#fff;letter-spacing:.01em}
+/* Empty video project: website-style backdrop (black + white glow + grid), never any code */
+.video-empty{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;overflow:hidden;background:#080808}
+.video-empty::before{content:'';position:absolute;inset:-40px;background:
+  radial-gradient(620px 320px at 50% -40px,#ffffff16,transparent 62%),
+  radial-gradient(520px 420px at 86% 82%,#ffffff09,transparent 60%),
+  radial-gradient(520px 420px at 10% 78%,#ffffff07,transparent 60%);animation:ve-drift 12s ease-in-out infinite alternate}
+.video-empty::after{content:'';position:absolute;inset:0;background:
+  repeating-linear-gradient(0deg,#ffffff07 0 1px,transparent 1px 44px),
+  repeating-linear-gradient(90deg,#ffffff07 0 1px,transparent 1px 44px);
+  -webkit-mask-image:radial-gradient(72% 72% at 50% 45%,#000 25%,transparent 100%);
+  mask-image:radial-gradient(72% 72% at 50% 45%,#000 25%,transparent 100%)}
+@keyframes ve-drift{from{transform:translateY(-16px)}to{transform:translateY(16px)}}
+.ve-pill{position:relative;font-size:11px;font-weight:700;letter-spacing:.14em;color:#30d158;border:1px solid #30d15844;background:#30d15811;border-radius:999px;padding:5px 14px}
+.ve-pill i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#30d158;margin-right:8px;animation:think-blink 1.6s infinite}
+.ve-title{position:relative;font-size:24px;font-weight:700;color:#fff;letter-spacing:-.01em}
 .ve-title .blink{animation:think-blink 1.4s infinite}
-.ve-sub{font-size:12.5px;color:#ffffffaa;max-width:340px;line-height:1.6}
+.ve-sub{position:relative;font-size:12.5px;color:#ffffff99;max-width:370px;line-height:1.65}
 .video-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border-weaker);background:#101014;flex-wrap:wrap}
 .video-label{font-size:11.5px;color:var(--text-weak);display:flex;align-items:center;gap:6px}
 .video-select{background:var(--surface);color:var(--text-strong);border:1px solid var(--border-weak);border-radius:8px;padding:5px 8px;font-size:12px;font-family:inherit}
