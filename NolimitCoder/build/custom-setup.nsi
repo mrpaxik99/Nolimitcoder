@@ -53,15 +53,7 @@ SetCompressor /SOLID lzma
 !define C_TEXT 0xEDEDED
 !define C_GRAY 0x9E9E9E
 !define C_GREEN 0x58D132
-!define WM_SETTEXT 0x000C
-!define WM_SETFONT 0x0030
-!define BM_CLICK 0x00F5
-!define BM_GETCHECK 0x00F0
-!define BM_SETCHECK 0x00F1
-!define STM_SETIMAGE 0x0172
-!define IMAGE_ICON 0x0001
-!define PBM_SETPOS 1026
-!define EM_REPLACESEL 194
+; (message constants like WM_SETTEXT, BM_CLICK, PBM_SETPOS, EM_REPLACESEL come from nsDialogs.nsh)
 !define ID_NEXT 1
 !define ID_BACK 3
 
