@@ -1400,6 +1400,7 @@ async function runAgent(convo, intent) {
     isStreaming = false; setActivity(null); hidePlanBox();
     el.sendBtn.disabled = false; el.stopBtn.style.display = 'none';
     try { window.api.removeListeners(); } catch {}
+    try { if (activeProjectType() === 'video') refreshVideoEmpty(); } catch {}
     if (pendingQueue.length) { const nx = pendingQueue.shift(); updateQueue(); sendMessage(nx); }
     else updateQueue();
   }
@@ -1599,6 +1600,7 @@ async function termExec(cmd) {
 function setVideoMode(on) {
   const pane = $('#previewPane'), bar = $('#videoBar'), blocker = $('#videoBlocker');
   if (pane) pane.classList.toggle('video', !!on);
+  try { $('#viewChat').classList.toggle('video', !!on); } catch {}
   if (bar) bar.style.display = on ? '' : 'none';
   if (blocker) blocker.style.display = on ? '' : 'none';
   if (on) {
@@ -1635,12 +1637,40 @@ async function startPreview(root, type) {
       if (type === 'video' || isVideoMode()) {
         setVideoMode(true);
         setTimeout(fitVideoFrame, 60);
+        setTimeout(refreshVideoEmpty, 150);
       } else {
         const f = $('#previewFrame');
         if (f) { f.style.width = ''; f.style.height = ''; f.style.transform = ''; f.style.flex = ''; }
       }
     }
   } catch {}
+}
+/* Empty video project → animated "waiting" background (never any code/404).
+   As soon as index.html exists, the real ad shows instead. */
+async function refreshVideoEmpty() {
+  const empty = $('#videoEmpty'), frame = $('#previewFrame');
+  if (!empty || !frame) return;
+  if (!isVideoMode() || !prefs.activeProject) { empty.style.display = 'none'; return; }
+  let hasIndex = false;
+  try {
+    const r = await window.api.projectFiles(prefs.activeProject, false);
+    if (r && r.ok) {
+      const paths = (r.tree || []).map(t => String(t.path || '').toLowerCase());
+      hasIndex = paths.includes('index.html') || paths.includes('dist/index.html');
+    }
+  } catch {}
+  if (hasIndex) {
+    empty.style.display = 'none';
+    const src = String(frame.src || '');
+    if (!src || src === 'about:blank') {
+      const url = $('#previewUrl') ? $('#previewUrl').textContent : '';
+      if (url && url.startsWith('http')) frame.src = url;
+    }
+    fitVideoFrame();
+  } else {
+    try { frame.src = 'about:blank'; } catch {}
+    empty.style.display = '';
+  }
 }
 function setVideoProgress(t) { const p = $('#videoProgress'); if (p) p.textContent = t || ''; }
 async function videoExportRun() {
@@ -1766,7 +1796,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   } catch {}
   window.addEventListener('resize', () => { try { fitVideoFrame(); } catch {} });
-  $('#previewReload').addEventListener('click', () => { try { $('#previewFrame').contentWindow.location.reload(); } catch {} });
+  $('#previewReload').addEventListener('click', () => { try { $('#previewFrame').contentWindow.location.reload(); } catch {} try { refreshVideoEmpty(); } catch {} });
   $('#previewOpen').addEventListener('click', () => { const u = $('#previewUrl').textContent; if (u && u.startsWith('http')) window.api.openExternal(u); });
   // create project modal
   $('#createProjectBtn').addEventListener('click', () => {

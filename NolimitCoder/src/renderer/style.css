@@ -290,8 +290,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 
 /* ===== My Projects (landing) ===== */
 .projects-view{flex:1;display:flex;overflow-y:auto;background:var(--bg-base)}
-.pv-inner{max-width:860px;width:100%;margin:0 auto;padding:64px 24px;display:flex;flex-direction:column;gap:26px}
-.pv-head{text-align:center}
+.pv-inner{max-width:none;width:100%;margin:0;padding:48px 36px;display:flex;flex-direction:column;gap:26px;align-items:stretch;text-align:left}
+.pv-head{text-align:left}
 .pv-title{font-size:26px;color:var(--text-strong);font-weight:600;letter-spacing:-.01em}
 .pv-sub{font-size:13px;color:var(--text-weaker);margin-top:6px}
 .pv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
@@ -312,7 +312,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .pv-create .plus{font-size:17px}
 /* ===== Logo ===== */
 .app-logo{width:30px;height:30px;border-radius:8px;object-fit:cover;flex-shrink:0}
-.pv-logo{width:120px;height:120px;border-radius:26px;object-fit:cover;margin:0 auto 4px;
+.pv-logo{width:120px;height:120px;border-radius:26px;object-fit:cover;margin:0 0 4px;
   box-shadow:0 0 50px #ffffff22}
 /* ===== Project header in chat ===== */
 .chat-view{flex:1;display:flex;min-width:0}
@@ -414,6 +414,10 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 /* Website & video projects: chat on the RIGHT, preview on the LEFT */
 .chat-view.flip .preview-pane{order:-1;border-left:none;border-right:1px solid var(--border-weaker)}
 .chat-view.flip .term-pane{order:2}
+/* Video projects: chat half as wide, preview gets the room */
+.chat-view.flip.video .sidebar{width:170px;min-width:170px}
+.chat-view.flip.video .main{flex:0.55}
+.chat-view.flip.video .preview-pane{flex:2}
 .preview-pane{flex:1.2;min-width:380px;display:flex;flex-direction:column;background:#0a0a0a;
   border-left:1px solid var(--border-weaker)}
 .preview-bar{display:flex;align-items:center;gap:8px;padding:0 10px;height:44px;min-height:44px;
@@ -427,8 +431,14 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .preview-frame{flex:1;width:100%;align-self:stretch;border:none;background:#fff;min-height:0}
 /* Video mode: exact-size frame scaled to fit, covered by a click blocker */
 .preview-pane.video .preview-frame{flex:none;align-self:center;transform-origin:center center;box-shadow:0 0 0 1px #ffffff22,0 12px 50px #00000088}
-.video-blocker{position:absolute;inset:0;z-index:5;display:flex;align-items:flex-start;justify-content:center;pointer-events:auto;cursor:default}
-.video-blocker span{margin-top:10px;font-size:11px;font-weight:700;letter-spacing:.12em;color:#fff;background:#000000aa;border:1px solid #ffffff33;border-radius:20px;padding:4px 14px;pointer-events:none}
+.video-blocker{position:absolute;inset:0;z-index:5;cursor:default}
+/* Empty video project: animated waiting background instead of any code/404 */
+.video-empty{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;overflow:hidden;
+  background:linear-gradient(120deg,#0b1026,#141b3d,#0b1026);background-size:220% 220%;animation:ve-bg 9s ease-in-out infinite}
+@keyframes ve-bg{0%,100%{background-position:0% 40%}50%{background-position:100% 60%}}
+.ve-title{font-size:19px;font-weight:700;color:#fff;letter-spacing:.01em}
+.ve-title .blink{animation:think-blink 1.4s infinite}
+.ve-sub{font-size:12.5px;color:#ffffffaa;max-width:340px;line-height:1.6}
 .video-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border-weaker);background:#101014;flex-wrap:wrap}
 .video-label{font-size:11.5px;color:var(--text-weak);display:flex;align-items:center;gap:6px}
 .video-select{background:var(--surface);color:var(--text-strong);border:1px solid var(--border-weak);border-radius:8px;padding:5px 8px;font-size:12px;font-family:inherit}

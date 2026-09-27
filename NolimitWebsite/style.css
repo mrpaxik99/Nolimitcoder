@@ -75,6 +75,14 @@ body:hover .cursor-glow{opacity:1}
 .nav-links a::after{content:'';position:absolute;left:0;bottom:0;height:1px;width:0;background:#fff;transition:width .25s}
 .nav-links a:hover{color:var(--text-strong)}
 .nav-links a:hover::after{width:100%}
+.nav-links a.vip{color:#1a1200;font-weight:800;padding:7px 18px;border-radius:999px;
+  background:linear-gradient(135deg,#fff3c4,#ffd23c 45%,#ff9d00);
+  box-shadow:0 0 16px #ffbf3f88,0 0 44px #ff9d0044,inset 0 1px 0 #ffffffaa;
+  animation:vip-glow 2.2s ease-in-out infinite;transition:transform .2s}
+.nav-links a.vip::after{display:none}
+.nav-links a.vip:hover{color:#000;transform:translateY(-1px) scale(1.05)}
+@keyframes vip-glow{0%,100%{box-shadow:0 0 12px #ffbf3f77,0 0 34px #ff9d0033,inset 0 1px 0 #ffffffaa}
+  50%{box-shadow:0 0 28px #ffd23ccc,0 0 70px #ff9d0066,inset 0 1px 0 #ffffffcc}}
 .nav-cta{margin-left:8px;white-space:nowrap}
 
 /* ===== Buttons — normal size, gloss ===== */
