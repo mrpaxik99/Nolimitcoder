@@ -279,7 +279,7 @@ function activeProjectType() {
 function videoResWH() { return VIDEO_RESOLUTIONS[videoRes] || VIDEO_RESOLUTIONS['1920x1080']; }
 /* System prompt pro reklamní videa: jedno responzivní index.html, celé viewport,
    animované, bez potřeby klikání (v náhledu ani klikat nejde — chová se jako video). */
-const VIDEO_ADD = ' VIDEO AD PROJECT: output a single self-contained advertising commercial as index.html in the project root (inline CSS+JS, no build). The ad fills the whole viewport at the target resolution and is ALWAYS in motion — layered CSS/JS animations (background, headline, CTA, particles) run continuously and concurrently from page load (autoplay, no interaction), looping seamlessly with no static frames. Hook in the first second, persistent logo and CTA, readable typography, strong contrast — it must look like a real paid ad at every moment. If the brief mentions a platform (YouTube, TikTok, Reels…), FIRST research its current ad/creative specs via web_search (resolution, duration, safe zones) and build exactly to spec. No clicks needed — the page behaves like a video (nothing must require interaction). Keep everything responsive so it looks right at any of 1920x1080, 1280x720, 1440x1080, 1080x1080, 1080x1920.';
+const VIDEO_ADD = ' VIDEO AD PROJECT: output a single self-contained advertising commercial as index.html in the project root (inline CSS+JS, no build). The ad fills the whole viewport at the target resolution and is ALWAYS in motion — layered CSS/JS animations (background, headline, CTA, particles) run continuously and concurrently from page load (autoplay, no interaction), looping seamlessly with no static frames. Hook in the first second, persistent logo and CTA, readable typography, strong contrast — it must look like a real paid ad at every moment. If the brief mentions a platform (YouTube, TikTok, Reels…), FIRST research its current ad/creative specs via web_search (resolution, duration, safe zones) and build exactly to spec. No clicks needed — the page behaves like a video (nothing must require interaction). Keep everything responsive so it looks right at any of 1920x1080, 1280x720, 1440x1080, 1080x1080, 1080x1920. The finished index.html is automatically recorded to MP4 by the app — the MP4 is the primary deliverable, index.html stays inside as its editable source.';
 
 /* ---------- projekty ---------- */
 function renderProjects() {
@@ -1435,6 +1435,18 @@ async function runAgent(convo, intent) {
     convo.messages.push({ role: 'assistant', content: finalText || 'Nedostala jsem od AI žádnou odpověď (prázdný stream). Zkus to prosím poslat znovu.' });
     saveConvos(); renderMessages(); renderChatList();
     setFooter('Hotovo'); playDone();
+    // Video project: primárním výstupem je MP4 — po každém zápisu reklamy ho rovnou automaticky nahraj
+    // (index.html zůstává uvnitř jako zdroj, ze kterého se nahrává). Jen když se opravdu něco zapsalo.
+    try {
+      if (activeProjectType() === 'video' && !stopRequested) {
+        const writes = runToolMsgs(convo).filter(m => !m.skipped && m.ok && ['write_file', 'append_file', 'edit_file'].includes(m.tool));
+        if (writes.length) {
+          setFooter('Nahrávám MP4…');
+          await videoExportRun();
+          setFooter('Hotovo · MP4 nahráno');
+        }
+      }
+    } catch {}
   } catch (e) {
     bubble.innerHTML = mdToHtml('Chyba: ' + (e.message || e));
     setFooter('Chyba');
