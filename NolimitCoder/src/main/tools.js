@@ -1,5 +1,5 @@
-// NolimitCoder tools — kompletní sada nástrojů (bash/read/write/edit/glob/grep/env)
-// Cisty node modul bez electron závislostí (testovatelný). Volá ho main.js pres IPC.
+// NolimitCoder tools — complete toolset (bash/read/write/edit/glob/grep/env)
+// Pure node module with no electron dependencies (testable). Called by main.js via IPC.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -8,9 +8,9 @@ const http = require('http');
 const { execFile } = require('child_process');
 const net = require('net');
 
-/* ===== AI debug log (dist/ai-debug.log) — diagnostika chování agenta =====
-   Píše se sem každé kolo smyčky, každý nástroj, každý request na AI.
-   Soubor rotuje při 8 MB. Vše v try/catch — logování nikdy nesmí nic rozbít. */
+/* ===== AI debug log (dist/ai-debug.log) — agent behavior diagnostics =====
+   Every loop turn, every tool, every AI request is written here.
+   The file rotates at 8 MB. Everything in try/catch — logging must never break anything. */
 let dbgFile = '';
 let dbgWrites = 0;
 function dbgFilePath() {
@@ -65,8 +65,8 @@ const BLOCKED_PREFIXES = ['c:\\windows', 'c:\\program files', 'c:\\program files
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'out', 'build', '.next', '__pycache__', '.venv', 'venv', 'target']);
 const TEXT_EXT = new Set(['.txt', '.md', '.js', '.jsx', '.ts', '.tsx', '.json', '.py', '.html', '.css', '.c', '.cpp', '.h', '.java', '.cs', '.go', '.rs', '.php', '.rb', '.sql', '.xml', '.yml', '.yaml', '.toml', '.ini', '.cfg', '.sh', '.bat', '.ps1', '.vue', '.svelte']);
 
-// Kompilátory/runtime: najdi v PATH i mimo něj, a když chybí,
-// doinstaluj přes winget, jinak portable z internetu do userData/tools.
+// Compilers/runtime: find in PATH and outside it, and when missing,
+// install via winget, otherwise portable from the internet into userData/tools.
 const TOOLCHAINS = {
   node: { label: 'Node.js', bins: [['node', '--version']], winget: 'OpenJS.NodeJS.LTS', url: 'https://nodejs.org/', portable: 'node', cmds: ['node', 'npm', 'npx', 'corepack', 'tsc', 'ts-node', 'electron', 'electron-builder', 'vite', 'next', 'webpack', 'rollup', 'eslint', 'prettier', 'yarn', 'pnpm', 'ng', 'expo'] },
   python: { label: 'Python', bins: [['python', '--version'], ['py', '--version']], winget: 'Python.Python.3.12', url: 'https://www.python.org/downloads/', portable: 'python', cmds: ['python', 'py', 'pip', 'pip3', 'pytest', 'django-admin', 'flask', 'uvicorn', 'gunicorn', 'black', 'ruff', 'mypy', 'poetry'] },
@@ -91,8 +91,8 @@ const TOOLCHAINS = {
   unity: { label: 'Unity Editor', heavy: true, manual: true, bins: [['unity', '-version']], url: 'https://unity.com/download', cmds: ['unity'] },
   unreal: { label: 'Unreal Engine', heavy: true, manual: true, bins: [['UnrealEditor', '-version']], url: 'https://www.unrealengine.com/download', cmds: [] }
 };
-const TOOL_GROUPS = { cpp: { label: 'C/C++ kompilátor', prefer: ['msvc', 'gcc'], install: ['gcc'] } };
-// Balíčkové manažery jako druhá instance (některá PC nemá winget, ale má choco/scoop)
+const TOOL_GROUPS = { cpp: { label: 'C/C++ compiler', prefer: ['msvc', 'gcc'], install: ['gcc'] } };
+// Package managers as a second instance (some PCs lack winget but have choco/scoop)
 const PKG_ALIAS = {
   node: { choco: 'nodejs-lts', scoop: 'nodejs-lts' },
   python: { choco: 'python312', scoop: 'python' },
@@ -159,7 +159,7 @@ function resolveTarget(root, p, fullAccess) {
   }
   const low = abs.toLowerCase();
   if (BLOCKED_PREFIXES.some(b => low === b.replace(/\/$/, '') || low.startsWith(b))) {
-    throw new Error('Systémová složka je zakázaná: ' + abs);
+    throw new Error('System folder is forbidden: ' + abs);
   }
   if (!fullAccess) {
     const r = path.resolve(root);
@@ -170,12 +170,12 @@ function resolveTarget(root, p, fullAccess) {
         const kr = path.resolve(v);
         return abs === kr || abs.startsWith(kr + path.sep);
       });
-      if (!userOk) throw new Error('Mimo složku projektu (povoleny jsou ještě Dokumenty/Plocha/Stažené…, nebo zapni Full přístup v Nastavení): ' + abs);
+      if (!userOk) throw new Error('Outside the project folder (Documents/Desktop/Downloads are also allowed, or enable Full access in Settings): ' + abs);
     }
   }
   return abs;
 }
-// Model občas pošle parametr pod jiným jménem (file, filename…) — sjednoť
+// The model sometimes sends a parameter under a different name (file, filename…) — unify it
 const ARG_ALIASES = {
   path: ['path', 'file', 'filename', 'filepath', 'file_path', 'target', 'to', 'dest', 'destination', 'name', 'dir', 'folder'],
   from: ['from', 'source', 'src', 'sourcepath', 'source_path', 'oldpath', 'old_path'],
@@ -216,8 +216,8 @@ function splitArgs(s) {
   while ((m = re.exec(String(s || '')))) out.push(m[1] !== undefined ? m[1] : (m[2] !== undefined ? m[2] : m[3]));
   return out;
 }
-// Modely často píšou unixové příkazy i na Windows + chytré uvozovky/pomlčky.
-// Přelož na cmd.exe ekvivalenty, ať to funguje bez chyby.
+// Models often write unix commands even on Windows + smart quotes/dashes.
+// Translate to cmd.exe equivalents so it works without errors.
 function normalizeShell(cmd, light) {
   let c = String(cmd || '');
   c = c.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[–—−]/g, '-').replace(/ /g, ' ');
@@ -247,8 +247,8 @@ function normalizeShell(cmd, light) {
     return seg;
   }).join('');
 }
-// Konzole píše česky v OEM (cp852) — Node to neumí dekódovat, takže vlastní tabulka (empiricky ověřeno).
-const OEM_CZ = {0xa0:'á',0x9f:'č',0xd4:'ď',0x82:'é',0xd8:'ě',0xa1:'í',0xe5:'ň',0xa2:'ó',0xfd:'ř',0xe7:'š',0x9c:'ť',0xa3:'ú',0x85:'ů',0xec:'ý',0xa7:'ž',0xb5:'Á',0xac:'Č',0xd2:'Ď',0x90:'É',0xb7:'Ě',0xd6:'Í',0xd5:'Ň',0xe0:'Ó',0xfc:'Ř',0xe6:'Š',0x9b:'Ť',0xe9:'Ú',0xde:'Ů',0xed:'Ý',0xa6:'Ž'};
+// The console writes Czech in OEM (cp852) — Node cannot decode it, so a custom table (empirically verified).
+const OEM_CZ = {0xa0:'\u00e1',0x9f:'\u010d',0xd4:'\u010f',0x82:'\u00e9',0xd8:'\u011b',0xa1:'\u00ed',0xe5:'\u0148',0xa2:'\u00f3',0xfd:'\u0159',0xe7:'\u0161',0x9c:'\u0165',0xa3:'\u00fa',0x85:'\u016f',0xec:'\u00fd',0xa7:'\u017e',0xb5:'\u00c1',0xac:'\u010c',0xd2:'\u010e',0x90:'\u00c9',0xb7:'\u011a',0xd6:'\u00cd',0xd5:'\u0147',0xe0:'\u00d3',0xfc:'\u0158',0xe6:'\u0160',0x9b:'\u0164',0xe9:'\u00da',0xde:'\u016e',0xed:'\u00dd',0xa6:'\u017d'};
 function decodeConsole(buf) {
   const b = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf || ''));
   let s = '';
@@ -263,12 +263,12 @@ function runCmd(cmd, cwd, timeoutMs) {
         let out = decodeConsole(stdout);
         const errS = decodeConsole(stderr);
         if (errS) out += (out ? '\n[stderr]\n' : '') + errS;
-        if (out.length > 20000) out = out.slice(0, 20000) + '\n… (výstup zkrácen)';
+        if (out.length > 20000) out = out.slice(0, 20000) + '\n… (output truncated)';
         if (err) {
           const code = typeof err.code === 'number' ? `exit ${err.code}` : String(err.code || 'error');
           resolve({ ok: err.killed ? false : false, output: `${out}\n[${code}${err.killed ? ', timeout' : ''}]`.trim() });
         } else {
-          resolve({ ok: true, output: (out.trim() || '(bez výstupu)') + '\n[exit 0]' });
+          resolve({ ok: true, output: (out.trim() || '(no output)') + '\n[exit 0]' });
         }
       });
     void child;
@@ -279,7 +279,7 @@ function decodeSmart(buf) {
   try { return new TextDecoder("utf-8", { fatal: true }).decode(b); }
   catch { return decodeConsole(b); }
 }
-// Spuštění bez shellu (žádné parsování uvozovek): pro tar/7z, kde cmd /s /c rozbíjí cesty v uvozovkách.
+// Running without a shell (no quote parsing): for tar/7z, where cmd /s /c breaks quoted paths.
 function runArgv(exe, args, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const child = execFile(exe, args || [],
@@ -287,11 +287,11 @@ function runArgv(exe, args, cwd, timeoutMs) {
         let out = decodeSmart(stdout);
         const errS = decodeSmart(stderr);
         if (errS) out += (out ? '\n[stderr]\n' : '') + errS;
-        if (out.length > 20000) out = out.slice(0, 20000) + '\n… (výstup zkrácen)';
+        if (out.length > 20000) out = out.slice(0, 20000) + '\n… (output truncated)';
         if (err) {
           const code = typeof err.code === 'number' ? `exit ${err.code}` : String(err.code || 'error');
           resolve({ ok: false, output: `${out}\n[${code}${err.killed ? ', timeout' : ''}]`.trim() });
-        } else resolve({ ok: true, output: (out.trim() || '(bez výstupu)') + '\n[exit 0]' });
+        } else resolve({ ok: true, output: (out.trim() || '(no output)') + '\n[exit 0]' });
       });
     void child;
   });
@@ -311,20 +311,20 @@ function runCmdKind(kind, cmd, cwd, timeoutMs) {
         let out = decodeSmart(stdout);
         const errS = decodeSmart(stderr);
         if (errS) out += (out ? "\n[stderr]\n" : "") + errS;
-        if (out.length > 20000) out = out.slice(0, 20000) + "\n… (výstup zkrácen)";
+        if (out.length > 20000) out = out.slice(0, 20000) + "\n… (output truncated)";
         const incompatible = kind === "cmd"
-          ? /is not recognized as an internal or external command|není rozpoznán|neni rozpoznan/i.test(out)
-          : /is not recognized as the name of a cmdlet|není rozpoznán|neni rozpoznan/i.test(out);
+          ? /is not recognized as an internal or external command|nen\u00ed rozpozn\u00e1n|neni rozpoznan/i.test(out)
+          : /is not recognized as the name of a cmdlet|nen\u00ed rozpozn\u00e1n|neni rozpoznan/i.test(out);
         if (err && err.killed) { resolve({ ok: false, output: (out + "\n[timeout]").trim(), launched: true, incompatible: false }); return; }
         if (err && typeof err.code === "number") { resolve({ ok: false, output: (out + "\n[exit " + err.code + "]").trim(), launched: true, incompatible }); return; }
         if (err) { resolve({ ok: false, output: (out + "\n[" + String(err.code || "error") + "]").trim(), launched: true, incompatible }); return; }
-        resolve({ ok: true, output: (out.trim() || "(bez výstupu)") + "\n[exit 0]", launched: true, incompatible });
+        resolve({ ok: true, output: (out.trim() || "(no output)") + "\n[exit 0]", launched: true, incompatible });
       });
     void child;
   });
 }
-// Vždy zakázané (rozbití PC). Kontroluje se JEN název příkazu (první token),
-// aby to neblokovalo nevinné věci jako "npm run format".
+// Always forbidden (breaks the PC). Only the command name (first token) is checked,
+// so it does not block innocent things like "npm run format".
 function firstToken(cmd) {
   const m = String(cmd || '').trim().match(/^"([^"]+)"|^'([^']+)'|^(\S+)/);
   return ((m && (m[1] || m[2] || m[3])) || '').toLowerCase().replace(/\.(exe|cmd|bat|ps1|com)$/, '');
@@ -370,7 +370,7 @@ function globWalk(root, pattern, fullAccess) {
         if (e.isDirectory()) {
           if (SKIP_DIRS.has(e.name)) continue;
           if (segs[si] === '**') {
-            walk(full, si, rp); // ** žere libovolně hluboko
+            walk(full, si, rp); // ** eats arbitrarily deep
             if (si + 1 < segs.length) walk(full, si + 1, rp);
             else out.push(rp + '/');
           } else if (segRx(segs[si]).test(e.name)) {
@@ -381,7 +381,7 @@ function globWalk(root, pattern, fullAccess) {
           const seg = segs[si];
           let hit = false;
           if (seg === '**') {
-            // ** samotné bere vše; ** /x bere shodu s dalším segmentem (i v kořenu)
+            // ** alone takes everything; **/x matches the next segment too (even at the root)
             if (si === segs.length - 1) hit = true;
             else if (si + 1 === segs.length - 1 && segRx(segs[si + 1]).test(e.name)) hit = true;
           } else if (last && segRx(seg).test(e.name)) hit = true;
@@ -394,7 +394,7 @@ function globWalk(root, pattern, fullAccess) {
         }
       } catch {}
     }
-    // "**/x": prohledej i vnořené adresáře se stejným vzorem
+    // "**/x": also search nested directories with the same pattern
     if (segs[si] !== '**') {
       for (const e of entries) {
         if (out.length >= 200) return;
@@ -425,16 +425,16 @@ function fetchText(url, timeoutMs) {
       res.on('end', () => {
         const txt = data.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
           .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-        resolve({ ok: true, output: txt.slice(0, 15000) || '(prázdná stránka)' });
+        resolve({ ok: true, output: txt.slice(0, 15000) || '(empty page)' });
       });
     });
-    req.on('error', e => resolve({ ok: false, output: 'Chyba: ' + e.message }));
+    req.on('error', e => resolve({ ok: false, output: 'Error: ' + e.message }));
     req.setTimeout(timeoutMs || 15000, () => { req.destroy(); resolve({ ok: false, output: 'Timeout' }); });
   });
 }
 
-// Portable nástroje (když winget selže): stáhni z netu do userData/tools a přidej do PATH,
-// aby je shell hned našel — bez admin práv.
+// Portable tools (when winget fails): download from the web into userData/tools and add to PATH,
+// so the shell finds them right away — no admin rights needed.
 function toolsBinDirs(userDataDir) {
   const out = [];
   if (!userDataDir) return out;
@@ -487,14 +487,14 @@ function prependPortableBins(userDataDir) {
     process.env.PATH = cur.join(sep);
   } catch {}
 }
-// Progress stahování/instalací pro download widget v UI (vlevo dole).
-// main.js zaregistruje hook, který eventy přeposílá do rendereru.
+// Download/install progress for the download widget in the UI (bottom left).
+// main.js registers a hook that forwards events to the renderer.
 let progressHook = null;
 function setProgressHook(fn) { progressHook = (typeof fn === 'function') ? fn : null; }
 function dlEvent(ev) { try { if (progressHook) progressHook(Object.assign({ t: Date.now() }, ev)); } catch {} }
-// Aktuální popisek stahovaného (nastavuje installTool, aby downloadFile věděl, co to je).
+// Current label of the download (set by installTool so downloadFile knows what it is).
 let dlContext = '';
-// Registr běžících stahování pro zrušení z UI (Stop / Zrušit vše).
+// Registry of running downloads for cancellation from the UI (Stop / Cancel all).
 const dlControllers = new Map(); // id(dest) -> { cancelled, reqs:Set }
 function cancelDownload(id) {
   const ids = id ? [String(id)] : [...dlControllers.keys()];
@@ -504,11 +504,11 @@ function cancelDownload(id) {
     if (!c) continue;
     hit = true;
     c.cancelled = true;
-    for (const r of c.reqs || []) { try { r.destroy(new Error('Zrušeno uživatelem')); } catch {} }
+    for (const r of c.reqs || []) { try { r.destroy(new Error('Cancelled by user')); } catch {} }
   }
   return hit;
 }
-// HEAD: velikost + podpora Range (pro segmentové stahování). Vrací {url,size,ranges} nebo null.
+// HEAD: size + Range support (for segmented downloads). Returns {url,size,ranges} or null.
 function headInfo(url, timeoutMs) {
   return new Promise((resolve) => {
     let over = false;
@@ -532,8 +532,8 @@ function headInfo(url, timeoutMs) {
     go(url, 4);
   });
 }
-const DL_SEGS = 6; // paralelních proudů u velkých souborů
-const DL_SEG_MIN = 8 * 1048576; // segmentovat až soubory > 8 MB
+const DL_SEGS = 6; // parallel streams for large files
+const DL_SEG_MIN = 8 * 1048576; // segment only files > 8 MB
 function downloadFile(url, dest, timeoutMs) {
   return new Promise((resolve) => {
     let done = false;
@@ -574,8 +574,8 @@ function downloadFile(url, dest, timeoutMs) {
         dlControllers.delete(id);
         cleanupParts();
         try { fs.rmSync(dest, { force: true }); } catch {}
-        dlEvent({ kind: 'dl', id, label, phase: 'error', percent: -1, error: 'Zrušeno uživatelem' });
-        return resolve({ ok: false, error: 'Zrušeno uživatelem' });
+        dlEvent({ kind: 'dl', id, label, phase: 'error', percent: -1, error: 'Cancelled by user' });
+        return resolve({ ok: false, error: 'Cancelled by user' });
       }
       if (stage === 'seg') { stage = 'single'; restarting = true; cleanupParts(); single(); return; }
       if (tries < 1) { tries++; restarting = true; single(); return; }
@@ -586,11 +586,11 @@ function downloadFile(url, dest, timeoutMs) {
       dlEvent({ kind: 'dl', id, label, phase: 'error', percent: -1, error: msg });
       resolve({ ok: false, error: msg });
     };
-    // ---- jeden proud (i fallback) ----
+    // ---- single stream (also fallback) ----
     const single = () => {
       restarting = false;
       const go = (u, left, expected) => {
-        if (done || ctrl.cancelled) return fail('Zrušeno uživatelem');
+        if (done || ctrl.cancelled) return fail('Cancelled by user');
         const mod = String(u).startsWith('https:') ? https : http;
         const req = mod.get(String(u), { headers: { 'User-Agent': 'NolimitCoder/2.0' } }, (res) => {
           if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && left > 0) {
@@ -605,30 +605,30 @@ function downloadFile(url, dest, timeoutMs) {
           let received = 0;
           prog(0, expected || 0);
           res.on('data', c => { received += c.length; prog(received, expected || 0); });
-          res.on('aborted', () => fail(ctrl.cancelled ? 'Zrušeno uživatelem' : 'Spojení přerušeno uprostřed stahování'));
+          res.on('aborted', () => fail(ctrl.cancelled ? 'Cancelled by user' : 'Connection interrupted in the middle of the download'));
           res.pipe(ws);
           ws.on('finish', () => ws.close(() => {
             if (done) return;
             let size = 0;
             try { size = fs.statSync(dest).size; } catch {}
-            if (!size) return fail('Staženo 0 B');
-            if (expected && size < expected) return fail(`Neúplné stažení (${(size / 1048576).toFixed(1)} z ${(expected / 1048576).toFixed(1)} MB)`);
+            if (!size) return fail('Downloaded 0 B');
+            if (expected && size < expected) return fail(`Incomplete download (${(size / 1048576).toFixed(1)} of ${(expected / 1048576).toFixed(1)} MB)`);
             finishOk(size, expected);
           }));
           ws.on('error', e => fail(e.message));
         });
         ctrl.reqs.add(req);
         const unreg = () => ctrl.reqs.delete(req);
-        req.on('error', e => { unreg(); fail((e && e.message) || 'Chyba sítě'); });
+        req.on('error', e => { unreg(); fail((e && e.message) || 'Network error'); });
         req.on('close', unreg);
-        req.setTimeout(timeoutMs || 120000, () => { try { req.destroy(new Error(ctrl.cancelled ? 'Zrušeno uživatelem' : 'Timeout stahování')); } catch {} });
+        req.setTimeout(timeoutMs || 120000, () => { try { req.destroy(new Error(ctrl.cancelled ? 'Cancelled by user' : 'Download timeout')); } catch {} });
       };
       go(url, 4, 0);
     };
-    // ---- jeden segment paralelního stahování ----
+    // ---- one segment of the parallel download ----
     const segDownload = (u, start, end, partFile, shared) => new Promise((res, rej) => {
       const go = (uu, left) => {
-        if (done || ctrl.cancelled) return rej(new Error('Zrušeno uživatelem'));
+        if (done || ctrl.cancelled) return rej(new Error('Cancelled by user'));
         const mod = String(uu).startsWith('https:') ? https : http;
         const req = mod.get(String(uu), { headers: { 'User-Agent': 'NolimitCoder/2.0', Range: `bytes=${start}-${end}` } }, (rs) => {
           if (rs.statusCode >= 300 && rs.statusCode < 400 && rs.headers.location && left > 0) {
@@ -638,7 +638,7 @@ function downloadFile(url, dest, timeoutMs) {
           if (rs.statusCode !== 206) { rs.resume(); return rej(new Error(rs.statusCode === 200 ? 'no-range' : 'HTTP ' + rs.statusCode)); }
           const ws = fs.createWriteStream(partFile);
           rs.on('data', c => { shared.received += c.length; prog(shared.received, shared.total); });
-          rs.on('aborted', () => rej(new Error('Spojení přerušeno')));
+          rs.on('aborted', () => rej(new Error('Connection interrupted')));
           rs.pipe(ws);
           ws.on('finish', () => ws.close(() => res(true)));
           ws.on('error', e => rej(e));
@@ -647,11 +647,11 @@ function downloadFile(url, dest, timeoutMs) {
         const unreg = () => ctrl.reqs.delete(req);
         req.on('error', e => { unreg(); rej(e); });
         req.on('close', unreg);
-        req.setTimeout(timeoutMs || 300000, () => { try { req.destroy(new Error(ctrl.cancelled ? 'Zrušeno uživatelem' : 'Timeout stahování')); } catch {} });
+        req.setTimeout(timeoutMs || 300000, () => { try { req.destroy(new Error(ctrl.cancelled ? 'Cancelled by user' : 'Download timeout')); } catch {} });
       };
       go(u, 4);
     });
-    // ---- paralelní stahování + složení ----
+    // ---- parallel download + assembly ----
     const startSeg = (finalUrl, size) => {
       restarting = false;
       const N = DL_SEGS;
@@ -665,11 +665,11 @@ function downloadFile(url, dest, timeoutMs) {
         jobs.push(segDownload(finalUrl, a, b, id + '.part' + i, shared));
       }
       Promise.all(jobs).then(async () => {
-        if (done || ctrl.cancelled) return fail('Zrušeno uživatelem');
+        if (done || ctrl.cancelled) return fail('Cancelled by user');
         try {
           const ws = fs.createWriteStream(dest);
           for (let i = 0; i < jobs.length; i++) {
-            if (done || ctrl.cancelled) { try { ws.destroy(); } catch {} return fail('Zrušeno uživatelem'); }
+            if (done || ctrl.cancelled) { try { ws.destroy(); } catch {} return fail('Cancelled by user'); }
             await new Promise((res2, rej2) => {
               const rs = fs.createReadStream(id + '.part' + i);
               rs.on('error', rej2);
@@ -682,22 +682,22 @@ function downloadFile(url, dest, timeoutMs) {
           cleanupParts();
           let sz = 0;
           try { sz = fs.statSync(dest).size; } catch {}
-          if (!sz) return fail('Staženo 0 B');
-          if (sz < size) return fail(`Neúplné stažení (${(sz / 1048576).toFixed(1)} z ${(size / 1048576).toFixed(1)} MB)`);
+          if (!sz) return fail('Downloaded 0 B');
+          if (sz < size) return fail(`Incomplete download (${(sz / 1048576).toFixed(1)} of ${(size / 1048576).toFixed(1)} MB)`);
           finishOk(sz, size);
-        } catch (e) { fail((e && e.message) || 'Chyba skládání'); }
+        } catch (e) { fail((e && e.message) || 'Assembly error'); }
       }).catch((e) => {
         if (done || restarting) return;
-        if (ctrl.cancelled) return fail('Zrušeno uživatelem');
+        if (ctrl.cancelled) return fail('Cancelled by user');
         if (String((e && e.message) || e) === 'no-range') { stage = 'single'; restarting = true; cleanupParts(); return single(); }
-        fail((e && e.message) || 'Chyba stahování');
+        fail((e && e.message) || 'Download error');
       });
     };
-    // ---- start: nejdřív zkusit segmenty, jinak jeden proud ----
+    // ---- start: try segments first, otherwise a single stream ----
     (async () => {
       try {
         const info = await headInfo(url, 20000);
-        if (done || ctrl.cancelled) return fail('Zrušeno uživatelem');
+        if (done || ctrl.cancelled) return fail('Cancelled by user');
         if (info && info.size > DL_SEG_MIN && info.ranges) { stage = 'seg'; return startSeg(info.url, info.size); }
       } catch {}
       stage = 'single';
@@ -726,36 +726,36 @@ function fetchJson(url, timeoutMs) {
   });
 }
 async function installPortableNode(userDataDir) {
-  if (!userDataDir) throw new Error('Chybí userData');
+  if (!userDataDir) throw new Error('Missing userData');
   dlContext = 'Node.js';
   const toolsDir = path.join(String(userDataDir), 'tools');
   fs.mkdirSync(toolsDir, { recursive: true });
-  // najdi nejnovější LTS verzi (žádné hardcodování)
+  // find the latest LTS version (no hardcoding)
   const index = await fetchJson('https://nodejs.org/dist/index.json', 20000);
   const lts = Array.isArray(index) ? index.find(v => v && v.lts) : null;
   const ver = (lts && lts.version) || 'v22.14.0';
   const existing = path.join(toolsDir, `node-${ver}-win-x64`, 'node.exe');
   if (fs.existsSync(existing)) {
     prependPortableBins(userDataDir);
-    return { ok: true, output: `Node.js ${ver} už je stažený v ${path.dirname(existing)} a je v PATH.` };
+    return { ok: true, output: `Node.js ${ver} is already downloaded in ${path.dirname(existing)} and is in PATH.` };
   }
   const zipUrl = `https://nodejs.org/dist/${ver}/node-${ver}-win-x64.zip`;
   const zipDest = path.join(toolsDir, `node-${ver}-win-x64.zip`);
   const dl = await downloadFile(zipUrl, zipDest, 300000);
   if (!dl.ok) {
     try { fs.rmSync(zipDest, { force: true }); } catch {}
-    throw new Error(`Stažení selhalo (${dl.error}). Ručně: https://nodejs.org/`);
+    throw new Error(`Download failed (${dl.error}). Manual: https://nodejs.org/`);
   }
   const ps = await runCmd(`powershell -NoProfile -Command "Expand-Archive -Force '${zipDest}' '${toolsDir}'"`, toolsDir, 300000);
   try { fs.rmSync(zipDest, { force: true }); } catch {}
-  if (!fs.existsSync(existing)) throw new Error(`Rozbalení se nepovedlo (${ps.output.slice(-300)}). Ručně: https://nodejs.org/`);
+  if (!fs.existsSync(existing)) throw new Error(`Extraction failed (${ps.output.slice(-300)}). Manual: https://nodejs.org/`);
   prependPortableBins(userDataDir);
-  return { ok: true, output: `Node.js ${ver} stažen z internetu do ${path.dirname(existing)} a přidán do PATH.` };
+  return { ok: true, output: `Node.js ${ver} downloaded from the internet to ${path.dirname(existing)} and added to PATH.` };
 }
-// Portable Git (MinGit) — když winget selže: zjisti nejnovější verzi přes GitHub API,
-// stáhni MinGit-*-64-bit.zip do userData/tools a přidej cmd/ do PATH. Bez admina.
+// Portable Git (MinGit) — when winget fails: find the latest version via the GitHub API,
+// download MinGit-*-64-bit.zip into userData/tools and add cmd/ to PATH. No admin needed.
 async function installPortableGit(userDataDir) {
-  if (!userDataDir) throw new Error('Chybí userData');
+  if (!userDataDir) throw new Error('Missing userData');
   dlContext = 'Git';
   const toolsDir = path.join(String(userDataDir), 'tools');
   fs.mkdirSync(toolsDir, { recursive: true });
@@ -766,29 +766,29 @@ async function installPortableGit(userDataDir) {
         resolve(!err && /git version/i.test(String(stdout || '')));
       });
     });
-    if (probe) return { ok: true, output: 'Git už je k dispozici v PATH.' };
+    if (probe) return { ok: true, output: 'Git is already available in PATH.' };
   }
   const rel = await fetchJson('https://api.github.com/repos/git-for-windows/git/releases/latest', 20000);
   const assets = (rel && rel.assets) || [];
   const mg = assets.find(a => /MinGit-.*-64-bit\.zip$/i.test(a.name || '')) || assets.find(a => /MinGit.*64.*\.zip$/i.test(a.name || ''));
-  if (!mg || !mg.browser_download_url) throw new Error('Nenašel jsem MinGit ke stažení. Ručně: https://git-scm.com/downloads');
+  if (!mg || !mg.browser_download_url) throw new Error('Could not find MinGit to download. Manual: https://git-scm.com/downloads');
   const destDir = path.join(toolsDir, 'mingit');
   const zipDest = path.join(toolsDir, 'mingit.zip');
   const dl = await downloadFile(mg.browser_download_url, zipDest, 300000);
   if (!dl.ok) {
     try { fs.rmSync(zipDest, { force: true }); } catch {}
-    throw new Error(`Stažení selhalo (${dl.error}). Ručně: https://git-scm.com/downloads`);
+    throw new Error(`Download failed (${dl.error}). Manual: https://git-scm.com/downloads`);
   }
   fs.mkdirSync(destDir, { recursive: true });
   await runCmd(`powershell -NoProfile -Command "Expand-Archive -Force '${zipDest}' '${destDir}'"`, toolsDir, 300000);
   try { fs.rmSync(zipDest, { force: true }); } catch {}
   const gitExe = path.join(destDir, 'cmd', 'git.exe');
-  if (!fs.existsSync(gitExe)) throw new Error('Rozbalení se nepovedlo. Ručně: https://git-scm.com/downloads');
+  if (!fs.existsSync(gitExe)) throw new Error('Extraction failed. Manual: https://git-scm.com/downloads');
   prependPortableBins(userDataDir);
-  return { ok: true, output: `Git (${mg.name}) stažen z internetu do ${destDir} a přidán do PATH.` };
+  return { ok: true, output: `Git (${mg.name}) downloaded from the internet to ${destDir} and added to PATH.` };
 }
 
-// ===== DETEKCE PROSTŘEDÍ: co už je v PC (i mimo PATH) =====
+// ===== ENVIRONMENT DETECTION: what is already on the PC (including outside PATH) =====
 const ENV_TTL = 15000;
 const envState = { tools: null, at: 0, packages: null, pkgAt: 0, dirs: [], dirsAt: 0 };
 
@@ -942,7 +942,7 @@ const EXT_NEEDS = {
 };
 
 function detectProject(root) {
-  const out = { root: root || '', kind: 'žádný projekt', needs: [], files: [] };
+  const out = { root: root || '', kind: 'no project', needs: [], files: [] };
   if (!root || !fs.existsSync(String(root))) return out;
   const needs = [];
   const add = (ids) => { for (const i of ids || []) if (!needs.includes(i)) needs.push(i); };
@@ -969,27 +969,27 @@ function detectProject(root) {
   if (names.includes('package.json')) {
     let pkgTxt = '';
     try { pkgTxt = fs.readFileSync(path.join(String(root), 'package.json'), 'utf-8').slice(0, 20000).toLowerCase(); } catch {}
-    kind = /electron-builder|"electron"/.test(pkgTxt) ? 'Electron aplikace'
+    kind = /electron-builder|"electron"/.test(pkgTxt) ? 'Electron app'
       : /"next"/.test(pkgTxt) ? 'Next.js web'
       : /"vite"/.test(pkgTxt) ? 'Vite web'
       : /"nuxt"/.test(pkgTxt) ? 'Nuxt web'
-      : 'Node.js/npm projekt';
-  } else if (names.includes('cargo.toml')) kind = 'Rust projekt';
-  else if (names.includes('go.mod')) kind = 'Go projekt';
-  else if (names.includes('requirements.txt') || names.includes('pyproject.toml')) kind = 'Python projekt';
-  else if (names.some(n => n.endsWith('.csproj') || n.endsWith('.sln'))) kind = '.NET projekt';
+      : 'Node.js/npm project';
+  } else if (names.includes('cargo.toml')) kind = 'Rust project';
+  else if (names.includes('go.mod')) kind = 'Go project';
+  else if (names.includes('requirements.txt') || names.includes('pyproject.toml')) kind = 'Python project';
+  else if (names.some(n => n.endsWith('.csproj') || n.endsWith('.sln'))) kind = '.NET project';
   else if (names.includes('pom.xml')) kind = 'Java (Maven)';
   else if (names.some(n => n.startsWith('build.gradle'))) kind = 'Java/Kotlin (Gradle)';
   else if (names.includes('cmakelists.txt')) kind = 'C/C++ (CMake)';
   else if (names.includes('makefile')) kind = 'C/C++ (Make)';
-  else if (names.includes('dockerfile')) kind = 'Docker projekt';
-  else if (names.includes('composer.json')) kind = 'PHP projekt';
-  else if (names.includes('gemfile')) kind = 'Ruby projekt';
-  else if (names.some(n => /\.(cpp|cc|cxx|c)$/.test(n))) kind = 'C/C++ zdrojáky';
-  else if (names.some(n => n.endsWith('.py'))) kind = 'Python zdrojáky';
-  else if (names.includes('index.html')) kind = 'statický web';
+  else if (names.includes('dockerfile')) kind = 'Docker project';
+  else if (names.includes('composer.json')) kind = 'PHP project';
+  else if (names.includes('gemfile')) kind = 'Ruby project';
+  else if (names.some(n => /\.(cpp|cc|cxx|c)$/.test(n))) kind = 'C/C++ sources';
+  else if (names.some(n => n.endsWith('.py'))) kind = 'Python sources';
+  else if (names.includes('index.html')) kind = 'static website';
   if (needs.includes('cpp') && !needs.includes('msvc') && !needs.includes('gcc')) { /* group resolution later */ }
-  out.kind = kind || 'kód';
+  out.kind = kind || 'code';
   out.needs = needs;
   out.files = files.slice(0, 120);
   return out;
@@ -1000,7 +1000,7 @@ const INTENT_RULES = [
   [/\bmsvc\b|visual studio/i, ['msvc']],
   [/\bc#\b|csharp|dotnet|\.cs\b|\.csproj\b|wpf|blazor|maui/i, ['dotnet']],
   [/\bpython|\bpy\b|\.py\b|flask|django|fastapi|pandas|numpy|selenium|pygame|tkinter|pyqt|discord bot|telegram bot/i, ['python']],
-  [/\bnode\b|nodejs|node\.js|\bnpm\b|\bnpx\b|electron|\breact\b|next\.?js|\bvue\b|angular|svelte|nestjs|express|typescript|javascript|tailwind|three\.?js|webov|web app|stránk|\bhtml\b|\bcss\b/i, ['node']],
+  [/\bnode\b|nodejs|node\.js|\bnpm\b|\bnpx\b|electron|\breact\b|next\.?js|\bvue\b|angular|svelte|nestjs|express|typescript|javascript|tailwind|three\.?js|webov|web app|str\u00e1nk|\bhtml\b|\bcss\b/i, ['node']],
   [/\brust|\bcargo\b|\.rs\b/i, ['rust']],
   [/golang|\bgo\s+lang\b|\.go\b|gin-gonic|fiber/i, ['go']],
   [/\bjava\b|\bjavu\b|\bjavac\b|\bkotlin|android|\bapk\b|\bspring\b|\bjar\b/i, ['java']],
@@ -1101,61 +1101,61 @@ async function scanEnv(opts) {
   return data;
 }
 
-// Krátká verze pro MODEL (plnou tabulku má panel v Nastavení z data.tools).
-// Důvod: slabý model se v 22řádkové tabulce ztrácí a pak volá nástroje s prázdnými argumenty.
+// Short version for the MODEL (the full table is in the Settings panel from data.tools).
+// Reason: a weak model gets lost in a 22-row table and then calls tools with empty arguments.
 function envReportShort(s) {
   const lines = [];
-  const pkg = Object.entries(s.packages || {}).filter(([, v]) => v).map(([k]) => k).join(', ') || 'žádný';
-  lines.push(`PC: ${s.os} · balíčkové manažery: ${pkg}`);
-  lines.push(`Projekt${s.project.root ? ' ' + s.project.root : ''}: ${s.project.kind}`);
-  if (s.intent.text) lines.push(`Objednávka: "${s.intent.text}" → potřeba: ${s.intent.needs.join(', ') || 'nic specifického'}`);
+  const pkg = Object.entries(s.packages || {}).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none';
+  lines.push(`PC: ${s.os} \u00b7 package managers: ${pkg}`);
+  lines.push(`Project${s.project.root ? ' ' + s.project.root : ''}: ${s.project.kind}`);
+  if (s.intent.text) lines.push(`Request: "${s.intent.text}" \u2192 needs: ${s.intent.needs.join(', ') || 'nothing specific'}`);
   const lbl = (i) => (TOOLCHAINS[i] || {}).label || i;
   if (s.needed.length) {
-    lines.push('Stav potřebných:');
+    lines.push('Needed status:');
     for (const i of s.needed) {
       const t = (s.tools || {})[i] || {};
-      if (t.ok) lines.push(`  ✓ ${lbl(i)} (${t.version || 'nalezeno'})`);
+      if (t.ok) lines.push(`  \u2713 ${lbl(i)} (${t.version || 'found'})`);
       else {
-        const how = t.manual ? 'jen ručně: ' + (t.url || '') : t.heavy ? 'velký toolchain (heavy: true)' : 'doinstaluje env_prepare';
-        lines.push(`  ✗ ${lbl(i)} — chybí (${how})`);
+        const how = t.manual ? 'manual only: ' + (t.url || '') : t.heavy ? 'large toolchain (heavy: true)' : 'will install via env_prepare';
+        lines.push(`  \u2717 ${lbl(i)} \u2014 missing (${how})`);
       }
     }
-  } else lines.push('Potřeba pro tuto práci: zatím nic');
-  lines.push(`Chybí celkem: ${s.missing.length ? s.missing.map(lbl).join(', ') : 'nic — všechno je tu'}`);
+  } else lines.push('Needed for this job: nothing yet');
+  lines.push(`Missing in total: ${s.missing.length ? s.missing.map(lbl).join(', ') : 'nothing \u2014 everything is here'}`);
   return lines.join('\n');
 }
 function envReport(s) {
   const lines = [];
-  const pkg = Object.entries(s.packages || {}).map(([k, v]) => `${k} ${v ? '✓' : '✗'}`).join(', ');
-  lines.push(`PC: ${s.os} · uživatel ${s.user} · balíčkové manažery: ${pkg}`);
-  lines.push('Nástroje v PC:');
+  const pkg = Object.entries(s.packages || {}).map(([k, v]) => `${k} ${v ? '\u2713' : '\u2717'}`).join(', ');
+  lines.push(`PC: ${s.os} \u00b7 user ${s.user} \u00b7 package managers: ${pkg}`);
+  lines.push('Tools on this PC:');
   for (const t of Object.values(s.tools)) {
-    if (t.ok) lines.push(`  ✓ ${t.label} — ${t.version || 'nalezeno'}${t.dir ? ' · ' + t.dir : ''}${t.source === 'FOUND' ? ' (bylo mimo PATH, přidáno do PATH)' : ''}`);
-    else lines.push(`  ✗ ${t.label} — chybí${t.heavy ? ' · velký toolchain' : ''}${t.winget ? ' · winget ' + t.winget : ''}${t.manual ? ' · jen ručně' : ''}${t.url ? ' · ' + t.url : ''}`);
+    if (t.ok) lines.push(`  \u2713 ${t.label} \u2014 ${t.version || 'found'}${t.dir ? ' \u00b7 ' + t.dir : ''}${t.source === 'FOUND' ? ' (was outside PATH, added to PATH)' : ''}`);
+    else lines.push(`  \u2717 ${t.label} \u2014 missing${t.heavy ? ' \u00b7 large toolchain' : ''}${t.winget ? ' \u00b7 winget ' + t.winget : ''}${t.manual ? ' \u00b7 manual only' : ''}${t.url ? ' \u00b7 ' + t.url : ''}`);
   }
-  lines.push(`Projekt${s.project.root ? ' ' + s.project.root : ''}: ${s.project.kind}`);
-  if (s.intent.text) lines.push(`Objednávka uživatele: "${s.intent.text}" → potřeba: ${s.intent.needs.join(', ') || 'nic specifického'}`);
-  lines.push(`Potřeba pro tuto práci: ${s.needed.length ? s.needed.map(i => (TOOLCHAINS[i] || {}).label || i).join(', ') : 'zatím nic'}`);
-  lines.push(`Chybí a doinstaluje se: ${s.missing.length ? s.missing.map(i => (TOOLCHAINS[i] || {}).label || i).join(', ') : 'nic — všechno je tu'}`);
+  lines.push(`Project${s.project.root ? ' ' + s.project.root : ''}: ${s.project.kind}`);
+  if (s.intent.text) lines.push(`User request: "${s.intent.text}" \u2192 needs: ${s.intent.needs.join(', ') || 'nothing specific'}`);
+  lines.push(`Needed for this job: ${s.needed.length ? s.needed.map(i => (TOOLCHAINS[i] || {}).label || i).join(', ') : 'nothing yet'}`);
+  lines.push(`Missing, will be installed: ${s.missing.length ? s.missing.map(i => (TOOLCHAINS[i] || {}).label || i).join(', ') : 'nothing \u2014 everything is here'}`);
   return lines.join('\n');
 }
 function envHow(r) {
-  return r.how === 'winget' ? 'winget' : r.how === 'choco' ? 'Chocolatey' : r.how === 'scoop' ? 'Scoop' : 'staženo z internetu';
+  return r.how === 'winget' ? 'winget' : r.how === 'choco' ? 'Chocolatey' : r.how === 'scoop' ? 'Scoop' : 'downloaded from the internet';
 }
 function envActionReport(after, results) {
-  const lines = [envReportShort(after), '', 'Akce:'];
+  const lines = [envReportShort(after), '', 'Actions:'];
   for (const r of results || []) {
-    if (r.already) lines.push(`  ✓ ${r.label} — už byla v PC (${r.version || 'nalezeno'})`);
-    else if (r.ok) lines.push(`  ✓ ${r.label} — doinstalováno (${envHow(r)})`);
-    else if (r.missing) lines.push(`  ⓘ ${r.label} — chybí, instalace by se spustila${r.heavy ? ' (velký toolchain, chce heavy: true)' : ''}`);
-    else if (r.manual) lines.push(`  ⓘ ${r.label} — nedá se doinstalovat automaticky: ${String(r.output || '').replace(/^.*Odkaz: /, '')}`);
-    else lines.push(`  ✗ ${r.label} — ${String(r.output || 'selhalo').split('\n').slice(0, 2).join(' ')}`);
+    if (r.already) lines.push(`  \u2713 ${r.label} \u2014 already on this PC (${r.version || 'found'})`);
+    else if (r.ok) lines.push(`  \u2713 ${r.label} \u2014 installed (${envHow(r)})`);
+    else if (r.missing) lines.push(`  \u24d8 ${r.label} \u2014 missing, installation would start${r.heavy ? ' (large toolchain, needs heavy: true)' : ''}`);
+    else if (r.manual) lines.push(`  \u24d8 ${r.label} \u2014 cannot be installed automatically: ${String(r.output || '').replace(/^.*(Odkaz|Link): /, '')}`);
+    else lines.push(`  \u2717 ${r.label} \u2014 ${String(r.output || 'failed').split('\n').slice(0, 2).join(' ')}`);
   }
-  lines.push(after.missing.length ? `\nPo této akci ještě chybí: ${after.missing.map(i => (TOOLCHAINS[i] || {}).label || i).join(', ')}` : '\nVšechno potřebné je připravené — pokračuj v práci.');
+  lines.push(after.missing.length ? `\nStill missing after this action: ${after.missing.map(i => (TOOLCHAINS[i] || {}).label || i).join(', ')}` : '\nEverything needed is ready \u2014 continue with the work.');
   return lines.join('\n');
 }
 
-// ===== Portable instalace (winget fallback): všechny stažitelné toolchainy =====
+// ===== Portable installs (winget fallback): all downloadable toolchains =====
 async function toolsDirFor(userDataDir) {
   const d = path.join(String(userDataDir || os.tmpdir()), 'tools');
   fs.mkdirSync(d, { recursive: true });
@@ -1216,15 +1216,15 @@ const PORTABLE_INSTALLERS = {
   async python(ud) {
     const d = await toolsDirFor(ud);
     const a = await ghAsset('astral-sh/python-build-standalone', /^cpython-3\.(12|13).*-x86_64-pc-windows-msvc-install_only\.tar\.gz$/i);
-    if (!a) throw new Error('Portable Python se nepodařilo najít.');
+    if (!a) throw new Error('Portable Python could not be found.');
     const f = path.join(d, 'python.tar.gz');
     const dl = await downloadFile(a.browser_download_url, f, 600000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const out = path.join(d, 'python');
     await untarTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
     const exe = findFileRe(out, /^python\.exe$/i, 4);
-    if (!exe) throw new Error('Rozbalení Pythonu se nepovedlo.');
+    if (!exe) throw new Error('Python extraction failed.');
     rememberToolDir(ud, 'python', path.dirname(exe));
     rememberToolDir(ud, 'python', path.join(path.dirname(exe), 'Scripts'));
     prependPortableBins(ud);
@@ -1236,10 +1236,10 @@ const PORTABLE_INSTALLERS = {
     const a = await ghAsset('brechtsanders/winlibs_mingw', has7z
       ? /^winlibs-x86_64-.*gcc.*\.7z$/i
       : /^winlibs-x86_64-.*gcc.*\.zip$/i);
-    if (!a) throw new Error('WinLibs GCC se nepodařilo najít.');
+    if (!a) throw new Error('WinLibs GCC could not be found.');
     const f = path.join(d, 'winlibs' + (has7z ? '.7z' : '.zip'));
     const dl = await downloadFile(a.browser_download_url, f, 900000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const out = path.join(d, 'gcc');
     const okx = has7z ? await sevenZTo(f, out) : await unzipTo(f, out);
     if (!okx) throw new Error('Rozbalení GCC se nepovedlo.');
@@ -1253,10 +1253,10 @@ const PORTABLE_INSTALLERS = {
   async cmake(ud) {
     const d = await toolsDirFor(ud);
     const a = await ghAsset('Kitware/CMake', /^(?:cmake-[\d.]+-)?windows-x86_64\.zip$/i);
-    if (!a) throw new Error('CMake release se nepodařilo najít.');
+    if (!a) throw new Error('CMake release could not be found.');
     const f = path.join(d, 'cmake.zip');
     const dl = await downloadFile(a.browser_download_url, f, 600000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const out = path.join(d, 'cmake');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
@@ -1272,10 +1272,10 @@ const PORTABLE_INSTALLERS = {
     const rel = Array.isArray(idx) ? idx.find(v => v && v.stable) : null;
     const files = (rel && rel.files) || [];
     const f64 = files.find(x => x.os === 'windows' && x.arch === 'amd64' && x.kind === 'archive') || null;
-    if (!f64) throw new Error('Go release se nepodařilo najít.');
+    if (!f64) throw new Error('Go release could not be found.');
     const f = path.join(d, 'go.zip');
     const dl = await downloadFile('https://go.dev/dl/' + f64.filename, f, 900000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const out = path.join(d, 'go');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
@@ -1289,7 +1289,7 @@ const PORTABLE_INSTALLERS = {
     const d = await toolsDirFor(ud);
     const f = path.join(d, 'jdk.zip');
     const dl = await downloadFile('https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jdk/hotspot/normal/eclipse', f, 900000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const out = path.join(d, 'java');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
@@ -1315,7 +1315,7 @@ const PORTABLE_INSTALLERS = {
     const d = await toolsDirFor(ud);
     const exe = path.join(d, 'rustup-init.exe');
     const dl = await downloadFile('https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe', exe, 600000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const r = await runCmd(`"${exe}" -y --profile minimal --default-toolchain stable --no-modify-path`, d, 900000);
     const cargoDir = path.join(os.homedir(), '.cargo', 'bin');
     if (!r.ok || !fs.existsSync(path.join(cargoDir, 'cargo.exe'))) throw new Error('Instalace Rustu selhala: ' + r.output.slice(-300));
@@ -1326,10 +1326,10 @@ const PORTABLE_INSTALLERS = {
   async bun(ud) {
     const d = await toolsDirFor(ud);
     const a = await ghAsset('oven-sh/bun', /^bun-windows-x64\.zip$/i);
-    if (!a) throw new Error('Bun release se nepodařilo najít.');
+    if (!a) throw new Error('Bun release could not be found.');
     const f = path.join(d, 'bun.zip');
     const dl = await downloadFile(a.browser_download_url, f, 600000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const out = path.join(d, 'bun');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
@@ -1342,10 +1342,10 @@ const PORTABLE_INSTALLERS = {
   async deno(ud) {
     const d = await toolsDirFor(ud);
     const a = await ghAsset('denoland/deno', /^deno-x86_64-pc-windows-msvc\.zip$/i);
-    if (!a) throw new Error('Deno release se nepodařilo najít.');
+    if (!a) throw new Error('Deno release could not be found.');
     const f = path.join(d, 'deno.zip');
     const dl = await downloadFile(a.browser_download_url, f, 600000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const out = path.join(d, 'deno');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
@@ -1359,7 +1359,7 @@ const PORTABLE_INSTALLERS = {
     const d = await toolsDirFor(ud);
     const f = path.join(d, 'php.zip');
     const dl = await downloadFile('https://windows.php.net/downloads/releases/latest/php-8.4-nts-Win32-vs17-x64-latest.zip', f, 600000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     const out = path.join(d, 'php');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
@@ -1375,7 +1375,7 @@ const PORTABLE_INSTALLERS = {
     fs.mkdirSync(sub, { recursive: true });
     const exe = path.join(sub, '7zr.exe');
     const dl = await downloadFile('https://www.7-zip.org/a/7zr.exe', exe, 300000);
-    if (!dl.ok) throw new Error('Stažení selhalo: ' + dl.error);
+    if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     try { fs.copyFileSync(exe, path.join(sub, '7z.exe')); } catch {}
     rememberToolDir(ud, 'sevenzip', sub);
     prependPortableBins(ud);
@@ -1388,7 +1388,7 @@ async function installTool(id, opts) {
   const def = TOOLCHAINS[id];
   if (!def) return { ok: false, output: 'Neznámý toolchain: ' + id };
   if (def.manual) return { ok: false, manual: true, heavy: !!def.heavy, output: `${def.label} se nedá automaticky doinstalovat. Odkaz: ${def.url || ''}` };
-  if (def.heavy && !o.heavy) return { ok: false, heavy: true, output: `${def.label} je velký toolchain (GB) — potřebuje potvrzení uživatele (heavy: true). Ručně: ${def.url || ''}` };
+  if (def.heavy && !o.heavy) return { ok: false, heavy: true, output: `${def.label} je velký toolchain (GB) — potřebuje potvrzení uživatele (heavy: true). Manual: ${def.url || ''}` };
   const notes = [];
   const H = os.homedir();
   const alias = PKG_ALIAS[id] || {};
@@ -1438,7 +1438,7 @@ async function installTool(id, opts) {
   } else if (def.portable) {
     notes.push('bez userData cesty nelze portable varianta');
   }
-  return { ok: false, output: `Automatická instalace ${def.label} selhala.${notes.length ? '\n' + notes.join('\n') : ''}\nRučně: ${def.url || 'https://winget.run/'}` };
+  return { ok: false, output: `Automatická instalace ${def.label} selhala.${notes.length ? '\n' + notes.join('\n') : ''}\nManual: ${def.url || 'https://winget.run/'}` };
 }
 
 async function ensureTools(ids, opts) {
@@ -1535,7 +1535,7 @@ function runCmdAdmin(cmd, cwd, timeoutMs) {
       const m = text.match(/EXIT:(-?\d+)/);
       let combined = String(out || '');
       if (errT) combined += (combined ? '\n[stderr]\n' : '') + String(errT);
-      if (combined.length > 20000) combined = combined.slice(0, 20000) + '\n… (výstup zkrácen)';
+      if (combined.length > 20000) combined = combined.slice(0, 20000) + '\n… (output truncated)';
       if (err) {
         resolve({ ok: false, output: `${combined}\n[admin shell selhal: ${err.killed ? 'timeout' : err.message}]`.trim() });
         return;
@@ -1813,7 +1813,7 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       const dl = await downloadFile(url, abs, 300000);
       if (!dl.ok) {
         try { fs.rmSync(abs, { force: true }); } catch {}
-        throw new Error(`Stažení selhalo (${dl.error})`);
+        throw new Error(`Download failed (${dl.error})`);
       }
       let size = 0;
       try { size = fs.statSync(abs).size; } catch {}

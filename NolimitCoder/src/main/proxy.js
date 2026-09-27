@@ -1,9 +1,9 @@
-// Proxy manager — ProxyScrape free list + automatická rotace při quota limitu.
-// Zdroj: https://proxyscrape.com (v4 public API, bez klíče) + přibalená složka proxies/.
-// Umí: načíst všechny proxy, stáhnout čerstvé, tahat random proxy,
-// detekovat quota/rate-limit z odpovědi brány opencode a jet přes proxy tunel
-// (HTTP CONNECT + SOCKS4/5 + TLS) pro https://opencode.ai.
-// Bez externích závislostí (čistý node: net + tls + https).
+// Proxy manager — ProxyScrape free list + automatic rotation on quota limit.
+// Source: https://proxyscrape.com (v4 public API, no key needed) + bundled proxies/ folder.
+// Supports: loading all proxies, downloading fresh ones, picking a random proxy,
+// detecting quota/rate-limit from the opencode gateway response and going via a proxy tunnel
+// (HTTP CONNECT + SOCKS4/5 + TLS) for https://opencode.ai.
+// No external dependencies (pure node: net + tls + https).
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -15,34 +15,34 @@ const http = require('http');
 const API_TMPL = (proto) =>
   `https://api.proxyscrape.com/v4/free-proxy-list/get?request=displayproxies&protocol=${proto}&timeout=10000&country=all&ssl=all&anonymity=all&skip=0&limit=2000`;
 
-// Přibalené listy (ve zdroji i v buildu): src/main -> ../../proxies
+// Bundled lists (in source and in build): src/main -> ../../proxies
 function bundledDir() {
   return path.join(__dirname, '..', '..', 'proxies');
 }
 
-// Stav rotace
+// Rotation state
 const state = {
   http: [], socks4: [], socks5: [],
   loadedAt: 0,
-  // quota tracking — "blížím se limitu" vyhodnocení
-  quotaHits: 0,          // kolikrát jsme narazili na 429/quota celkem
-  lastQuotaAt: 0,        // timestamp posledního quota zásahu
-  lastRetryAfterMs: 0,   // Retry-After z poslední 429
-  consecutive429: 0,     // po sobě jdoucí 429 (resetuje úspěch)
-  proxyActive: false,    // právě jedeme přes proxy?
-  current: null,         // aktuální proxy {type,host,port,str}
-  switches: 0,           // kolikrát se přepnulo
-  bad: new Map(),        // proxyStr -> failCount (dočasně vynechat)
+  // quota tracking — "approaching the limit" evaluation
+  quotaHits: 0,          // how many times we hit 429/quota in total
+  lastQuotaAt: 0,        // timestamp of the last quota hit
+  lastRetryAfterMs: 0,   // Retry-After from the last 429
+  consecutive429: 0,     // consecutive 429s (reset by success)
+  proxyActive: false,    // currently going via proxy?
+  current: null,         // current proxy {type,host,port,str}
+  switches: 0,           // how many times we switched
+  bad: new Map(),        // proxyStr -> failCount (skip temporarily)
   okCount: 0,
   cacheDir: '',
 };
 function dbg() { try { require('./tools').dbgLog('proxy', arguments[0]); } catch {} }
 
-/* ---------- načtení ---------- */
+/* ---------- loading ---------- */
 function parseLine(line) {
   const s = String(line || '').trim();
   if (!s || s.startsWith('#')) return null;
-  // povolíme "http://ip:port" i holé "ip:port"
+  // allow both "http://ip:port" and bare "ip:port"
   const m = s.match(/^(?:(https?|socks4|socks5):\/\/)?(\d{1,3}(?:\.\d{1,3}){3}|[a-zA-Z0-9.-]+):(\d{1,5})$/);
   if (!m) return null;
   const port = parseInt(m[3], 10);
@@ -82,7 +82,7 @@ function loadProxies(cacheDir) {
     } catch {}
     if (http.length && s4.length && s5.length) break;
   }
-  // nouzově: all.txt (s prefixy)
+  // fallback: all.txt (with prefixes)
   if (!http.length && !s4.length && !s5.length) {
     for (const d of dirs) {
       try {
@@ -106,7 +106,7 @@ function counts() {
   return { http: state.http.length, socks4: state.socks4.length, socks5: state.socks5.length, total: state.http.length + state.socks4.length + state.socks5.length };
 }
 
-/* ---------- stažení čerstvých ze ProxyScrape ---------- */
+/* ---------- downloading fresh ones from ProxyScrape ---------- */
 function fetchUrl(url, timeoutMs) {
   return new Promise((resolve) => {
     try {
@@ -141,7 +141,7 @@ async function refreshProxies(cacheDir) {
     }
     out[proto] = clean;
   }
-  // uložit jen když něco přišlo (jinak držet staré)
+  // save only when something arrived (otherwise keep the old ones)
   const gotAny = (out.http.length + out.socks4.length + out.socks5.length) > 0;
   if (gotAny) {
     state.http = out.http.length ? out.http : state.http;
@@ -149,7 +149,7 @@ async function refreshProxies(cacheDir) {
     state.socks5 = out.socks5.length ? out.socks5 : state.socks5;
     state.loadedAt = Date.now();
     state.bad.clear();
-    // persist do cache (userData/proxies) + pokus i do bundled (dev)
+    // persist to cache (userData/proxies) + also try bundled (dev)
     for (const d of [state.cacheDir, bundledDir()]) {
       if (!d) continue;
       try {
@@ -174,10 +174,10 @@ async function refreshProxies(cacheDir) {
   return { ok: gotAny, counts: counts() };
 }
 
-/* ---------- random výběr ---------- */
+/* ---------- random selection ---------- */
 function isBad(key) {
   const n = state.bad.get(key) || 0;
-  return n >= 3; // po 3 pádech dočasně vynechat
+  return n >= 3; // skip temporarily after 3 failures
 }
 function pickRandom(arr, excludeKey) {
   if (!arr.length) return null;
@@ -188,11 +188,11 @@ function pickRandom(arr, excludeKey) {
     if (isBad(k)) continue;
     return p;
   }
-  // nouzově i špatnou (lepší než nic)
+  // fall back to even a bad one (better than nothing)
   const p = arr[Math.floor(Math.random() * arr.length)];
   return p || null;
 }
-// Preferujeme HTTP (nejrychlejší na https CONNECT), pak SOCKS5, pak SOCKS4.
+// Prefer HTTP (fastest for https CONNECT), then SOCKS5, then SOCKS4.
 function getRandomProxy(excludeStr) {
   const excl = String(excludeStr || '');
   let p = pickRandom(state.http, excl);
@@ -207,7 +207,7 @@ function markBad(proxy) {
   try {
     const k = typeof proxy === 'string' ? proxy.replace(/^\w+:\/\//, '') : (proxy.host + ':' + proxy.port);
     state.bad.set(k, (state.bad.get(k) || 0) + 1);
-    if (state.bad.size > 500) { // rotace mapy
+    if (state.bad.size > 500) { // rotate the map
       const first = state.bad.keys().next().value;
       state.bad.delete(first);
     }
@@ -215,14 +215,14 @@ function markBad(proxy) {
 }
 function markGood() { state.okCount++; state.consecutive429 = 0; }
 
-/* ---------- quota detekce z brány opencode ---------- */
+/* ---------- quota detection from the opencode gateway ---------- */
 function isQuotaBody(s) {
   return /quota|rate[\s_-]*limit|free[\s_-]*usage[\s_-]*limit|too many requests|capacity|overloaded|try again later|429|FreeUsageLimit|usage[\s_-]*exceeded|limit[\s_-]*exceeded|insufficient[\s_-]*quota/i.test(String(s || ''));
 }
 function isQuotaStatus(status, body) {
   if (status === 429) return true;
   if (status === 402 || status === 503) return isQuotaBody(body);
-  if (status === 403) return /quota|rate|limit/i.test(String(body || '')); // geo-ban (RegionError) NE — ten proxy neřeší
+  if (status === 403) return /quota|rate|limit/i.test(String(body || '')); // geo-ban (RegionError) excluded — proxy won't fix that
   return false;
 }
 function isGeoBlockedBody(s) {
@@ -235,12 +235,12 @@ function onQuotaHit(retryAfterMs) {
   if (retryAfterMs > 0) state.lastRetryAfterMs = Math.min(retryAfterMs, 300000);
   try { dbg({ act: 'quota-hit', hits: state.quotaHits, consec: state.consecutive429 }); } catch {}
 }
-// "Blížím se limitu" — další request radši rovnou přes proxy (rychlé přepnutí bez čekání na další 429).
+// "Approaching the limit" — send the next request straight via proxy (fast switch without waiting for another 429).
 function shouldUseProxyFirst() {
   if (!counts().total) return false;
   const sinceQuota = Date.now() - (state.lastQuotaAt || 0);
-  if (state.consecutive429 >= 1 && sinceQuota < 5 * 60 * 1000) return true; // čerstvá 429 → jeď přes proxy
-  if (state.proxyActive && sinceQuota < 10 * 60 * 1000) return true;        // už jedeme přes proxy → držet
+  if (state.consecutive429 >= 1 && sinceQuota < 5 * 60 * 1000) return true; // fresh 429 → go via proxy
+  if (state.proxyActive && sinceQuota < 10 * 60 * 1000) return true;        // already going via proxy → stick with it
   return false;
 }
 function onProxySwitch(proxy) {
@@ -250,13 +250,13 @@ function onProxySwitch(proxy) {
   try { dbg({ act: 'switch', proxy: state.current, switches: state.switches }); } catch {}
 }
 function onDirectOk() {
-  // úspěch napřímo po odeznění quota → vrátit se na direct (rychlejší než free proxy)
+  // success while direct after quota faded → return to direct (faster than a free proxy)
   if (state.proxyActive && (Date.now() - state.lastQuotaAt) > 10 * 60 * 1000) {
     state.proxyActive = false; state.current = null;
   }
 }
 
-/* ---------- tunely ---------- */
+/* ---------- tunnels ---------- */
 function tcpConnect(host, port, timeoutMs) {
   return new Promise((resolve, reject) => {
     const s = net.createConnection({ host, port }, () => { clearTimeout(t); resolve(s); });
@@ -324,7 +324,7 @@ function viaSocks4(proxyHost, proxyPort, targetHost, targetPort, timeoutMs) {
     catch (e) { return reject(e); }
     const t = setTimeout(() => { try { sock.destroy(); } catch {} reject(new Error('socks4 timeout')); }, timeoutMs || 8000);
     const fail = (m) => { clearTimeout(t); try { sock.destroy(); } catch {} reject(new Error(m)); };
-    // SOCKS4: VER(04) CMD(01) PORT(2) IP(4) USERID(00). IP musí být číselná → hostname neumí, zkusit DNS předem.
+    // SOCKS4: VER(04) CMD(01) PORT(2) IP(4) USERID(00). IP must be numeric → it cannot do hostnames, try DNS first.
     const doConnect = (ipStr) => {
       const parts = String(ipStr).split('.').map(Number);
       if (parts.length !== 4 || parts.some((n) => !(n >= 0 && n <= 255))) return fail('socks4 needs IPv4 target');
@@ -337,7 +337,7 @@ function viaSocks4(proxyHost, proxyPort, targetHost, targetPort, timeoutMs) {
     };
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(targetHost)) doConnect(targetHost);
     else {
-      // přeložit hostname → IPv4 (opencode.ai)
+      // resolve hostname → IPv4 (opencode.ai)
       require('dns').lookup(targetHost, { family: 4 }, (err, addr) => {
         if (err || !addr) return fail('socks4 dns fail');
         doConnect(addr);
@@ -352,10 +352,10 @@ async function tunnelSocket(proxy, targetHost, targetPort, timeoutMs) {
   return viaHttpProxy(proxy.host, proxy.port, targetHost, targetPort, timeoutMs);
 }
 
-/* ---------- POST stream přes proxy (https cíl) ----------
-   Použití pro bránu opencode: POST https://opencode.ai/zen/v1/...
-   Volá cb {onHead(status,headers), onChunk(str), onEnd(), onError(err)}.
-   Vrací {abort()} pro zrušení. */
+/* ---------- POST stream via proxy (https target) ----------
+   Usage for the opencode gateway: POST https://opencode.ai/zen/v1/...
+   Calls cb {onHead(status,headers), onChunk(str), onEnd(), onError(err)}.
+   Returns {abort()} for cancellation. */
 function postStreamViaProxy(targetUrl, opts, cb) {
   const o = opts || {};
   const c = cb || {};
@@ -409,7 +409,7 @@ function postStreamViaProxy(targetUrl, opts, cb) {
   return api;
 }
 
-/* ---------- jednoduchý GET/POST přes proxy (ne-stream, např. /models) ---------- */
+/* ---------- simple GET/POST via proxy (non-stream, e.g. /models) ---------- */
 function fetchViaProxy(targetUrl, opts) {
   return new Promise((resolve) => {
     const o = opts || {};

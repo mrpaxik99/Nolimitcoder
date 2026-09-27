@@ -1,7 +1,7 @@
 {
     "name":  "nolimit-coder-v2",
     "version":  "3.0.13",
-    "description":  "Ultra modern Electron chat s modely NolimitCoder - vše lokálně, offline po stažení",
+    "description":  "Ultra modern Electron chat with NolimitCoder models - everything local, offline after download",
     "main":  "src/main/main.js",
     "type":  "commonjs",
     "author":  "NolimitCoder",

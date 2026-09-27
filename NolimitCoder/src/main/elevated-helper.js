@@ -1,6 +1,6 @@
-// Zvýšený pomocník NolimitCoderu: běží jako správce (spuštěn přes UAC),
-// připojí se rourou zpět do appky a vykonává shell příkazy bez dalších dotazů.
-// Žádné okno, žádný single-instance zámek, při pádu roury se ukončí.
+// NolimitCoder elevated helper: runs as administrator (launched via UAC),
+// connects back to the app via a pipe and executes shell commands without further prompts.
+// No window, no single-instance lock, exits when the pipe breaks.
 const net = require('net');
 
 function send(sock, obj) {
@@ -28,14 +28,14 @@ function run(pipeName) {
         const r = await T.runCmd(String(msg.cmd || ''), String(msg.cwd || process.cwd()), Math.min(Math.max(parseInt(msg.timeout) || 120000, 1000), 900000));
         send(sock, { id: msg.id, ok: r.ok, output: r.output });
       } catch (e) {
-        send(sock, { id: msg.id, ok: false, output: 'Chyba pomocníka: ' + (e.message || e) });
+        send(sock, { id: msg.id, ok: false, output: 'Helper error: ' + (e.message || e) });
       }
     }
   });
   const die = () => { try { process.exit(0); } catch {} };
   sock.on('close', () => setTimeout(die, 1000));
   sock.on('error', () => {});
-  // pojistka: když se do 60 s nikdo neozve (roura mrtvá), skonči
+  // safety valve: if nobody responds within 60 s (dead pipe), exit
   let alive = false;
   sock.on('connect', () => { alive = true; });
   setTimeout(() => { if (!alive) die(); }, 60000);

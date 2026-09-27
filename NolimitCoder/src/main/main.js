@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
-// Zvýšený pomocník: tahle instance slouží JEN jako executor za rourou,
-// žádné okno, žádný zámek, jen pipe klient (spouští ho hlavní appka zvýšeně).
+// Elevated helper: this instance serves ONLY as an executor behind the pipe,
+// no window, no lock, just a pipe client (launched elevated by the main app).
 if (process.argv.includes('--elevated-helper')) {
   const idx = process.argv.indexOf('--elevated-helper');
   require('./elevated-helper').run(process.argv[idx + 1]);
@@ -14,7 +14,7 @@ const http = require('http');
 const T = require('./tools');
 const PX = require('./proxy');
 
-// Progress stahování/instalací (download widget vlevo dole) — tools.js volá hook, my to pošleme do okna.
+// Download/install progress (download widget at bottom left) — tools.js calls the hook, we forward it to the window.
 if (T.setProgressHook) T.setProgressHook((p) => {
   try { for (const w of BrowserWindow.getAllWindows()) { try { w.webContents.send('nlc-download', p); } catch {} } } catch {}
 });
@@ -22,18 +22,18 @@ if (T.setProgressHook) T.setProgressHook((p) => {
 let mainWindow;
 let abortFlag = false;
 
-try { app.setPath('userData', path.join(app.getPath('appData'), 'NolimitCoder V2')); } catch {} // data zustavaji ve stare slozce i po prejmenovani exe
+try { app.setPath('userData', path.join(app.getPath('appData'), 'NolimitCoder V2')); } catch {} // data stays in the old folder even after renaming the exe
 const STORE_PATH = path.join(app.getPath('userData'), 'config.json');
 
 try { fs.mkdirSync(path.join(os.tmpdir(), 'nolimitcoder'), { recursive: true }); } catch {}
 function getStore() {
   const defaults = {
-    permissions: 'all',       // vždy vše povoleno, žádné dotazování
-    fullAccess: true,         // vždy plný přístup k celému PC
-    activeProject: null,      // full path ke složce projektu
+    permissions: 'all',       // always everything allowed, no prompting
+    fullAccess: true,         // always full access to the whole PC
+    activeProject: null,      // full path to the project folder
     mode: 'build',            // build | plan
-    sound: true,              // zvuk po dokončení generování
-    terminal: 'auto',         // terminál vždy auto
+    sound: true,              // sound after generation finishes
+    terminal: 'auto',         // terminal always auto
     ollamaUrl: 'http://127.0.0.1:11434',
     lmstudioUrl: 'http://127.0.0.1:1234',
 
@@ -81,7 +81,7 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  // Když renderer spadne (OOM apod.), nestojí celá appka — jen se přenačte
+  // When the renderer crashes (OOM etc.), the whole app doesn't go down — it just reloads
   mainWindow.webContents.on('render-process-gone', (_e, details) => {
     try {
       const logPath = path.join(app.getPath('userData'), 'crash.log');
@@ -98,9 +98,9 @@ process.on('uncaughtException', (e) => {
   } catch {}
 });
 
-// Jedna instance. Při restartu jako správce se nová (zvýšená) instance ozve
-// příznakem --elevated-child a stará se pak sama vypne. Normální dvojklik
-// jen vyfocusuje okno (když UAC zamítneš, běží se dál beze změny).
+// Single instance. On restart as administrator the new (elevated) instance announces
+// itself with the --elevated-child flag and the old one quits on its own. A normal double-click
+// just focuses the window (if you deny UAC, everything keeps running unchanged).
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -121,7 +121,7 @@ ipcMain.handle('sys:helperState', () => {
 });
 
 ipcMain.handle('sys:isAdmin', async () => {
-  // net session projde jen se zvýšenými právy
+  // net session only passes with elevated rights
   try {
     const { execFile } = require('child_process');
     const ok = await new Promise((resolve) => {
@@ -132,8 +132,8 @@ ipcMain.handle('sys:isAdmin', async () => {
 });
 
 ipcMain.handle('app:relaunchAdmin', async () => {
-  // Spustí TUTO aplikaci znovu jako správce (1× UAC okno). Stará instance
-  // se vypne sama přes second-instance — když UAC zamítneš, nic se nestane a jede se dál.
+  // Relaunches THIS application as administrator (1x UAC prompt). The old instance
+  // quits on its own via second-instance — if you deny UAC, nothing happens and it keeps running.
   try {
     const { execFile } = require('child_process');
     const exe = app.getPath('exe');
@@ -148,13 +148,13 @@ ipcMain.handle('app:relaunchAdmin', async () => {
 
 app.whenReady().then(async () => {
   createWindow();
-  // Proxy pool (ProxyScrape free list): načíst přibalené + cache, čerstvé stáhnout na pozadí.
+  // Proxy pool (ProxyScrape free list): load bundled + cache, download fresh ones in the background.
   try {
     const cacheDir = path.join(app.getPath('userData'), 'proxies');
     try { fs.mkdirSync(cacheDir, { recursive: true }); } catch {}
     try { PX.loadProxies(cacheDir); } catch {}
     try { T.dbgLog('proxy', { act: 'init', counts: PX.counts() }); } catch {}
-    // tichý refresh po startu (neblokuje okno), pak každých 30 min
+    // silent refresh after startup (doesn't block the window), then every 30 min
     setTimeout(async () => { try { await PX.refreshProxies(cacheDir); } catch {} }, 8000);
     setInterval(async () => { try { await PX.refreshProxies(cacheDir); } catch {} }, 30 * 60 * 1000);
   } catch {}
@@ -183,18 +183,18 @@ ipcMain.handle('app:paths', () => ({
   storePath: STORE_PATH
 }));
 
-// 429 = free kvota vycerpana. Retry-After (s) z hlavicky, max 300.
+// 429 = free quota exhausted. Retry-After (s) from the header, max 300.
 function parseRetryAfterMs(v) {
   const n = parseInt(String(v == null ? '' : v).trim(), 10);
   if (isNaN(n) || n < 0) return 0;
   return Math.min(n, 300) * 1000;
 }
-// 403 RegionError = zeme je pro model blokovana (geo-ban).
+// 403 RegionError = the country is blocked for the model (geo-ban).
 function isGeoBlockedBody(s) {
   return /RegionError|not available in your country/i.test(String(s || ''));
 }
 
-// Seznam modelu: nejdřív napřímo, při quota/429 automaticky přes random proxy z poolu.
+// Model list: direct first, on quota/429 automatically via a random proxy from the pool.
 ipcMain.handle('net:fetch-zen-models', async (_, apiKey) => {
   const url = 'https://opencode.ai/zen/v1/models';
   const headers = { 'Content-Type': 'application/json' };
@@ -216,7 +216,7 @@ ipcMain.handle('net:fetch-zen-models', async (_, apiKey) => {
     req.setTimeout(8000, () => { req.destroy(); resolve({ ok: false, error: 'timeout', via: 'direct' }); });
   });
   if (!direct.quota) return direct;
-  // quota → zkus 3 random proxy rychle za sebou
+  // quota → try 3 random proxies quickly in a row
   for (let i = 0; i < 3; i++) {
     const proxy = PX.getRandomProxy();
     if (!proxy) break;
@@ -229,10 +229,10 @@ ipcMain.handle('net:fetch-zen-models', async (_, apiKey) => {
     }
     PX.markBad(proxy);
   }
-  return { ok: false, error: `quota 429 i přes proxy (zkuseno 3×) — ${direct.body || ''}`.slice(0, 500), via: 'direct+proxy', isRateLimit: true };
+  return { ok: false, error: `quota 429 even via proxy (tried 3x) — ${direct.body || ''}`.slice(0, 500), via: 'direct+proxy', isRateLimit: true };
 });
 
-// ===== PROXY pool (ProxyScrape) — status / refresh / list pro UI =====
+// ===== PROXY pool (ProxyScrape) — status / refresh / list for the UI =====
 function broadcastProxyStatus() {
   try {
     const st = PX.status();
@@ -280,13 +280,13 @@ ipcMain.handle('net:discover-local', async () => {
   // vLLM
   const vllm = await fetchLocalModels(`http://127.0.0.1:8000/v1/models`);
   results.vllm = vllm;
-  // lokalni AI server
+  // local AI server
   const localai = await fetchLocalModels(`http://127.0.0.1:4096/config`);
   results.localai = localai;
   return results;
 });
 
-// ===== PROJECTS — složka projects (vytvořit / přejmenovat / smazat / vybrat) =====
+// ===== PROJECTS — projects folder (create / rename / delete / pick) =====
 function projectsDir() {
   const d = path.join(app.getPath('userData'), 'projects');
   try { fs.mkdirSync(d, { recursive: true }); } catch {}
@@ -308,19 +308,19 @@ ipcMain.handle('projects:list', () => {
 
 ipcMain.handle('projects:create', (_, name) => {
   const n = safeName(name);
-  if (!n) return { ok: false, error: 'Prázdný název' };
+  if (!n) return { ok: false, error: 'Empty name' };
   const p = path.join(projectsDir(), n);
-  if (fs.existsSync(p)) return { ok: false, error: 'Složka už existuje' };
+  if (fs.existsSync(p)) return { ok: false, error: 'Folder already exists' };
   try { fs.mkdirSync(p, { recursive: true }); } catch (e) { return { ok: false, error: e.message }; }
   return { ok: true, name: n, path: p };
 });
 
 ipcMain.handle('projects:rename', (_, oldName, newName) => {
   const o = safeName(oldName), n = safeName(newName);
-  if (!o || !n) return { ok: false, error: 'Špatný název' };
+  if (!o || !n) return { ok: false, error: 'Invalid name' };
   const op = path.join(projectsDir(), o), np = path.join(projectsDir(), n);
-  if (!fs.existsSync(op)) return { ok: false, error: 'Projekt neexistuje' };
-  if (fs.existsSync(np)) return { ok: false, error: 'Cíl už existuje' };
+  if (!fs.existsSync(op)) return { ok: false, error: 'Project does not exist' };
+  if (fs.existsSync(np)) return { ok: false, error: 'Target already exists' };
   try { fs.renameSync(op, np); } catch (e) { return { ok: false, error: e.message }; }
   const st = getStore();
   if (st.activeProject === op) { st.activeProject = np; saveStore(st); }
@@ -329,9 +329,9 @@ ipcMain.handle('projects:rename', (_, oldName, newName) => {
 
 ipcMain.handle('projects:delete', (_, name) => {
   const n = safeName(name);
-  if (!n) return { ok: false, error: 'Špatný název' };
+  if (!n) return { ok: false, error: 'Invalid name' };
   const p = path.join(projectsDir(), n);
-  if (!fs.existsSync(p)) return { ok: false, error: 'Projekt neexistuje' };
+  if (!fs.existsSync(p)) return { ok: false, error: 'Project does not exist' };
   try { fs.rmSync(p, { recursive: true, force: true }); } catch (e) { return { ok: false, error: e.message }; }
   const st = getStore();
   if (st.activeProject === p) { st.activeProject = null; saveStore(st); }
@@ -340,15 +340,15 @@ ipcMain.handle('projects:delete', (_, name) => {
 
 ipcMain.handle('projects:renamePath', (_, oldPath, newName) => {
   const n = safeName(newName);
-  if (!n) return { ok: false, error: 'Špatný název' };
+  if (!n) return { ok: false, error: 'Invalid name' };
   const op = path.resolve(String(oldPath || ''));
-  if (!op || !fs.existsSync(op)) return { ok: false, error: 'Složka neexistuje' };
+  if (!op || !fs.existsSync(op)) return { ok: false, error: 'Folder does not exist' };
   const low = op.toLowerCase();
   if (T.BLOCKED_PREFIXES.some(b => low === b.replace(/\/$/, '') || low.startsWith(b))) {
-    return { ok: false, error: 'Systémová složka je zakázaná' };
+    return { ok: false, error: 'System folder is forbidden' };
   }
   const np = path.join(path.dirname(op), n);
-  if (fs.existsSync(np)) return { ok: false, error: 'Cíl už existuje' };
+  if (fs.existsSync(np)) return { ok: false, error: 'Target already exists' };
   try { fs.renameSync(op, np); } catch (e) { return { ok: false, error: e.message }; }
   return { ok: true, path: np, name: n };
 });
@@ -364,7 +364,7 @@ const TEXT_EXT = new Set(['.txt', '.md', '.js', '.jsx', '.ts', '.tsx', '.json', 
 
 ipcMain.handle('projects:files', (_, dirPath, includeContents) => {
   const root = path.resolve(String(dirPath || ''));
-  if (!root || !fs.existsSync(root)) return { ok: false, error: 'Složka neexistuje' };
+  if (!root || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
   const tree = [];
   let truncated = false;
   (function walk(dir, rel) {
@@ -419,11 +419,11 @@ ipcMain.handle('sys:knownFolders', () => {
   };
 });
 
-// ===== NOLIMIT FREE TIER pres branu (zadny user API key) =====
-// Zdroj generovani: brana NolimitCoder (klientsky fingerprint v hlavickach nize).
-// Auth: Bearer public + fingerprint oficialniho klienta.
-// Gatekeeper (od 19.9.2026) vyzaduje: stream:true + tools [shell, read] + fingerprint.
-// Overeno 24.9.2026: 7x /chat/completions + 2x /responses funguje bez klice.
+// ===== NOLIMIT FREE TIER via the gateway (no user API key) =====
+// Generation source: the NolimitCoder gateway (client fingerprint in the headers below).
+// Auth: Bearer public + official client fingerprint.
+// Gatekeeper (since 19.9.2026) requires: stream:true + tools [shell, read] + fingerprint.
+// Verified 24.9.2026: 7x /chat/completions + 2x /responses works without a key.
 
 const API_BASE = 'https://opencode.ai/zen/v1';
 const RESPONSES_MODELS = new Set([
@@ -439,7 +439,7 @@ function genSessionId() {
   for (let i = 0; i < 14; i++) s += b62[Math.floor(Math.random() * 62)];
   return s;
 }
-// Stable session per conversation (lepsi cache + routing), per-request id unikatni
+// Stable session per conversation (better cache + routing), per-request id unique
 const sessionCache = new Map();
 function getSessionId(convoId) {
   if (!convoId) return genSessionId();
@@ -447,9 +447,9 @@ function getSessionId(convoId) {
   return sessionCache.get(convoId);
 }
 
-// ===== FILE TOOLS — kompletní sada nástrojů (provedení v tools.js) =====
-// Gatekeeper vyžaduje nástroj se jménem shell (+read) — proto je shell vždy v seznamu.
-// agent=true jen v Build modu (Plan je text-only) a jen když je kam sahat.
+// ===== FILE TOOLS — complete tool set (executed in tools.js) =====
+// Gatekeeper requires a tool named shell (+read) — that's why shell is always in the list.
+// agent=true only in Build mode (Plan is text-only) and only when there is somewhere to reach.
 const P = (properties, required) => ({ type: 'object', properties, required: required || Object.keys(properties) });
 const STR = (d) => ({ type: 'string', description: d || '' });
 const SHELL_REAL = { type: 'function', name: 'shell', description: `Execute a shell command (Windows cmd.exe on win32).
@@ -484,36 +484,36 @@ Terminals: cmd (default), powershell, pwsh. The backend parameter selects one (d
 # Git and GitHub
 - Only commit, amend or push when explicitly requested. Before committing, inspect \`git status\`, \`git diff\`, \`git log --oneline -10\`; stage only intended files, never commit secrets. Write a concise commit message.
 - Use \`gh\` for GitHub tasks and return the PR URL when done.`, parameters: P({ command: STR('The command to execute'), timeout: { type: 'number', description: 'Optional timeout in milliseconds (default 120000, max 900000)' }, workdir: STR('The working directory to run the command in. Defaults to the project folder. Use this instead of cd commands.'), backend: STR('cmd | powershell | pwsh | auto (default auto)') }, ['command']) };
-// Gatekeeper brány vyžaduje, aby v seznamu byl nástroj se jménem "shell" a "read".
-// V chat/plan režimu (bez agenta) jsou to záměrně mrtvé zátky, aby model nic nevolal.
-// V build režimu se posílají POUZE skutečné nástroje (žádné duplicity jmen!).
+// The gateway gatekeeper requires the list to contain a tool named "shell" and "read".
+// In chat/plan mode (no agent) these are intentionally dead plugs so the model calls nothing.
+// In build mode ONLY real tools are sent (no duplicate names!).
 const READ_GATE = { type: 'function', name: 'read', description: 'Read a text file (alias of read_file).', parameters: P({ path: STR('Path to the file') }) };
 const SHELL_GATE = { type: 'function', name: 'shell', description: 'INTERNAL ONLY — never call this tool in chat mode.', parameters: P({ command: STR('ignored, do not use') }) };
 const DUMMY_TOOLS_RESP = [ SHELL_GATE, READ_GATE ];
 const AGENT_TOOLS_RESP = [
   SHELL_REAL,
   READ_GATE,
-  { type: 'function', name: 'write_file', description: 'Zapíše textový soubor (vytvoří i podsložky). Místo vypisování kódu do chatu ho VŽDY zapiš tímto nástrojem.', parameters: P({ path: STR('Relativní cesta k projektu nebo absolutní cesta'), content: STR('Celý obsah souboru') }, ['path', 'content']) },
-  { type: 'function', name: 'append_file', description: 'Připíše text na konec souboru (soubor případně vytvoří).', parameters: P({ path: STR('Cesta k souboru'), content: STR('Text k připsání') }, ['path', 'content']) },
-  { type: 'function', name: 'edit_file', description: 'Přesná editace souboru: oldString musí v souboru sedět přesně 1x, jinak pošli větší kontext nebo replaceAll: true.', parameters: P({ path: STR('Cesta k souboru'), oldString: STR('Přesný původní text'), newString: STR('Nový text') }, ['path', 'oldString', 'newString']) },
-  { type: 'function', name: 'read_file', description: 'Přečte textový soubor (max 40 KB).', parameters: P({ path: STR('Cesta k souboru') }) },
-  { type: 'function', name: 'list_dir', description: 'Vypíše soubory a podsložky ve složce.', parameters: P({ path: STR('Cesta ke složce, "." = projekt') }) },
-  { type: 'function', name: 'glob_file', description: 'Najde soubory podle vzoru (např. **/*.js, src/*.py).', parameters: P({ pattern: STR('Glob vzor'), dir: STR('Kde hledat, výchozí "."') }, ['pattern']) },
-  { type: 'function', name: 'create_dir', description: 'Vytvoří složku včetně podsložek.', parameters: P({ path: STR('Cesta ke složce') }) },
-  { type: 'function', name: 'move_file', description: 'Přesune nebo přejmenuje soubor (i obrázky) mezi složkami.', parameters: P({ from: STR('Zdrojová cesta'), to: STR('Cílová cesta') }, ['from', 'to']) },
-  { type: 'function', name: 'copy_file', description: 'Zkopíruje soubor (i obrázek) do jiné složky.', parameters: P({ from: STR('Zdrojová cesta'), to: STR('Cílová cesta') }, ['from', 'to']) },
-  { type: 'function', name: 'delete_file', description: 'Smaže soubor.', parameters: P({ path: STR('Cesta k souboru') }) },
-  { type: 'function', name: 'file_info', description: 'Info o souboru/složce: velikost, datum, typ.', parameters: P({ path: STR('Cesta') }) },
-  { type: 'function', name: 'search_files', description: 'Vyhledá text v souborech projektu (grep).', parameters: P({ pattern: STR('Hledaný text'), dir: STR('Kde hledat, výchozí "."'), ext: STR('Přípona bez tečky, např. js (volitelné)') }, ['pattern']) },
-  { type: 'function', name: 'open_path', description: 'Otevře soubor/složku v systému (Průzkumník).', parameters: P({ path: STR('Cesta') }) },
-  { type: 'function', name: 'web_fetch', description: 'Stáhne text webové stránky (https URL).', parameters: P({ url: STR('https://…') }, ['url']) },
-  { type: 'function', name: 'web_search', description: 'Vyhledá cokoliv na internetu (plný přístup k webu).', parameters: P({ query: STR('Hledaný dotaz') }, ['query']) },
-  { type: 'function', name: 'download_file', description: 'Stáhne soubor z internetu na disk (https URL → cesta). Umí i velké soubory.', parameters: P({ url: STR('https://…/soubor.zip'), to: STR('Kam uložit (relativně k projektu i absolutně)') }, ['url', 'to']) },
-  { type: 'function', name: 'env_scan', description: 'Skenuje počítač a zjistí, co už je nainstalované (node, npm, python, pip, git, gcc/g++, MSVC, cmake, make, dotnet, java, maven, gradle, go, rust, bun, deno, php, ruby, docker, 7-Zip) a co je potřeba pro aktivní projekt i pro zadání uživatele. Nic neinstaluje. Volej NA ZAČÁTKU, když budeš něco stavět, kompilovat nebo spouštět.', parameters: P({ request: STR('Volitelné: co přesně uživatel chce, např. "udělej C++ program a zkompiluj exe"') }) },
-  { type: 'function', name: 'env_prepare', description: 'Zjistí, co je potřeba (projekt + zadání uživatele + plánované příkazy) a VŠECHNO chybějící DOINSTALUJE SÁM: winget → Chocolatey → Scoop → stažení z internetu do aplikace, a pak rovnou pokračuje v práci. Než uživateli řekneš, ať si něco instaluje, zavolej tohle. Velké toolchainy (Visual Studio Build Tools, Docker, Android Studio) se bez dotazu neinstalují — u nich se nejdřív zeptej nástrojem question a pak volej znovu s heavy: true.', parameters: P({ request: STR('Co uživatel chce, v jeho vlastních slovech'), ids: { type: 'array', items: STR('id toolchainu'), description: 'Volitelné: konkrétní toolchainy místo automatického výběru' }, heavy: { type: 'boolean', description: 'Povolit velké instalace (GB) — jen když uživatel souhlasil' } }) },
-  { type: 'function', name: 'env_install', description: 'Doinstaluje konkrétní toolchainy přes winget/Chocolatey/Scoop, jinak je stáhne z internetu (node, python, git, gcc, msvc, cmake, make, dotnet, java, maven, gradle, go, rust, bun, deno, php, ruby, docker, sevenzip, android). Volej jen když env_scan ukázal, že chybí.', parameters: P({ id: STR('jedno id, nebo víc oddělených čárkou'), ids: { type: 'array', items: STR('id toolchainu'), description: 'použij místo id, když chceš víc toolchainů' }, heavy: { type: 'boolean', description: 'Povolit velké instalace (GB)' } }) },
-  { type: 'function', name: 'scaffold_electron', description: 'Vytvoří funkční kostru Electron projektu (package.json + main.js + index.html) pro EXE aplikaci. Volej VŽDY jako první krok, když uživatel chce Electron/desktropovou exe aplikaci. Pak dopiš kód, spusť shell npm install (timeout 600000) a npm run dist (timeout 600000).', parameters: P({ dir: STR('Složka projektu (relativně nebo absolutně)'), name: STR('Název aplikace') }, ['dir']) },
-  { type: 'function', name: 'question', description: 'Zeptej se uživatele, když potřebuješ rozhodnutí nebo vyjasnění (např. kterou technologii zvolit). Ukaž mu možnosti, ze kterých vybere.', parameters: P({ questions: { type: 'array', description: 'Otázky (1-3)', items: { type: 'object', properties: { header: STR('Krátký nadpis'), question: STR('Otázka'), options: { type: 'array', items: { type: 'object', properties: { label: STR('Název volby'), description: STR('Popis volby') } } }, multiple: { type: 'boolean', description: 'Více voleb najednou' } } } } }, ['questions']) }
+  { type: 'function', name: 'write_file', description: 'Writes a text file (creates subfolders too). Instead of printing code into the chat, ALWAYS write it with this tool.', parameters: P({ path: STR('Relative path to the project or absolute path'), content: STR('Entire file content') }, ['path', 'content']) },
+  { type: 'function', name: 'append_file', description: 'Appends text to the end of a file (creates the file if needed).', parameters: P({ path: STR('Path to the file'), content: STR('Text to append') }, ['path', 'content']) },
+  { type: 'function', name: 'edit_file', description: 'Precise file edit: oldString must match exactly 1x in the file, otherwise send a larger context or replaceAll: true.', parameters: P({ path: STR('Path to the file'), oldString: STR('Exact original text'), newString: STR('New text') }, ['path', 'oldString', 'newString']) },
+  { type: 'function', name: 'read_file', description: 'Reads a text file (max 40 KB).', parameters: P({ path: STR('Path to the file') }) },
+  { type: 'function', name: 'list_dir', description: 'Lists files and subfolders in a folder.', parameters: P({ path: STR('Path to the folder, "." = project') }) },
+  { type: 'function', name: 'glob_file', description: 'Finds files by pattern (e.g. **/*.js, src/*.py).', parameters: P({ pattern: STR('Glob pattern'), dir: STR('Where to search, default "."') }, ['pattern']) },
+  { type: 'function', name: 'create_dir', description: 'Creates a folder including subfolders.', parameters: P({ path: STR('Path to the folder') }) },
+  { type: 'function', name: 'move_file', description: 'Moves or renames a file (images too) between folders.', parameters: P({ from: STR('Source path'), to: STR('Target path') }, ['from', 'to']) },
+  { type: 'function', name: 'copy_file', description: 'Copies a file (image too) to another folder.', parameters: P({ from: STR('Source path'), to: STR('Target path') }, ['from', 'to']) },
+  { type: 'function', name: 'delete_file', description: 'Deletes a file.', parameters: P({ path: STR('Path to the file') }) },
+  { type: 'function', name: 'file_info', description: 'Info about a file/folder: size, date, type.', parameters: P({ path: STR('Path') }) },
+  { type: 'function', name: 'search_files', description: 'Searches text in project files (grep).', parameters: P({ pattern: STR('Text to search'), dir: STR('Where to search, default "."'), ext: STR('Extension without a dot, e.g. js (optional)') }, ['pattern']) },
+  { type: 'function', name: 'open_path', description: 'Opens a file/folder in the system (Explorer).', parameters: P({ path: STR('Path') }) },
+  { type: 'function', name: 'web_fetch', description: 'Downloads the text of a web page (https URL).', parameters: P({ url: STR('https://…') }, ['url']) },
+  { type: 'function', name: 'web_search', description: 'Searches anything on the internet (full web access).', parameters: P({ query: STR('Search query') }, ['query']) },
+  { type: 'function', name: 'download_file', description: 'Downloads a file from the internet to disk (https URL → path). Handles large files too.', parameters: P({ url: STR('https://…/file.zip'), to: STR('Where to save (relative to the project or absolute)') }, ['url', 'to']) },
+  { type: 'function', name: 'env_scan', description: 'Scans the computer and finds what is already installed (node, npm, python, pip, git, gcc/g++, MSVC, cmake, make, dotnet, java, maven, gradle, go, rust, bun, deno, php, ruby, docker, 7-Zip) and what the active project and the user request need. Installs nothing. Call AT THE START when you are going to build, compile or run something.', parameters: P({ request: STR('Optional: exactly what the user wants, e.g. "make a C++ program and compile an exe"') }) },
+  { type: 'function', name: 'env_prepare', description: 'Finds what is needed (project + user request + planned commands) and installs ALL missing pieces ITSELF: winget → Chocolatey → Scoop → downloading from the internet into the app, then keeps working right away. Before telling the user to install something, call this. Large toolchains (Visual Studio Build Tools, Docker, Android Studio) are not installed without asking — ask first with the question tool and then call again with heavy: true.', parameters: P({ request: STR('What the user wants, in their own words'), ids: { type: 'array', items: STR('toolchain id'), description: 'Optional: specific toolchains instead of auto selection' }, heavy: { type: 'boolean', description: 'Allow large installs (GB) — only when the user agreed' } }) },
+  { type: 'function', name: 'env_install', description: 'Installs specific toolchains via winget/Chocolatey/Scoop, otherwise downloads them from the internet (node, python, git, gcc, msvc, cmake, make, dotnet, java, maven, gradle, go, rust, bun, deno, php, ruby, docker, sevenzip, android). Call only when env_scan showed something is missing.', parameters: P({ id: STR('one id, or more separated by comma'), ids: { type: 'array', items: STR('toolchain id'), description: 'use instead of id when you want more toolchains' }, heavy: { type: 'boolean', description: 'Allow large installs (GB)' } }) },
+  { type: 'function', name: 'scaffold_electron', description: 'Creates a working Electron project skeleton (package.json + main.js + index.html) for an EXE app. ALWAYS call as the first step when the user wants an Electron/desktop exe app. Then write the code, run shell npm install (timeout 600000) and npm run dist (timeout 600000).', parameters: P({ dir: STR('Project folder (relative or absolute)'), name: STR('App name') }, ['dir']) },
+  { type: 'function', name: 'question', description: 'Ask the user when you need a decision or clarification (e.g. which technology to pick). Show them options to choose from.', parameters: P({ questions: { type: 'array', description: 'Questions (1-3)', items: { type: 'object', properties: { header: STR('Short heading'), question: STR('Question'), options: { type: 'array', items: { type: 'object', properties: { label: STR('Option name'), description: STR('Option description') } } }, multiple: { type: 'boolean', description: 'Multiple choices at once' } } } } }, ['questions']) }
 ];
 const DUMMY_TOOLS_CHAT = DUMMY_TOOLS_RESP.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
 const AGENT_TOOLS_CHAT = AGENT_TOOLS_RESP.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
@@ -543,7 +543,7 @@ ipcMain.handle('tools:exec', async (_, data) => {
       userDataDir: app.getPath('userData'),
       helperExe: h.exe, helperArgs: h.args
     });
-  } catch (e) { r = { ok: false, output: 'Chyba: ' + (e.message || e) }; }
+  } catch (e) { r = { ok: false, output: 'Error: ' + (e.message || e) }; }
   try {
     let argsHead = '';
     for (const k of ['command', 'path', 'dir', 'to', 'id', 'pattern', 'query', 'url', 'request']) {
@@ -561,7 +561,7 @@ ipcMain.handle('tools:exec', async (_, data) => {
 });
 ipcMain.on('log:debug', (_, e) => { try { if (e && e.tag) T.dbgLog('UI:' + e.tag, e.data); } catch {} });
 
-// Streaming pozadavku - renderer will call this and we stream back via event
+// Streaming the request - renderer will call this and we stream back via event
 ipcMain.on('chat:stream-abort', () => { abortFlag = true; });
 ipcMain.on('chat:stream-start', async (event, payload) => {
   const { messages, model, convoId, agent, mode: reqMode, projectRoot, fullAccess, inputItems, maxTokens, websearch } = payload || {};
@@ -574,7 +574,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
     const sid = getSessionId(convoId || mId);
     const reqId = 'req_' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
 
-    // VSECHNO jede pres branu NolimitCoder - zadny user key, vzdy Bearer public
+    // EVERYTHING goes via the NolimitCoder gateway - no user key, always Bearer public
     const zenHeaders = {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer public',
@@ -586,13 +586,13 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       'x-session-id': sid
     };
 
-    // Nikde ven nesmí pravé jméno modelu — jen NolimitCoderV2/V3
+    // The real model name must never leak out — only NolimitCoderV2/V3
     const scrubModels = (s) => String(s || '')
       .split('muse-spark-1.3-contributor-free').join('NolimitCoderV3')
       .split('muse-spark-1.2-contributor-free').join('NolimitCoderV2');
-    const agentOn = agent === true; // renderer posílá agent jen v Build modu; kam se smí, hlídá sandbox + panel
+    const agentOn = agent === true; // renderer sends agent only in Build mode; where it may reach is guarded by the sandbox + panel
     const planOn = reqMode === 'plan';
-    // LOCAL modely (Ollama / LM Studio / vLLM, OpenAI-kompatibilní)
+    // LOCAL models (Ollama / LM Studio / vLLM, OpenAI-compatible)
     const LOCAL_PREFIX = /^(local|ollama|lmstudio|vllm)[:/]/i;
     let localBase = null;
     let localModel = mId;
@@ -604,25 +604,25 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         : kind === 'vllm' ? 'http://127.0.0.1:8000'
         : (store.ollamaUrl || 'http://127.0.0.1:11434');
     }
-    // Google search vypínač z Nastavení: web_search se vůbec nenabídne.
+    // Google search switch from Settings: web_search is not offered at all.
     const noWeb = websearch === false;
     const dropWeb = (arr, get) => noWeb ? arr.filter(t => get(t) !== 'web_search') : arr;
     const gR = (t) => t.name, gC = (t) => t.function.name;
     const READ_TOOLS_RESP = AGENT_TOOLS_RESP.filter(t => ['read', 'read_file', 'list_dir', 'glob_file', 'search_files', 'file_info', 'web_fetch', 'web_search', 'question', 'env_scan'].includes(t.name));
     const READ_TOOLS_CHAT = AGENT_TOOLS_CHAT.filter(t => ['read', 'read_file', 'list_dir', 'glob_file', 'search_files', 'file_info', 'web_fetch', 'web_search', 'question', 'env_scan'].includes(t.function.name));
-    // Gatekeeper chce v seznamu i "shell" — v planu je to mrtvá zátka (model ho nesmí volat).
+    // Gatekeeper wants "shell" in the list too — in plan it is a dead plug (the model must not call it).
     const PLAN_TOOLS_RESP = [SHELL_GATE, ...READ_TOOLS_RESP];
     const PLAN_TOOLS_CHAT = [{ type: 'function', function: { name: 'shell', description: 'INTERNAL ONLY — never call this tool in plan mode.', parameters: P({ command: STR('ignored') }) } }, ...READ_TOOLS_CHAT];
     let url, body, headers;
     if (localBase) {
-      // lokální OpenAI-kompatibilní endpoint, bez auth, bez tools gatekeeperu
+      // local OpenAI-compatible endpoint, no auth, no tools gatekeeper
       url = localBase.replace(/\/$/, '') + '/v1/chat/completions';
       headers = { 'Content-Type': 'application/json' };
       body = JSON.stringify({ model: localModel, messages, stream: true, max_tokens: maxT });
     } else {
       headers = zenHeaders;
       if (RESPONSES_MODELS.has(mId)) {
-      // Muse Spark free -> Responses API (chat/completions vraci 500)
+      // Muse Spark free -> Responses API (chat/completions returns 500)
       url = `${API_BASE}/responses`;
       const input = inputItems || messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n\n');
       body = JSON.stringify({
@@ -633,9 +633,9 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         tools: dropWeb(agentOn ? AGENT_TOOLS_RESP : (planOn ? PLAN_TOOLS_RESP : DUMMY_TOOLS_RESP), gR)
       });
       } else {
-      // Zbytek FREE -> /chat/completions (stream:true + chat-tools + prompt_cache_key = povinne)
-      // Bez agenta: tool_choice:none = model NESMÍ volat tools (gatekeeper kontroluje jen přítomnost tools pole),
-      // jinak slabé FREE modely občas vypustí "undefined" / phantom tool-call bláboly
+      // Rest of FREE -> /chat/completions (stream:true + chat-tools + prompt_cache_key = required)
+      // Without agent: tool_choice:none = the model MUST NOT call tools (gatekeeper only checks the presence of the tools field),
+      // otherwise weak FREE models sometimes emit "undefined" / phantom tool-call gibberish
       url = `${API_BASE}/chat/completions`;
       const chatTools = dropWeb(agentOn ? AGENT_TOOLS_CHAT : (planOn ? PLAN_TOOLS_CHAT : DUMMY_TOOLS_CHAT), gC);
       body = JSON.stringify({
@@ -654,7 +654,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
     const isHttps = u.protocol === 'https:';
     const mod = isHttps ? https : http;
     const reqT0 = Date.now();
-    // Vse (brana i lokalni modely) jede vzdy naprimo. Zadna proxy, zadna VPN.
+    // Everything (gateway and local models) always goes direct. No proxy, no VPN.
     try {
       const parsed = JSON.parse(body);
       const tls = parsed.tools || [];
@@ -667,7 +667,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       });
     } catch {}
 
-    // --- Požadavek na bránu: napřímo, při quota/429 automaticky přes random proxy ---
+    // --- Gateway request: direct, on quota/429 automatically via a random proxy ---
     const MAX_PROXY_TRIES = 5;
     let finished = false;
     let currentAbort = null;
@@ -695,10 +695,10 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       safeSend(ch, data);
     };
 
-    // Společný streamovač odpovědi (direct i proxy) — chunky jdou rovnou do rendereru.
+    // Shared response streamer (direct and proxy) — chunks go straight to the renderer.
     const streamDirect = () => new Promise((resolve) => {
       if (localBase) {
-        // lokální modely vždy napřímo, proxy nedává smysl
+        // local models always direct, proxy makes no sense
         const req = mod.request(url, { method: 'POST', headers: { ...headers, 'Accept': 'text/event-stream' } }, (res) => {
           hookStream(res, null, resolve);
         });
@@ -716,7 +716,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       currentAbort = () => { try { req.destroy(); } catch {} };
       req.on('error', (e) => {
         try { T.dbgLog('aistream', { end: 'req-error', err: String(e.message || e).slice(0, 300), ms: Date.now() - reqT0 }); } catch {}
-        // síťová chyba napřímo → rovnou zkusit proxy (třeba je problém na IP)
+        // network error on direct → try proxy right away (the IP may be the problem)
         if (!localBase && !finished) resolve({ netError: true, error: e.message });
         else { finishOnce('chat:stream-error', { error: e.message, url }); resolve({ fatal: true }); }
       });
@@ -748,10 +748,10 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         if (ch === 'chat:stream-end' && !viaProxy) { try { PX.onDirectOk(); PX.markGood(); } catch {} }
         if (ch === 'chat:stream-end' && viaProxy) { try { PX.markGood(); } catch {} }
         if (resolve && ch && ch !== '__streaming__') {
-          // terminální stav řeší volající (resolve s výsledkem), nechceme double-finish
+          // the caller handles the terminal state (resolve with the result), we don't want a double-finish
           if (ch === 'chat:stream-end' || ch === 'chat:stream-error') { finishOnce(ch, data, chunks, bytes); resolve({ fatal: true }); return; }
         }
-        // průběžné volání done bez resolve → jen úklid (nepoužívá se)
+        // interim done call without resolve → just cleanup (unused)
       };
       if (res.statusCode < 200 || res.statusCode >= 300) {
         const rl = res.statusCode === 429;
@@ -774,9 +774,9 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         return;
       }
       bumpIdle();
-      // úspěšný start streamu — dej vědět volajícímu, že jede (aby nezkoušel další proxy)
+      // successful stream start — let the caller know it is running (so it doesn't try another proxy)
       if (resolve) resolve({ streaming: true });
-      // přepneme resolve na no-op, další události už jen forwardují chunky
+      // switch resolve to a no-op, further events only forward chunks
       const fwdEnd = (ch, data) => {
         if (ended) return;
         ended = true;
@@ -822,7 +822,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         onHead: (status, headers) => {
           gotHead = true;
           if (status < 200 || status >= 300) {
-            // hlavicku s chybou resime v onChunk/onEnd sběrem těla
+            // an error header is handled in onChunk/onEnd by collecting the body
             api._errStatus = status;
             api._errHeaders = headers;
             api._errBody = '';
@@ -852,7 +852,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
             }
             return;
           }
-          // prázdný stream přes proxy (padlý tunel bez dat) → brát jako fail proxy, zkusit další
+          // empty stream via proxy (dead tunnel with no data) → treat as proxy fail, try the next one
           if (!gotHead || (chunks === 0 && bytes === 0)) {
             resolve({ proxyFail: true, error: 'empty via proxy' });
             return;
@@ -871,23 +871,23 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       bumpIdle();
     });
 
-    // Hlavní smyčka: direct → při quota/netError okamžitě random proxy (max 5×), každá jiná.
+    // Main loop: direct → on quota/netError immediately a random proxy (max 5x), each a different one.
     (async () => {
       if (localBase) { await streamDirect(); return; }
-      // Když se blížíme limitu (čerstvá 429), začít rovnou přes proxy — je to rychlejší než další 429 napřímo.
+      // When approaching the limit (fresh 429), start via proxy right away — it is faster than another direct 429.
       if (PX.shouldUseProxyFirst()) {
         for (let i = 0; i < MAX_PROXY_TRIES && !finished; i++) {
           const proxy = PX.getRandomProxy(i === 0 ? null : undefined);
           if (!proxy) break;
           notifyProxy(proxy, i === 0 ? 'preemptive-quota' : 'retry');
-          safeSend('chat:stream-chunk', ''); // udržet spojení
+          safeSend('chat:stream-chunk', ''); // keep the connection alive
           const r = await streamViaProxy(proxy);
           if (r.fatal) return;
-          if (r.quota) { PX.markBad(proxy); continue; }       // quota i přes proxy → další random proxy
-          if (r.proxyFail) { PX.markBad(proxy); continue; }    // padlá proxy → další
-          if (r.streaming) return; // jede — zbytek řeší forwardování
+          if (r.quota) { PX.markBad(proxy); continue; }       // quota even via proxy → next random proxy
+          if (r.proxyFail) { PX.markBad(proxy); continue; }    // dead proxy → next one
+          if (r.streaming) return; // running — the rest is handled by forwarding
         }
-        // proxy pool vyčerpán → padnout zpět na direct (ať renderer aspoň dostane poctivou 429)
+        // proxy pool exhausted → fall back to direct (so the renderer at least gets an honest 429)
       }
       const d = await streamDirect();
       if (d && (d.quota || d.netError)) {
@@ -902,11 +902,11 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
           if (r.quota || r.proxyFail) { PX.markBad(proxy); continue; }
           if (r.streaming) return;
         }
-        // Všechny proxy selhaly → poctivá hláška s quota příznakem (renderer zkusí 2. model)
+        // All proxies failed → honest message with quota flag (renderer tries the 2nd model)
         if (!finished) {
           const raMs = d.retryAfterMs || 0;
           finishOnce('chat:stream-error', {
-            error: scrubModels(`HTTP ${d.status || 429}: ${String(d.body || d.error || 'quota').slice(0, 1200)} (zkuseno i přes ${MAX_PROXY_TRIES} proxy)`),
+            error: scrubModels(`HTTP ${d.status || 429}: ${String(d.body || d.error || 'quota').slice(0, 1200)} (also tried via ${MAX_PROXY_TRIES} proxies)`),
             url, isRateLimit: true, retryAfterMs: raMs, viaExhausted: true,
           }, 0, 0);
         }
@@ -927,7 +927,7 @@ ipcMain.handle('app:openExternal', (_, url) => {
   try { shell.openExternal(String(url)); return true; } catch { return false; }
 });
 
-// ===== VESTAVĚNÝ TERMINÁL (uživatelův — normální práva, bez ptaní, bez oken) =====
+// ===== BUILT-IN TERMINAL (the user's — normal rights, no prompting, no windows) =====
 ipcMain.handle('term:run', async (_, data) => {
   const d = data || {};
   const cmd = T.normalizeShell(String(d.command || '').trim());
@@ -940,7 +940,7 @@ ipcMain.handle('term:run', async (_, data) => {
   return { ok: r.ok, output: r.output, cwd };
 });
 
-// ===== LIVE PREVIEW pro Website projekty (localhost server jen pro 127.0.0.1) =====
+// ===== LIVE PREVIEW for Website projects (localhost server for 127.0.0.1 only) =====
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -963,7 +963,7 @@ function freePort() {
 }
 ipcMain.handle('preview:start', async (_, dirPath) => {
   const root = path.resolve(String(dirPath || ''));
-  if (!root || !fs.existsSync(root)) return { ok: false, error: 'Složka neexistuje' };
+  if (!root || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
   const cur = previewServers.get(root);
   if (cur) return { ok: true, port: cur.port, url: `http://127.0.0.1:${cur.port}/` };
   const port = await freePort();
@@ -982,7 +982,7 @@ ipcMain.handle('preview:start', async (_, dirPath) => {
         res.end('Forbidden');
         return;
       }
-      // React/Vue build do dist/ má přednost před kořenem
+      // React/Vue build into dist/ takes precedence over the root
       const distIndex = path.join(root, 'dist', 'index.html');
       let effRoot = root;
       try {
@@ -1000,14 +1000,14 @@ ipcMain.handle('preview:start', async (_, dirPath) => {
         const st = fs.statSync(abs);
         if (st.isDirectory()) abs = path.join(abs, 'index.html');
       } catch {}
-      // SPA fallback: bezpříponové cesty padnou na index (client routing), jinak 404 nápověda
+      // SPA fallback: extensionless paths fall back to index (client routing), otherwise a 404 hint
       if ((!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) && path.extname(abs) === '') {
         const idx = path.join(effRoot, 'index.html');
         if (fs.existsSync(idx)) abs = idx;
       }
       if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
         res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end('<body style="background:#101010;color:#888;font-family:sans-serif"><h3>404 — v projektu zatím nic není. Nech AI něco vygenerovat (index.html).</h3></body>');
+        res.end('<body style="background:#101010;color:#888;font-family:sans-serif"><h3>404 — nothing in the project yet. Let the AI generate something (index.html).</h3></body>');
         return;
       }
       const ext = path.extname(abs).toLowerCase();
@@ -1030,7 +1030,7 @@ ipcMain.handle('preview:start', async (_, dirPath) => {
     previewServers.set(root, { server, port });
     return { ok: true, port, url: `http://127.0.0.1:${port}/` };
   }
-  return { ok: false, error: 'Server se nepovedlo spustit' };
+  return { ok: false, error: 'Failed to start the server' };
 });
 ipcMain.handle('preview:stop', async (_, dirPath) => {
   const root = path.resolve(String(dirPath || ''));
