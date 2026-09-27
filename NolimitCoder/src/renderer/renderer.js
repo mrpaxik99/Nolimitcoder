@@ -217,10 +217,11 @@ async function refreshZenLive() {
 
 /* ---------- AI commercial video: stav náhledu + exportu ---------- */
 const VIDEO_RESOLUTIONS = {
-  '1920x1080': { w: 1920, h: 1080, label: 'Full HD' },
-  '1280x720': { w: 1280, h: 720, label: 'HD' },
-  '1080x1080': { w: 1080, h: 1080, label: 'Square 1:1' },
-  '1080x1920': { w: 1080, h: 1920, label: 'Vertical 9:16' }
+  '1920x1080': { w: 1920, h: 1080, label: '16:9 Full HD' },
+  '1280x720': { w: 1280, h: 720, label: '16:9 HD' },
+  '1440x1080': { w: 1440, h: 1080, label: '4:3' },
+  '1080x1080': { w: 1080, h: 1080, label: '1:1 Square' },
+  '1080x1920': { w: 1080, h: 1920, label: '9:16 Vertical' }
 };
 let videoRes = localStorage.getItem('nlc_videores') || '1920x1080';
 if (!VIDEO_RESOLUTIONS[videoRes]) videoRes = '1920x1080';
@@ -238,7 +239,7 @@ function activeProjectType() {
 function videoResWH() { return VIDEO_RESOLUTIONS[videoRes] || VIDEO_RESOLUTIONS['1920x1080']; }
 /* System prompt pro reklamní videa: jedno responzivní index.html, celé viewport,
    animované, bez potřeby klikání (v náhledu ani klikat nejde — chová se jako video). */
-const VIDEO_ADD = ' VIDEO AD PROJECT: output a single self-contained advertising commercial as index.html in the project root (inline CSS+JS, no build). The ad fills the whole viewport at the target resolution, animated from page load (CSS/JS animation, autoplay, loop-friendly), readable typography, strong contrast. No clicks needed — the page behaves like a video (nothing must require interaction). Keep everything responsive so it looks right at any of 1920x1080, 1280x720, 1080x1080, 1080x1920.';
+const VIDEO_ADD = ' VIDEO AD PROJECT: output a single self-contained advertising commercial as index.html in the project root (inline CSS+JS, no build). The ad fills the whole viewport at the target resolution, animated from page load (CSS/JS animation, autoplay, loop-friendly), readable typography, strong contrast. No clicks needed — the page behaves like a video (nothing must require interaction). Keep everything responsive so it looks right at any of 1920x1080, 1280x720, 1440x1080, 1080x1080, 1080x1920.';
 
 /* ---------- projekty ---------- */
 function renderProjects() {
