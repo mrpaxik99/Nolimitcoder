@@ -309,6 +309,7 @@ function showView(v) {
   if (vc) vc.style.display = v === 'chat' ? '' : 'none';
 }
 async function openProject(p) {
+  if (isStreaming) stopEverything();
   prefs.activeProject = p.path;
   try { await window.api.setStore({ activeProject: p.path }); } catch {}
   $('#projHeadName').textContent = p.name;
@@ -327,7 +328,21 @@ async function openProject(p) {
 }
 
 /* ---------- konverzace ---------- */
+/* STOP zastaví VŠECHNY generace v chatu (stream, frontu zpráv i nahrávání MP4)
+   a vyčistí všechny indikátory — po přepnutí/smazání chatu nic nevisí. */
+function stopEverything(why) {
+  stopRequested = true;
+  pendingQueue.length = 0; updateQueue();
+  try { window.api.chatStreamAbort(); } catch {}
+  try { window.api.videoAbort(); } catch {}
+  videoExporting = false;
+  setVideoProgress('');
+  setActivity(null); hidePlanBox();
+  el.sendBtn.disabled = false; el.stopBtn.style.display = 'none';
+  setFooter(why || 'Zastaveno');
+}
 function newConvo(silent) {
+  if (isStreaming) stopEverything();
   const c = { id: 'c' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), projectPath: prefs.activeProject, title: 'Nová konverzace', messages: [], created: Date.now() };
   conversations.push(c); activeConvoId = c.id;
   localStorage.setItem('nlc_active', c.id); saveConvos();
@@ -348,8 +363,9 @@ function renderChatList() {
   el.chatList.querySelectorAll('.chat-item').forEach(n => n.addEventListener('click', (e) => {
     const id = n.getAttribute('data-id');
     const a = e.target.getAttribute && e.target.getAttribute('data-a');
-    if (a === 'del') { e.stopPropagation(); conversations = conversations.filter(c => c.id !== id); saveConvos(); if (activeConvoId === id) { const rest = conversations.filter(projectMatch); activeConvoId = rest.length ? rest[rest.length - 1].id : null; } renderChatList(); renderMessages(); return; }
+    if (a === 'del') { e.stopPropagation(); if (id === activeConvoId && isStreaming) stopEverything(); conversations = conversations.filter(c => c.id !== id); saveConvos(); if (activeConvoId === id) { const rest = conversations.filter(projectMatch); activeConvoId = rest.length ? rest[rest.length - 1].id : null; } renderChatList(); renderMessages(); return; }
     if (a === 'rename') { e.stopPropagation(); const c = conversations.find(x => x.id === id); askPrompt('Přejmenovat chat', 'Nový název', c.title).then(v => { if (v) { c.title = v; saveConvos(); renderChatList(); } }); return; }
+    if (id !== activeConvoId && isStreaming) stopEverything();
     activeConvoId = id; localStorage.setItem('nlc_active', id); renderChatList(); renderMessages();
   }));
   const c = activeConvo();
@@ -1016,7 +1032,7 @@ async function handleSlash(text) {
   const parts = text.trim().split(/\s+/);
   const cmd = parts[0].toLowerCase();
   if (cmd === '/new') { newConvo(); return true; }
-  if (cmd === '/clear') { const c = activeConvo(); if (c) { c.messages = []; saveConvos(); renderMessages(); } return true; }
+  if (cmd === '/clear') { if (isStreaming) stopEverything(); const c = activeConvo(); if (c) { c.messages = []; saveConvos(); renderMessages(); } return true; }
   if (cmd === '/help') {
     const c = activeConvo() || newConvo(true);
     c.messages.push({ role: 'user', content: text });
@@ -1883,16 +1899,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
   el.sendBtn.addEventListener('click', () => sendMessage());
-  el.stopBtn.addEventListener('click', () => {
-    // STOP zastaví VŠECHNY generace v chatu: stream, frontu zpráv i nahrávání MP4
-    stopRequested = true;
-    pendingQueue.length = 0; updateQueue();
-    try { window.api.chatStreamAbort(); } catch {}
-    try { window.api.videoAbort(); } catch {}
-    videoExporting = false;
-    setVideoProgress('');
-    setFooter('Zastaveno');
-  });
+  el.stopBtn.addEventListener('click', () => stopEverything());
   document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); newConvo(); renderMessages(); } });
   $('#newChatBtn').addEventListener('click', () => { newConvo(); renderMessages(); });
   $('#backBtn').addEventListener('click', () => { showView('projects'); renderProjects(); });
