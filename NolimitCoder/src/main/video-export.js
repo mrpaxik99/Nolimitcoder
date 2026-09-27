@@ -181,7 +181,8 @@ async function exportVideo(opts) {
       const t0 = Date.now();
       try {
         const img = await win.webContents.capturePage();
-        fs.writeFileSync(path.join(framesDir, 'frame' + String(i + 1).padStart(4, '0') + '.png'), img.toPNG());
+        // JPEG (quality 85): much faster disk writes + smaller tmp than PNG, same visible quality for ads
+        fs.writeFileSync(path.join(framesDir, 'frame' + String(i + 1).padStart(4, '0') + '.jpg'), img.toJPEG(85));
       } catch (e) { return { ok: false, error: 'capture failed: ' + e.message }; }
       try { onProg && onProg({ phase: 'frames', done: i + 1, total }); } catch {}
       const wait = stepMs - (Date.now() - t0);
@@ -193,8 +194,9 @@ async function exportVideo(opts) {
   }
   try { onProg && onProg({ phase: 'encode' }); } catch {}
   const ff = ffmpegExePath(o.userDataDir);
-  const args = ['-y', '-framerate', String(fps), '-i', path.join(framesDir, 'frame%04d.png'),
-    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', '-movflags', '+faststart', outPath];
+  // ULTRA FAST encode: ultrafast preset (3-5x faster than default), all CPU threads, CRF 23
+  const args = ['-y', '-framerate', String(fps), '-i', path.join(framesDir, 'frame%04d.jpg'),
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p', '-crf', '23', '-movflags', '+faststart', outPath];
   const code = await new Promise((resolve) => {
     const cp = spawn(ff, args, { windowsHide: true, timeout: 600000 });
     cp.on('error', () => resolve(-1));
