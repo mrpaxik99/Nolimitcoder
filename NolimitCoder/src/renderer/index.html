@@ -169,17 +169,6 @@
         <button class="mini-btn" id="videoDownload" style="display:none">⬇ Download MP4</button>
         <span class="video-progress" id="videoProgress"></span>
       </div>
-      <div class="player-bar" id="playerBar" style="display:none">
-        <div class="player-tabs">
-          <button class="player-tab active" id="tabLive">Live HTML</button>
-          <button class="player-tab" id="tabMp4">MP4 ▶</button>
-        </div>
-        <div class="player-controls" id="playerControls" style="display:none">
-          <button class="mini-btn" id="mp4Play">⏸ Pause</button>
-          <input type="range" id="mp4Seek" class="video-range" min="0" max="1000" value="0" title="Seek">
-          <span id="mp4Time" class="video-dur-label">0:00 / 0:00</span>
-        </div>
-      </div>
       <div class="preview-stage" id="previewStage">
         <iframe class="preview-frame" id="previewFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-modals" title="Preview"></iframe>
         <video id="mp4Player" style="display:none" playsinline preload="auto"></video>
@@ -188,6 +177,17 @@
           <div class="ve-pill"><i></i>READY</div>
           <div class="ve-title">Your commercial will play here<span class="blink">…</span></div>
           <div class="ve-sub">Describe the ad in the chat on the right — the AI will direct, animate and render it as a video-ready page.</div>
+        </div>
+      </div>
+      <div class="player-bar player-bottom" id="playerBar" style="display:none">
+        <div class="player-tabs">
+          <button class="player-tab active" id="tabLive">Live HTML</button>
+          <button class="player-tab" id="tabMp4">MP4 ▶</button>
+        </div>
+        <div class="player-controls" id="playerControls" style="display:none">
+          <button class="mini-btn" id="mp4Play">⏸ Pause</button>
+          <input type="range" id="mp4Seek" class="video-range" min="0" max="1000" value="0" title="Seek (arrows ←/→ = 5 s, space = play/pause)">
+          <span id="mp4Time" class="video-dur-label">0:00 / 0:00</span>
         </div>
       </div>
     </section>

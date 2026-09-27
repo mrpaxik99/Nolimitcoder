@@ -1962,6 +1962,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   el.sendBtn.addEventListener('click', () => sendMessage());
   el.stopBtn.addEventListener('click', () => stopEverything());
   document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); newConvo(); renderMessages(); } });
+  // MP4 player shortcuts: space = play/pause, arrows = seek 5 s (only when the video is visible, never while typing)
+  document.addEventListener('keydown', (e) => {
+    try {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const tag = (e.target && e.target.tagName) || '';
+      if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+      const v = $('#mp4Player');
+      if (!v || v.style.display === 'none' || !v.src) return;
+      if (e.code === 'Space') { e.preventDefault(); if (v.paused) v.play().catch(() => {}); else v.pause(); syncMp4Btn(); }
+      else if (e.code === 'ArrowRight' && v.duration) { v.currentTime = Math.min(v.duration, v.currentTime + 5); }
+      else if (e.code === 'ArrowLeft' && v.duration) { v.currentTime = Math.max(0, v.currentTime - 5); }
+    } catch {}
+  });
   $('#newChatBtn').addEventListener('click', () => { newConvo(); renderMessages(); });
   $('#backBtn').addEventListener('click', () => { showView('projects'); renderProjects(); });
   // term

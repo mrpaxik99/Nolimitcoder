@@ -449,18 +449,9 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
   transition:width .45s cubic-bezier(.22,1,.36,1),height .45s cubic-bezier(.22,1,.36,1),transform .45s cubic-bezier(.22,1,.36,1)}
 .preview-frame.res-pop{animation:res-bubble .55s ease}
 @keyframes res-bubble{0%{transform:scale(calc(var(--s,1)*0.9));filter:brightness(1.7)}55%{transform:scale(calc(var(--s,1)*1.025));filter:brightness(1.1)}100%{transform:scale(var(--s,1));filter:brightness(1)}}
-/* Video stage: UPLNE STEJNE pozadi jako nahore na webu (bg-glow + noise + dychani).
-   Jakmile se vygeneruje video (clean), pozadi z teto casti zmizi a zustane ciste HTML. */
-.preview-pane.video .preview-stage{background:#080808;overflow:hidden}
-.preview-pane.video .preview-stage::before{content:'';position:absolute;inset:0;pointer-events:none;background:
-  radial-gradient(1000px 520px at 50% -120px,#ffffff12,transparent 62%),
-  radial-gradient(1200px 700px at 88% 38%,#ffffff07,transparent 62%),
-  radial-gradient(1100px 800px at 8% 72%,#ffffff06,transparent 62%),
-  linear-gradient(180deg,#0d0d0e 0%,#080808 30%,#080808 70%,#060607 100%);
-  animation:bg-breathe 9s ease-in-out infinite}
-@keyframes bg-breathe{0%,100%{opacity:.88}50%{opacity:1}}
-.preview-pane.video .preview-stage::after{content:'';position:absolute;inset:0;pointer-events:none;opacity:.05;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E")}
+/* Video stage: pure clean black, nothing around the video */
+.preview-pane.video .preview-stage{background:#000;overflow:hidden}
+.preview-pane.video .preview-stage::before,.preview-pane.video .preview-stage::after{display:none;animation:none;content:none}
 .preview-pane.video .preview-stage.clean{background:#000}
 .preview-pane.video .preview-stage.clean::before,.preview-pane.video .preview-stage.clean::after{display:none;animation:none}
 .video-blocker{position:absolute;inset:0;z-index:5;cursor:default}
@@ -485,6 +476,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 /* Video player (recorded MP4): black stage, video fills it, custom controls below */
 .preview-pane.video #mp4Player{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:4}
 .player-bar{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border-weaker);background:#101014;flex-wrap:wrap}
+.player-bar.player-bottom{border-bottom:none;border-top:1px solid var(--border-weaker)}
 .player-tabs{display:flex;gap:6px}
 .player-tab{border:1px solid var(--border-weak);background:transparent;color:var(--text-weak);font-size:12px;padding:5px 12px;border-radius:999px;cursor:pointer;font-family:inherit}
 .player-tab.active{background:#ededed;color:#101010;border-color:#ededed;font-weight:700}
