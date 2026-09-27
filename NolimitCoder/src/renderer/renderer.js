@@ -1706,7 +1706,7 @@ async function startPreview(root, type) {
 /* Empty video project → the frame shows gray with thick dots (never white),
    plus the waiting text on top. As soon as index.html exists, the real ad shows. */
 const VIDEO_EMPTY_PAGE = 'data:text/html;charset=utf-8,' + encodeURIComponent(
-  '<body style="margin:0;background:#0a0a0d;background-image:radial-gradient(circle,rgba(255,255,255,0.13) 2.6px,transparent 3.2px);background-size:26px 26px">');
+  '<body style="margin:0;background:#26262c">');
 async function refreshVideoEmpty() {
   const empty = $('#videoEmpty'), frame = $('#previewFrame');
   if (!empty || !frame) return;
