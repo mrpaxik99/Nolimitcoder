@@ -265,7 +265,7 @@ if (!VIDEO_DURS.includes(videoDur)) {
   videoDur = VIDEO_DURS.reduce((a, b) => Math.abs(b - videoDur) < Math.abs(a - videoDur) ? b : a);
 }
 function videoDurIx() { const i = VIDEO_DURS.indexOf(videoDur); return i >= 0 ? i : 0; }
-function fmtDur(s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function fmtDur(s) { s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ' min ' + (s % 60) + ' sec'; }
 let lastVideoPath = null;
 let videoExporting = false;
 // Typ aktivního projektu z registru (universal | website | video)
@@ -1136,6 +1136,8 @@ async function runAgent(convo, intent) {
     const readSeen = new Set(); // cesty už přečtené v tomto úkolu (pozná rutinu)
     const readCounts = {}; // cesta -> kolikrát čtena
     let readRut = 0; // po sobě jdoucí kola, která nepřinesla nic nového (jen opakované čtení)
+    let staleRounds = 0; // po sobě jdoucí kola BEZ skutečného postupu (žádný zápis/spuštění)
+    let roundProductive = false; // tohle kolo něco skutečně udělalo
     let readNudged = false; // direktiva proti čtecí rutině (max 1x za úkol)
     const planTrail = []; // provedené kroky úkolu (1 volání = 1 krok), pro lištu průběhu
     const maxRounds = effMode === 'build' ? 20 : 8; // slabý model potřebuje na velký úkol víc kol
@@ -1252,6 +1254,7 @@ async function runAgent(convo, intent) {
         continue;
       }
       emptyRounds = 0; // produktivní kolo → počítadlo znovu
+      roundProductive = false;
       // proveď tool cally (každé provedení = 1 krok v liště)
       for (let ci = 0; ci < calls.length; ci++) {
         const c = calls[ci];
@@ -1354,11 +1357,22 @@ async function runAgent(convo, intent) {
           }
         } else argFail = { key: '', count: 0 };
         convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: String((res && res.output) || ''), ok: !!(res && res.ok), diff: res && res.diff, skipped: !!(res && res.cached) });
+        if (res && res.ok && ['write_file', 'append_file', 'edit_file', 'shell', 'env_install'].includes(c.name)) roundProductive = true;
         if (!emptyWhy) {
           // Stráží zachycené prázdné volání se v chatu neukazuje (nic se nestalo) — jen v logu a v kontextu modelu.
           renderToolCard(c.name, c.args, String((res && res.output) || ''), !!(res && res.ok), res && res.diff, !!(res && res.cached));
           planTrail[planTrail.length - 1].st = (res && res.ok) ? 'done' : 'bad';
           renderPlanBox(planTrail, planTrail.length - 1);
+        }
+      }
+      // Zaseknutá smyčka: kola jen čtou/povídají a nic se neděje → po 4. takovém kole STOP se shrnutím.
+      // Poctivé stavby to nezasáhne (každý zápis počítadlo nuluje). Už hotové se neopakuje.
+      if (roundProductive) staleRounds = 0; else staleRounds++;
+      if (staleRounds >= 4) {
+        const didWorkSoFar = runToolMsgs(convo).some(m => !m.skipped && m.ok && (['write_file', 'append_file', 'edit_file'].includes(m.tool) || m.tool === 'shell' || m.tool === 'env_install'));
+        if (didWorkSoFar || rounds >= 6) {
+          const s = buildRunSummary(runToolMsgs(convo), lastErr, lastUserText(convo));
+          if (s) { finalText = s; dlog('final', { kind: 'stale-break', rounds }); break; }
         }
       }
       // kontext pro další kolo: shrň výsledky nástrojů AKTUÁLNÍHO požadavku (ne staré úkoly).
@@ -1433,16 +1447,18 @@ async function runAgent(convo, intent) {
         } catch {}
       }
     }
-    // Práce je hotová, ale model píše v přítomném čase ("Opravuji…"), jako by teprve začínal.
-    // Takový text se nahradí fakty v minulém čase (co se zapsalo/spustilo).
+    // Po práci VŽDY následuje výsledek: když text nezní hotově, shrnutí se připíše (slib se nahradí fakty).
     if (finalText && !stopRequested) {
       const acts = runToolMsgs(convo).filter(m => !m.skipped && (
         ['write_file', 'append_file', 'edit_file'].includes(m.tool) ||
         ((m.tool === 'shell' || m.tool === 'env_install') && m.ok)
       ));
-      if (acts.length && looksPromise(finalText) && !looksDone(finalText)) {
+      if (acts.length && !looksDone(finalText)) {
         const s = buildRunSummary(runToolMsgs(convo), lastErr, lastUserText(convo));
-        if (s) { dlog('final', { kind: 'past-rewrite' }); finalText = s; }
+        if (s) {
+          if (looksPromise(finalText)) { dlog('final', { kind: 'past-rewrite' }); finalText = s; }
+          else { dlog('final', { kind: 'append-summary' }); finalText = finalText + '\n\n' + s; }
+        }
       }
     }
     finalText = sanitizeResponse(finalText || '');
@@ -1680,6 +1696,8 @@ function setVideoMode(on) {
   const pane = $('#previewPane'), bar = $('#videoBar'), blocker = $('#videoBlocker');
   if (pane) pane.classList.toggle('video', !!on);
   try { $('#viewChat').classList.toggle('video', !!on); } catch {}
+  const pb = $('#playerBar'); if (pb) pb.style.display = on ? '' : 'none';
+  if (on) { try { showLiveTab(); } catch {} }
   if (bar) bar.style.display = on ? '' : 'none';
   if (blocker) blocker.style.display = on ? '' : 'none';
   if (on) {
@@ -1812,12 +1830,46 @@ async function ensureVideoHtml(convo) {
     return false;
   } catch { return false; }
 }
+/* MP4 player: recorded video with play/pause + seek bar under it (Live HTML | MP4 tabs). */
+function mp4Url() {
+  try {
+    const base = $('#previewUrl') ? $('#previewUrl').textContent : '';
+    if (!base || !base.startsWith('http') || !lastVideoPath) return '';
+    const file = String(lastVideoPath).split(/[\\/]/).pop();
+    return base.replace(/\/$/, '') + '/' + encodeURIComponent(file);
+  } catch { return ''; }
+}
+function showMp4Tab() {
+  const v = $('#mp4Player'); if (!v) return false;
+  const url = mp4Url(); if (!url) return false;
+  const f = $('#previewFrame'); if (f) f.style.display = 'none';
+  const bl = $('#videoBlocker'); if (bl) bl.style.display = 'none';
+  const em = $('#videoEmpty'); if (em) em.style.display = 'none';
+  v.style.display = ''; v.src = url;
+  const tL = $('#tabLive'), tM = $('#tabMp4');
+  if (tL) tL.classList.remove('active'); if (tM) tM.classList.add('active');
+  const pc = $('#playerControls'); if (pc) pc.style.display = '';
+  try { v.play().catch(() => {}); syncMp4Btn(); } catch {}
+  return true;
+}
+function showLiveTab() {
+  const v = $('#mp4Player');
+  if (v) { try { v.pause(); } catch {} try { v.removeAttribute('src'); } catch {} v.style.display = 'none'; }
+  const f = $('#previewFrame'); if (f) f.style.display = '';
+  const tL = $('#tabLive'), tM = $('#tabMp4');
+  if (tL) tL.classList.add('active'); if (tM) tM.classList.remove('active');
+  const pc = $('#playerControls'); if (pc) pc.style.display = 'none';
+  try { refreshVideoEmpty(); } catch {}
+}
+function syncMp4Btn() { const b = $('#mp4Play'), v = $('#mp4Player'); if (b && v) b.textContent = v.paused ? '▶ Play' : '⏸ Pause'; }
+function fmtClock(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function setVideoProgress(t) { const p = $('#videoProgress'); if (p) p.textContent = t || ''; }
 async function videoExportRun() {
   if (videoExporting) return;
   if (!prefs.activeProject) { setVideoProgress('No project selected'); return; }
   const { w, h } = videoResWH();
   videoExporting = true;
+  try { showLiveTab(); } catch {} // nahrává se nové — zpět na živé HTML
   const btn = $('#videoExport'); if (btn) btn.disabled = true;
   const dl = $('#videoDownload'); if (dl) dl.style.display = 'none';
   setVideoProgress('Preparing…');
@@ -1825,8 +1877,9 @@ async function videoExportRun() {
     const r = await window.api.videoExport({ root: prefs.activeProject, width: w, height: h, durationSec: videoDur, fps: 30 });
     if (r && r.ok) {
       lastVideoPath = r.path;
-      setVideoProgress('Done: ' + r.file + ' (' + r.mb + ')');
+      setVideoProgress('Done: ' + r.file + ' (' + r.mb + ', ' + fmtDur(videoDur) + ')');
       if (dl) dl.style.display = '';
+      try { showMp4Tab(); } catch {} // hotové video se rovnou ukáže v přehrávači
       playDone();
     } else {
       const errMsg = String((r && r.error) || 'unknown error');
@@ -1923,12 +1976,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     vres.addEventListener('change', () => {
       videoRes = vres.value;
       try { localStorage.setItem('nlc_videores', videoRes); } catch {}
-      // ultra-smooth bubble pop on resolution switch
+      // ultra-smooth bubble pop on resolution switch + celé HTML se přenačte v nové velikosti
       try {
         const fr = $('#previewFrame');
         if (fr) { fr.classList.remove('res-pop'); void fr.offsetWidth; fr.classList.add('res-pop'); }
       } catch {}
       fitVideoFrame();
+      try { reloadPreviewFrame(); } catch {}
     });
   }
   const vdur = $('#videoDurRange'), vdlab = $('#videoDurLabel');
@@ -1952,14 +2006,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (vexp) vexp.addEventListener('click', videoExportRun);
   const vdl = $('#videoDownload');
   if (vdl) vdl.addEventListener('click', videoDownloadRun);
-  try {
-    window.api.onVideoProgress((p) => {
-      if (!p) return;
-      if (p.phase === 'frames') setVideoProgress('Recording ' + p.done + '/' + p.total + '…');
-      else if (p.phase === 'encode') setVideoProgress('Encoding MP4…');
-      else if (p.phase === 'ffmpeg') setVideoProgress('Preparing converter (' + (p.percent >= 0 ? p.percent + '%' : 'downloading') + ')…');
-      else if (p.msg) setVideoProgress(p.msg);
+  // player tabs + controls (play/pause + seek bar + time)
+  const tL = $('#tabLive'); if (tL) tL.addEventListener('click', showLiveTab);
+  const tM = $('#tabMp4'); if (tM) tM.addEventListener('click', () => { if (!showMp4Tab()) setVideoProgress('No MP4 yet — generate first'); });
+  const mp = $('#mp4Play');
+  if (mp) mp.addEventListener('click', () => { const v = $('#mp4Player'); if (!v) return; try { if (v.paused) v.play().catch(() => {}); else v.pause(); } catch {} syncMp4Btn(); });
+  const ms = $('#mp4Seek');
+  if (ms) {
+    const fillSeek = () => { try { ms.style.setProperty('--fill', (parseFloat(ms.value) / 10) + '%'); } catch {} };
+    ms.addEventListener('input', () => { const v = $('#mp4Player'); if (v && v.duration) { try { v.currentTime = (parseFloat(ms.value) / 1000) * v.duration; } catch {} } fillSeek(); });
+    fillSeek();
+  }
+  const mv = $('#mp4Player');
+  if (mv) {
+    mv.addEventListener('timeupdate', () => {
+      const t = $('#mp4Time');
+      if (t) t.textContent = fmtClock(mv.currentTime) + ' / ' + fmtClock(mv.duration);
+      const s = $('#mp4Seek');
+      if (s && mv.duration) { s.value = String(Math.round(mv.currentTime / mv.duration * 1000)); try { s.style.setProperty('--fill', (mv.currentTime / mv.duration * 100) + '%'); } catch {} }
     });
+    mv.addEventListener('loadedmetadata', () => { const t = $('#mp4Time'); if (t) t.textContent = '0:00 / ' + fmtClock(mv.duration); });
+    mv.addEventListener('play', syncMp4Btn); mv.addEventListener('pause', syncMp4Btn); mv.addEventListener('ended', syncMp4Btn);
+  }
+  try {
+    // záměrně ticho: žádná čára ani sekundy průběhu, jen výsledek (Done/chybu píše videoExportRun sám)
+    window.api.onVideoProgress(() => {});
   } catch {}
   window.addEventListener('resize', () => { try { fitVideoFrame(); } catch {} });
   $('#previewReload').addEventListener('click', () => { try { $('#previewFrame').contentWindow.location.reload(); } catch {} try { refreshVideoEmpty(); } catch {} });
