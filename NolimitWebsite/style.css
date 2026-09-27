@@ -268,6 +268,7 @@ body:hover .cursor-glow{opacity:1}
 .price small{font-size:14px;font-weight:400;color:var(--text-weaker)}
 .price-card ul{list-style:none;margin:0 0 24px;padding:0;display:grid;gap:10px;font-size:13.5px;color:var(--text)}
 .price-card .btn{width:100%}
+.price-card .trial-warn{color:#f0a35e;border:1px solid #8a5a1f66;background:#8a5a1f14;border-radius:8px;padding:8px 10px}
 .price-card.featured{border-color:#ffffff55;background:linear-gradient(180deg,#1d1d1d,#121212);
   box-shadow:0 24px 70px #00000088,0 0 60px #ffffff0d}
 .price-badge{position:absolute;top:-13px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;
