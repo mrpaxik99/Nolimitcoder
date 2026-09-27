@@ -452,18 +452,23 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
   transition:width .45s cubic-bezier(.22,1,.36,1),height .45s cubic-bezier(.22,1,.36,1),transform .45s cubic-bezier(.22,1,.36,1)}
 .preview-frame.res-pop{animation:res-bubble .55s ease}
 @keyframes res-bubble{0%{transform:scale(calc(var(--s,1)*0.9));filter:brightness(1.7)}55%{transform:scale(calc(var(--s,1)*1.025));filter:brightness(1.1)}100%{transform:scale(var(--s,1));filter:brightness(1)}}
-/* Video stage: pure black, no checkered pattern — only the clean video is visible */
-.preview-pane.video .preview-stage{background:#000;overflow:hidden}
-.preview-pane.video .preview-stage::before{content:'';position:absolute;inset:-40px;pointer-events:none;background:
-  radial-gradient(620px 320px at 50% -40px,#ffffff10,transparent 62%);animation:ve-drift 12s ease-in-out infinite alternate}
-.preview-pane.video .preview-stage::after{display:none}
+/* Video stage: UPLNE STEJNE pozadi jako nahore na webu (bg-glow + noise + dychani).
+   Jakmile se vygeneruje video (clean), pozadi z teto casti zmizi a zustane ciste HTML. */
+.preview-pane.video .preview-stage{background:#080808;overflow:hidden}
+.preview-pane.video .preview-stage::before{content:'';position:absolute;inset:0;pointer-events:none;background:
+  radial-gradient(1000px 520px at 50% -120px,#ffffff12,transparent 62%),
+  radial-gradient(1200px 700px at 88% 38%,#ffffff07,transparent 62%),
+  radial-gradient(1100px 800px at 8% 72%,#ffffff06,transparent 62%),
+  linear-gradient(180deg,#0d0d0e 0%,#080808 30%,#080808 70%,#060607 100%);
+  animation:bg-breathe 9s ease-in-out infinite}
+@keyframes bg-breathe{0%,100%{opacity:.88}50%{opacity:1}}
+.preview-pane.video .preview-stage::after{content:'';position:absolute;inset:0;pointer-events:none;opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E")}
 .preview-pane.video .preview-stage.clean{background:#000}
-.preview-pane.video .preview-stage.clean::before,.preview-pane.video .preview-stage.clean::after{display:none}
-@keyframes ve-drift{from{transform:translateY(-16px)}to{transform:translateY(16px)}}
+.preview-pane.video .preview-stage.clean::before,.preview-pane.video .preview-stage.clean::after{display:none;animation:none}
 .video-blocker{position:absolute;inset:0;z-index:5;cursor:default}
 /* Empty video project: transparent overlay with waiting text (backdrop comes from the stage) */
 .video-empty{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;background:transparent;pointer-events:none}
-@keyframes ve-drift{from{transform:translateY(-16px)}to{transform:translateY(16px)}}
 .ve-pill{position:relative;font-size:11px;font-weight:700;letter-spacing:.14em;color:#30d158;border:1px solid #30d15844;background:#30d15811;border-radius:999px;padding:5px 14px}
 .ve-pill i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#30d158;margin-right:8px;animation:think-blink 1.6s infinite}
 .ve-title{position:relative;font-size:24px;font-weight:700;color:#fff;letter-spacing:-.01em}
