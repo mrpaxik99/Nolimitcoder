@@ -62,12 +62,10 @@ typeLoop('demoInput2', [
   els.forEach(e => io.observe(e));
 })();
 
-// Scroll progress + nav shadow + background parallax (background scrolls with the page)
+// Scroll progress + nav shadow
 (function () {
   const bar = document.getElementById('scrollProgress');
   const nav = document.getElementById('nav');
-  const orbs = document.getElementById('bgOrbs');
-  const gridBg = document.getElementById('bgGrid');
   let ticking = false;
   function onScroll() {
     const y = window.scrollY || 0;
@@ -75,9 +73,6 @@ typeLoop('demoInput2', [
     const p = h > 0 ? (y / h) * 100 : 0;
     if (bar) bar.style.width = p + '%';
     if (nav) nav.classList.toggle('scrolled', y > 12);
-    // parallax: each background layer moves at a different speed → the background feels "alive" on scroll
-    if (orbs) orbs.style.transform = 'translateY(' + (y * 0.12) + 'px)';
-    if (gridBg) gridBg.style.transform = 'translateY(' + (y * 0.05) + 'px)';
     ticking = false;
   }
   window.addEventListener('scroll', () => {
@@ -97,43 +92,6 @@ typeLoop('demoInput2', [
     y += (ty - y) * 0.12;
     glow.style.transform = 'translate(' + (x - 260) + 'px,' + (y - 260) + 'px)';
     requestAnimationFrame(loop);
-  })();
-})();
-
-// Subtle stars / dust in the background (cheap canvas particles, scrolling with the page)
-(function () {
-  const cv = document.getElementById('stars');
-  if (!cv) return;
-  const ctx = cv.getContext('2d');
-  let W, H, pts = [];
-  function resize() {
-    W = cv.width = cv.offsetWidth || window.innerWidth;
-    H = cv.height = document.documentElement.scrollHeight;
-    pts = Array.from({ length: Math.min(110, Math.floor(W / 12)) }, () => ({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      r: Math.random() * 1.6 + 0.4,
-      s: Math.random() * 0.35 + 0.08,
-      o: Math.random() * 0.5 + 0.15,
-      ph: Math.random() * Math.PI * 2
-    }));
-  }
-  resize();
-  window.addEventListener('resize', resize);
-  let t = 0;
-  (function draw() {
-    t += 0.02;
-    ctx.clearRect(0, 0, W, H);
-    for (const p of pts) {
-      p.y -= p.s;
-      if (p.y < -4) { p.y = H + 4; p.x = Math.random() * W; }
-      const tw = p.o * (0.6 + 0.4 * Math.sin(t + p.ph));
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,' + tw.toFixed(3) + ')';
-      ctx.fill();
-    }
-    requestAnimationFrame(draw);
   })();
 })();
 

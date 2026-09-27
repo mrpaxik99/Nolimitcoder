@@ -215,6 +215,31 @@ async function refreshZenLive() {
   } catch { setFooter('Offline režim'); }
 }
 
+/* ---------- AI commercial video: stav náhledu + exportu ---------- */
+const VIDEO_RESOLUTIONS = {
+  '1920x1080': { w: 1920, h: 1080, label: 'Full HD' },
+  '1280x720': { w: 1280, h: 720, label: 'HD' },
+  '1080x1080': { w: 1080, h: 1080, label: 'Square 1:1' },
+  '1080x1920': { w: 1080, h: 1920, label: 'Vertical 9:16' }
+};
+let videoRes = localStorage.getItem('nlc_videores') || '1920x1080';
+if (!VIDEO_RESOLUTIONS[videoRes]) videoRes = '1920x1080';
+let videoDur = parseInt(localStorage.getItem('nlc_videodur') || '10', 10) || 10;
+let lastVideoPath = null;
+let videoExporting = false;
+// Typ aktivního projektu z registru (universal | website | video)
+function activeProjectType() {
+  try {
+    const hit = (projectRegistry || []).find(p => p && p.path === prefs.activeProject);
+    if (hit && hit.type) return hit.type;
+  } catch {}
+  return 'universal';
+}
+function videoResWH() { return VIDEO_RESOLUTIONS[videoRes] || VIDEO_RESOLUTIONS['1920x1080']; }
+/* System prompt pro reklamní videa: jedno responzivní index.html, celé viewport,
+   animované, bez potřeby klikání (v náhledu ani klikat nejde — chová se jako video). */
+const VIDEO_ADD = ' VIDEO AD PROJECT: output a single self-contained advertising commercial as index.html in the project root (inline CSS+JS, no build). The ad fills the whole viewport at the target resolution, animated from page load (CSS/JS animation, autoplay, loop-friendly), readable typography, strong contrast. No clicks needed — the page behaves like a video (nothing must require interaction). Keep everything responsive so it looks right at any of 1920x1080, 1280x720, 1080x1080, 1080x1920.';
+
 /* ---------- projekty ---------- */
 function renderProjects() {
   const grid = $('#projectCards');
@@ -223,7 +248,7 @@ function renderProjects() {
     '<div class="pv-card" data-i="' + i + '"><span class="folder-ico">📁</span>'
     + '<div class="pv-card-info"><div class="pv-card-name">' + escapeHtml(p.name) + '</div>'
     + '<div class="pv-card-path">' + escapeHtml(p.path) + '</div>'
-    + '<span class="pv-type">' + escapeHtml(p.type === 'website' ? 'Website' : 'Universal') + '</span></div>'
+    + '<span class="pv-type">' + escapeHtml(p.type === 'website' ? 'Website' : (p.type === 'video' ? '🎬 Video' : 'Universal')) + '</span></div>'
     + '<div class="pv-card-act"><button class="row-btn" data-act="rename" title="Přejmenovat">✎</button>'
     + '<button class="row-btn danger" data-act="del" title="Odebrat">✕</button></div></div>'
   ).join('');
@@ -251,8 +276,13 @@ async function openProject(p) {
   let c = conversations.filter(x => x.projectPath === p.path).slice(-1)[0];
   if (!c) c = newConvo(true);
   else { activeConvoId = c.id; localStorage.setItem('nlc_active', c.id); renderMessages(); renderChatList(); }
-  if (p.type === 'website') startPreview(p.path); else hidePreview();
-  setFooter('Připraven · ' + p.name);
+  // Website + video: chat vpravo, náhled vlevo. Video navíc s rozlišením a exportem do MP4.
+  const flip = (p.type === 'website' || p.type === 'video');
+  try { $('#viewChat').classList.toggle('flip', flip); } catch {}
+  if (p.type === 'website' || p.type === 'video') startPreview(p.path, p.type);
+  else hidePreview();
+  setVideoMode(p.type === 'video');
+  setFooter('Ready · ' + p.name);
 }
 
 /* ---------- konverzace ---------- */
@@ -1028,7 +1058,12 @@ async function runAgent(convo, intent) {
         if (r && r.ok) projCtx = '\n\n[Aktivní projekt: ' + prefs.activeProject + '\nSoubory (max 300):\n' + (r.tree || []).slice(0, 120).map(t => (t.dir ? t.path : t.path)).join('\n') + ']';
       } catch {}
     }
-    const sysBase = effMode === 'build' ? BUILD_SYS : (isQuestion ? CHAT_SYS : PLAN_PROMPT);
+    const sysBase = (effMode === 'build' ? BUILD_SYS : (isQuestion ? CHAT_SYS : PLAN_PROMPT))
+      + ((effMode === 'build' && activeProjectType() === 'video') ? VIDEO_ADD : '');
+    if (activeProjectType() === 'video') {
+      const vr = videoResWH();
+      projCtx += '\n[Video project: target resolution ' + vr.w + 'x' + vr.h + ' (' + vr.label + '), single index.html ad.]';
+    }
     let rounds = 0;
     let finalText = '';
     let planBlocked = 0; // kolikrát Plan mód odmítl zapisující nástroj (pak už model jen dopíše plán textem)
@@ -1560,8 +1595,35 @@ async function termExec(cmd) {
   out.scrollTop = out.scrollHeight;
 }
 
-/* ---------- preview ---------- */
-async function startPreview(root) {
+/* ---------- preview (+ video režim) ---------- */
+function setVideoMode(on) {
+  const pane = $('#previewPane'), bar = $('#videoBar'), blocker = $('#videoBlocker');
+  if (pane) pane.classList.toggle('video', !!on);
+  if (bar) bar.style.display = on ? '' : 'none';
+  if (blocker) blocker.style.display = on ? '' : 'none';
+  if (on) {
+    const rs = $('#videoRes'); if (rs) rs.value = videoRes;
+    const du = $('#videoDur'); if (du) du.value = String(videoDur);
+    setVideoProgress('');
+    const dl = $('#videoDownload'); if (dl) dl.style.display = 'none';
+    lastVideoPath = null;
+  }
+}
+function isVideoMode() { try { return $('#previewPane').classList.contains('video'); } catch { return false; } }
+// Rámeček videa: přesné pixely rozlišení, zmenšené aby se vešlo (export jede vždy v plném rozlišení)
+function fitVideoFrame() {
+  if (!isVideoMode()) return;
+  const frame = $('#previewFrame'), stage = $('#previewStage');
+  if (!frame || !stage) return;
+  const { w, h } = videoResWH();
+  const r = stage.getBoundingClientRect();
+  const s = Math.min(1, (r.width - 24) / w, (r.height - 24) / h);
+  frame.style.width = w + 'px';
+  frame.style.height = h + 'px';
+  frame.style.transform = 'scale(' + s + ')';
+  frame.style.flex = 'none';
+}
+async function startPreview(root, type) {
   try {
     const r = await window.api.previewStart(root);
     if (r && r.ok) {
@@ -1570,8 +1632,45 @@ async function startPreview(root) {
       $('#previewToggle').textContent = 'Preview ✓';
       $('#previewUrl').textContent = r.url;
       $('#previewFrame').src = r.url;
+      if (type === 'video' || isVideoMode()) {
+        setVideoMode(true);
+        setTimeout(fitVideoFrame, 60);
+      } else {
+        const f = $('#previewFrame');
+        if (f) { f.style.width = ''; f.style.height = ''; f.style.transform = ''; f.style.flex = ''; }
+      }
     }
   } catch {}
+}
+function setVideoProgress(t) { const p = $('#videoProgress'); if (p) p.textContent = t || ''; }
+async function videoExportRun() {
+  if (videoExporting) return;
+  if (!prefs.activeProject) { setVideoProgress('No project selected'); return; }
+  const { w, h } = videoResWH();
+  videoExporting = true;
+  const btn = $('#videoExport'); if (btn) btn.disabled = true;
+  const dl = $('#videoDownload'); if (dl) dl.style.display = 'none';
+  setVideoProgress('Preparing…');
+  try {
+    const r = await window.api.videoExport({ root: prefs.activeProject, width: w, height: h, durationSec: videoDur, fps: 30 });
+    if (r && r.ok) {
+      lastVideoPath = r.path;
+      setVideoProgress('Done: ' + r.file + ' (' + r.mb + ')');
+      if (dl) dl.style.display = '';
+      playDone();
+    } else {
+      setVideoProgress('Export failed: ' + ((r && r.error) || 'unknown error').slice(0, 160));
+    }
+  } catch (e) {
+    setVideoProgress('Export failed: ' + String((e && e.message) || e).slice(0, 160));
+  }
+  videoExporting = false;
+  if (btn) btn.disabled = false;
+}
+async function videoDownloadRun() {
+  if (!lastVideoPath) return;
+  try { await window.api.videoReveal(lastVideoPath); }
+  catch { try { window.api.openPath(lastVideoPath); } catch {} }
 }
 function hidePreview() {
   $('#previewPane').style.display = 'none';
@@ -1635,6 +1734,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (show && prefs.activeProject) startPreview(prefs.activeProject);
   });
   $('#previewHide').addEventListener('click', () => { $('#previewPane').style.display = 'none'; });
+  // video: resolution + length + export to MP4 + download
+  const vres = $('#videoRes');
+  if (vres) {
+    vres.value = videoRes;
+    vres.addEventListener('change', () => {
+      videoRes = vres.value;
+      try { localStorage.setItem('nlc_videores', videoRes); } catch {}
+      fitVideoFrame();
+    });
+  }
+  const vdur = $('#videoDur');
+  if (vdur) {
+    vdur.value = String(videoDur);
+    vdur.addEventListener('change', () => {
+      videoDur = parseInt(vdur.value, 10) || 10;
+      try { localStorage.setItem('nlc_videodur', String(videoDur)); } catch {}
+    });
+  }
+  const vexp = $('#videoExport');
+  if (vexp) vexp.addEventListener('click', videoExportRun);
+  const vdl = $('#videoDownload');
+  if (vdl) vdl.addEventListener('click', videoDownloadRun);
+  try {
+    window.api.onVideoProgress((p) => {
+      if (!p) return;
+      if (p.phase === 'frames') setVideoProgress('Recording ' + p.done + '/' + p.total + '…');
+      else if (p.phase === 'encode') setVideoProgress('Encoding MP4…');
+      else if (p.phase === 'ffmpeg') setVideoProgress('Preparing converter (' + (p.percent >= 0 ? p.percent + '%' : 'downloading') + ')…');
+      else if (p.msg) setVideoProgress(p.msg);
+    });
+  } catch {}
+  window.addEventListener('resize', () => { try { fitVideoFrame(); } catch {} });
   $('#previewReload').addEventListener('click', () => { try { $('#previewFrame').contentWindow.location.reload(); } catch {} });
   $('#previewOpen').addEventListener('click', () => { const u = $('#previewUrl').textContent; if (u && u.startsWith('http')) window.api.openExternal(u); });
   // create project modal
@@ -1658,11 +1789,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     const name = $('#pmName').value.trim() || baseName(path) || 'Projekt';
     if (!path) { $('#pmPicked').textContent = 'Nejdřív vyber složku…'; return; }
     const type = (document.querySelector('input[name="ptype"]:checked') || {}).value || 'universal';
-    const frame = (document.querySelector('input[name="pframe"]:checked') || {}).value || 'html';
+    const frame = type === 'video' ? 'html' : ((document.querySelector('input[name="pframe"]:checked') || {}).value || 'html');
     projectRegistry.push({ name, path, type, framework: frame });
     saveRegistry(); $('#projectModal').classList.remove('open'); renderProjects();
     openProject({ name, path, type, framework: frame });
-    if (type === 'website') {
+    if (type === 'video') {
+      try {
+        const chk = await window.api.toolsExec({ tool: 'list_dir', args: { path: '.' }, root: path, fullAccess: true });
+        if (!chk || !chk.ok || chk.output === '(prázdná složka)' || chk.output === '(empty folder)') {
+          const vr = videoResWH();
+          el.promptInput.value = 'Create an advertising commercial (' + vr.w + 'x' + vr.h + ', ' + vr.label + ') as a single index.html in the project root: full-viewport animated ad, autoplay, no clicks needed (behaves like a video). Then verify with file_info.';
+          sendMessage();
+        }
+      } catch {}
+    } else if (type === 'website') {
       try {
         const chk = await window.api.toolsExec({ tool: 'list_dir', args: { path: '.' }, root: path, fullAccess: true });
         if (!chk || !chk.ok || chk.output === '(prázdná složka)') {
