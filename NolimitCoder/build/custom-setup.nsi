@@ -132,8 +132,14 @@ Function EnsureDark
     Return
   ${EndIf}
   !insertmacro DarkSetup "${APP_NAME} Setup"
+  ; verify: read the brush back + refresh the frame so DWM/titlebar take effect
+  System::Call 'user32::FindWindow(t "#32770", t "${APP_NAME} Setup") i .r0'
+  StrCpy $1 $0
+  System::Call 'user32::GetClassLongA(i $1, i -10) i .r0'
+  StrCpy $2 $0
+  System::Call 'user32::SetWindowPos(i $1, i 0, i 0, i 0, i 0, i 0, i 0x27)'
   FileOpen $9 "$TEMP\nldbg.txt" w
-  FileWrite $9 "DarkBrush=$DarkBrush OldBgBrush=$OldBgBrush$\r$\n"
+  FileWrite $9 "hwnd=$1 readback=$2 DarkBrush=$DarkBrush OldBgBrush=$OldBgBrush$\r$\n"
   FileClose $9
 FunctionEnd
 Function un.EnsureDark
