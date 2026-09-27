@@ -159,7 +159,7 @@ FunctionEnd
   ${NSD_CreateLabel} 12 ${Y} 280 26 "${TEXT}"
   Pop $2
   SendMessage $2 ${WM_SETFONT} $TitleFont 1
-  SetCtlColors $2 ${C_TEXT} transparent
+  SetCtlColors $2 ${C_TEXT} ${C_BG}
   Pop $3
   Pop $2
   Pop $1
@@ -247,13 +247,13 @@ Function WelcomeShow
   !insertmacro PageTitle "NolimitCoder V4" 14
   ${NSD_CreateLabel} 76 44 214 12 "Version ${APP_VERSION}  ·  by ${APP_PUBLISHER}"
   Pop $0
-  SetCtlColors $0 ${C_GREEN} transparent
+  SetCtlColors $0 ${C_GREEN} ${C_BG}
   ${NSD_CreateLabel} 12 76 280 30 "AI chat with NolimitCoder models.$\r$\nFast setup  ·  No API key  ·  Windows 64-bit"
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   ${NSD_CreateLabel} 12 122 280 12 "Click Next to install."
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   nsDialogs::Show
 FunctionEnd
 
@@ -268,7 +268,7 @@ Function LicenseShow
   !insertmacro PageTitle "License Agreement" 12
   ${NSD_CreateLabel} 12 42 280 12 "Please review the terms before installing."
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   nsDialogs::CreateControl "EDIT" "${DEFAULT_STYLES}|${WS_VSCROLL}|${ES_MULTILINE}|${ES_READONLY}|${ES_AUTOVSCROLL}" "0" 12 58 276 92 ""
   Pop $0
   FileOpen $1 "${LICENSE_FILE}" r
@@ -296,7 +296,7 @@ Function DirShow
   !insertmacro PageTitle "Choose Install Location" 12
   ${NSD_CreateLabel} 12 44 280 12 "Where should ${APP_NAME} be installed?"
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   ${NSD_CreateDirRequest} 12 62 200 13 "$INSTDIR"
   Pop $TxtDir
   ${NSD_CreateBrowseButton} 218 61 62 15 "Browse…"
@@ -304,7 +304,7 @@ Function DirShow
   ${NSD_OnClick} $0 OnBrowseDir
   ${NSD_CreateLabel} 12 84 280 26 "About 300 MB of free space is required.$\r$\nYour projects and settings stay untouched."
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   nsDialogs::Show
 FunctionEnd
 Function OnBrowseDir
@@ -329,12 +329,12 @@ Function InstallShow
   !insertmacro PageTitle "Installing…" 12
   ${NSD_CreateLabel} 12 48 280 12 "Copying files…"
   Pop $LblStatus
-  SetCtlColors $LblStatus ${C_GREEN} transparent
+  SetCtlColors $LblStatus ${C_GREEN} ${C_BG}
   ${NSD_CreateProgressBar} 12 66 276 14 ""
   Pop $BarProgress
   ${NSD_CreateLabel} 12 88 280 24 "${APP_NAME} ${APP_VERSION}$\r$\nPlease wait, this takes a moment."
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   !insertmacro DisableBackNext
   ${NSD_CreateTimer} InstallTimer 250
   nsDialogs::Show
@@ -418,10 +418,10 @@ Function FinishShow
   !insertmacro PageTitle "Installation complete" 12
   ${NSD_CreateLabel} 12 44 280 24 "${APP_NAME} is ready in:$\r$\n$INSTDIR"
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   ${NSD_CreateCheckBox} 12 76 280 14 "Launch NolimitCoder now"
   Pop $ChkLaunch
-  SetCtlColors $ChkLaunch ${C_TEXT} transparent
+  SetCtlColors $ChkLaunch ${C_TEXT} ${C_BG}
   SendMessage $ChkLaunch ${BM_SETCHECK} 1 0
   nsDialogs::Show
 FunctionEnd
@@ -457,7 +457,7 @@ Function un.ConfirmShow
   !insertmacro PageTitle "Uninstall ${APP_NAME}" 12
   ${NSD_CreateLabel} 12 44 280 36 "This removes the application, shortcuts and registry entries.$\r$\nYour projects and settings are kept."
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   nsDialogs::Show
 FunctionEnd
 
@@ -472,7 +472,7 @@ Function un.WorkShow
   !insertmacro PageTitle "Uninstalling…" 12
   ${NSD_CreateLabel} 12 48 280 12 "Removing files…"
   Pop $UnLblStatus
-  SetCtlColors $UnLblStatus ${C_GREEN} transparent
+  SetCtlColors $UnLblStatus ${C_GREEN} ${C_BG}
   ${NSD_CreateProgressBar} 12 66 276 14 ""
   Pop $UnBarProgress
   !insertmacro DisableBackNext
@@ -514,7 +514,7 @@ Function un.FinishShow
   !insertmacro PageTitle "Uninstall complete" 12
   ${NSD_CreateLabel} 12 48 280 24 "${APP_NAME} was removed from your PC.$\r$\nYour projects and settings were kept."
   Pop $0
-  SetCtlColors $0 ${C_GRAY} transparent
+  SetCtlColors $0 ${C_GRAY} ${C_BG}
   nsDialogs::Show
 FunctionEnd
 
