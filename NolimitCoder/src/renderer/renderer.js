@@ -1667,8 +1667,10 @@ async function startPreview(root, type) {
     }
   } catch {}
 }
-/* Empty video project → animated "waiting" background (never any code/404).
-   As soon as index.html exists, the real ad shows instead. */
+/* Empty video project → the frame shows gray with thick dots (never white),
+   plus the waiting text on top. As soon as index.html exists, the real ad shows. */
+const VIDEO_EMPTY_PAGE = 'data:text/html;charset=utf-8,' + encodeURIComponent(
+  '<body style="margin:0;background:#2e2e34;background-image:radial-gradient(circle,rgba(255,255,255,0.19) 2.6px,transparent 3.2px);background-size:26px 26px">');
 async function refreshVideoEmpty() {
   const empty = $('#videoEmpty'), frame = $('#previewFrame');
   if (!empty || !frame) return;
@@ -1684,14 +1686,15 @@ async function refreshVideoEmpty() {
   if (hasIndex) {
     empty.style.display = 'none';
     const src = String(frame.src || '');
-    if (!src || src === 'about:blank') {
+    if (!src || src === 'about:blank' || src.startsWith('data:')) {
       const url = $('#previewUrl') ? $('#previewUrl').textContent : '';
       if (url && url.startsWith('http')) frame.src = url;
     }
     fitVideoFrame();
   } else {
-    try { frame.src = 'about:blank'; } catch {}
+    try { if (String(frame.src || '') !== VIDEO_EMPTY_PAGE) frame.src = VIDEO_EMPTY_PAGE; } catch {}
     empty.style.display = '';
+    fitVideoFrame();
   }
 }
 function setVideoProgress(t) { const p = $('#videoProgress'); if (p) p.textContent = t || ''; }

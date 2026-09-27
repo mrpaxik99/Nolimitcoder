@@ -451,9 +451,18 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
   transition:width .45s cubic-bezier(.22,1,.36,1),height .45s cubic-bezier(.22,1,.36,1),transform .45s cubic-bezier(.22,1,.36,1)}
 .preview-frame.res-pop{animation:res-bubble .55s ease}
 @keyframes res-bubble{0%{transform:scale(calc(var(--s,1)*0.9));filter:brightness(1.7)}55%{transform:scale(calc(var(--s,1)*1.025));filter:brightness(1.1)}100%{transform:scale(var(--s,1));filter:brightness(1)}}
-/* Video stage: steady gray with thick dots only, never scrolls */
-.preview-pane.video .preview-stage{background-color:#2e2e34;background-image:radial-gradient(circle,#ffffff30 2.6px,transparent 3.2px);background-size:26px 26px;overflow:hidden}
-.preview-pane.video .preview-stage::before,.preview-pane.video .preview-stage::after{display:none}
+/* Video stage: same website-style backdrop as before (black + white glow) */
+.preview-pane.video .preview-stage{background:#080808;overflow:hidden}
+.preview-pane.video .preview-stage::before{content:'';position:absolute;inset:-40px;pointer-events:none;background:
+  radial-gradient(620px 320px at 50% -40px,#ffffff16,transparent 62%),
+  radial-gradient(520px 420px at 86% 82%,#ffffff09,transparent 60%),
+  radial-gradient(520px 420px at 10% 78%,#ffffff07,transparent 60%);animation:ve-drift 12s ease-in-out infinite alternate}
+.preview-pane.video .preview-stage::after{content:'';position:absolute;inset:0;pointer-events:none;background:
+  repeating-linear-gradient(0deg,#ffffff07 0 1px,transparent 1px 44px),
+  repeating-linear-gradient(90deg,#ffffff07 0 1px,transparent 1px 44px);
+  -webkit-mask-image:radial-gradient(72% 72% at 50% 45%,#000 25%,transparent 100%);
+  mask-image:radial-gradient(72% 72% at 50% 45%,#000 25%,transparent 100%)}
+@keyframes ve-drift{from{transform:translateY(-16px)}to{transform:translateY(16px)}}
 .video-blocker{position:absolute;inset:0;z-index:5;cursor:default}
 /* Empty video project: transparent overlay with waiting text (backdrop comes from the stage) */
 .video-empty{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;background:transparent;pointer-events:none}
