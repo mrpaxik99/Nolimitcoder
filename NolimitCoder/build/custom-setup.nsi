@@ -47,7 +47,6 @@ RequestExecutionLevel user
 XPStyle on
 ManifestDPIAware true
 SetCompressor /SOLID lzma
-SetShellVarContext current
 
 ; Colors: #0B0B0E background, #EDEDED text, #9E9E9E gray, #30D158 green
 !define C_BG 0x000E0B0B
@@ -327,27 +326,36 @@ FunctionEnd
 
 ; The real work — called from the install page (GUI) and from the hidden section (silent).
 Function DoInstallFiles
+  SetShellVarContext current
   Push "Removing previous version…"
   Call SetPhase
   Push 6
   Call SetProg
   StrLen $0 $INSTDIR
-  ${If} $0 > 10
-    RMDir /r "$INSTDIR"
+  ${If} $0 <= 10
+    Abort "Invalid install folder."
   ${EndIf}
+  StrCpy $1 0
+  RetryRm:
+    RMDir /r "$INSTDIR"
+    IfFileExists "$INSTDIR\${APP_EXE}" 0 RmOk
+    IntOp $1 $1 + 1
+    ${If} $1 >= 5
+      Abort "Could not remove the previous version (files are locked). Close ${APP_NAME} and try again."
+    ${EndIf}
+    IfSilent SilentLocked
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Some files are locked (is ${APP_NAME} running?). Close it and click Retry." IDRETRY RetryRm
+    Abort "Installation cancelled. No files were changed."
+  SilentLocked:
+    Abort "Could not remove the previous version (is ${APP_NAME} running?). Close it and run setup again."
+  RmOk:
   Push "Copying application files…"
   Call SetPhase
   Push 18
   Call SetProg
   SetOutPath "$INSTDIR"
-  RMDirLoop:
-    ClearErrors
-    File "${SRC_DIR}\*.exe"
-    File "${SRC_DIR}\*.dll"
-    IfFileExists "$INSTDIR\${APP_EXE}" 0 CopyLibs
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Some files are locked (is ${APP_NAME} running?). Close it and click Retry." IDRETRY RMDirLoop
-    Abort "Installation cancelled. No files were changed."
-  CopyLibs:
+  File "${SRC_DIR}\*.exe"
+  File "${SRC_DIR}\*.dll"
   Push "Copying libraries…"
   Call SetPhase
   Push 45
@@ -366,7 +374,6 @@ Function DoInstallFiles
   Call SetPhase
   Push 90
   Call SetProg
-  SetShellVarContext current
   CreateDirectory "$SMPROGRAMS\NolimitCoder"
   CreateShortcut "$SMPROGRAMS\NolimitCoder\NolimitCoder.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
   CreateShortcut "$SMPROGRAMS\NolimitCoder\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
