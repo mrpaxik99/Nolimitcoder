@@ -25,8 +25,9 @@ function Try-Push {
     if (!(Has-Changes)) { return }
     $msg = 'auto: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     & $Git -C $Root commit -m $msg 2>&1 | Out-Null
-    $p = & $Git -C $Root push origin $Branch 2>&1
-    Log ('push OK: ' + $msg)
+    & $Git -C $Root push origin $Branch 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { Log ('push OK: ' + $msg) }
+    else { Log 'push FAIL (napr. chybi remote/prihlaseni) — zkusim znovu pri dalsi zmene' }
   } catch {
     Log ('push FAIL: ' + $_.Exception.Message)
   }
