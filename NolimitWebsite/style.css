@@ -275,6 +275,25 @@ body:hover .cursor-glow{opacity:1}
   letter-spacing:.1em;background:#ededed;color:#101010;border-radius:999px;padding:5px 14px;white-space:nowrap}
 .price-note{color:var(--text-weaker);font-size:12.5px;margin:22px 0 0}
 
+/* ===== Payment page ===== */
+.pay{max-width:560px;margin:0 auto;padding:72px 32px 90px;width:100%}
+.pay-card{background:linear-gradient(180deg,#181818,#111111);border:1px solid var(--border-weak);
+  border-radius:18px;padding:38px;text-align:center;box-shadow:0 30px 80px #00000077;position:relative;overflow:hidden}
+.pay-card::before{content:'';position:absolute;inset:0 0 auto 0;height:1px;background:linear-gradient(90deg,transparent,#ffffff55,transparent)}
+.pay-card h1{font-size:26px;color:var(--text-strong);margin:0 0 6px}
+.pay-card .pay-sub{color:var(--text-weaker);font-size:13px;margin:0 0 24px}
+.pay-row{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  border:1px solid var(--border-weak);border-radius:10px;padding:14px 18px;margin-bottom:12px;background:#ffffff05}
+.pay-row b{color:var(--text-strong);font-size:14px}
+.pay-row span{color:var(--text-strong);font-size:18px;font-weight:700}
+.pay-row.total{border-color:#ffffff44;background:#ffffff08}
+.pay-soon{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.1em;color:#1a1200;
+  background:linear-gradient(135deg,#fff3c4,#ffd23c 45%,#ff9d00);border-radius:999px;padding:6px 16px;margin:14px 0 20px;
+  box-shadow:0 0 18px #ffbf3f77;animation:vip-glow 2.2s ease-in-out infinite}
+.pay-card .btn{width:100%;margin-bottom:10px}
+.pay-back{display:inline-block;margin-top:6px;color:var(--text-weak);text-decoration:none;font-size:13px}
+.pay-back:hover{color:var(--text-strong)}
+
 /* ===== Footer — full width ===== */
 footer{border-top:1px solid var(--border-weaker);width:100%;background:#0a0a0a}
 footer{margin:0}
