@@ -302,8 +302,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 
 /* ===== My Projects (landing) ===== */
 .projects-view{flex:1;display:flex;overflow-y:auto;background:var(--bg-base)}
-.pv-inner{max-width:1100px;width:100%;margin:0;padding:48px 36px;display:flex;flex-direction:column;gap:26px;align-items:stretch;text-align:left}
-.pv-head{text-align:left}
+.pv-inner{max-width:860px;width:100%;margin:0 auto;padding:64px 24px;display:flex;flex-direction:column;gap:26px}
+.pv-head{text-align:center}
 .pv-title{font-size:26px;color:var(--text-strong);font-weight:600;letter-spacing:-.01em}
 .pv-sub{font-size:13px;color:var(--text-weaker);margin-top:6px}
 .pv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
@@ -324,7 +324,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .pv-create .plus{font-size:17px}
 /* ===== Logo ===== */
 .app-logo{width:30px;height:30px;border-radius:8px;object-fit:cover;flex-shrink:0}
-.pv-logo{width:120px;height:120px;border-radius:26px;object-fit:cover;margin:0 0 4px;
+.pv-logo{width:120px;height:120px;border-radius:26px;object-fit:cover;margin:0 auto 4px;
   box-shadow:0 0 50px #ffffff22}
 /* ===== Project header in chat ===== */
 .chat-view{flex:1;display:flex;min-width:0}

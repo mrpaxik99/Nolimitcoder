@@ -31,6 +31,7 @@ const args = ['/V3',
   '/DOUT_FILE=' + path.join(root, 'dist', 'NolimitCoder V4 Setup.exe'),
   '/DLICENSE_FILE=' + path.join(root, 'build', 'license.txt'),
   '/DLOGO_ICO=' + path.join(root, 'build', 'welcome-logo.ico'),
+  '/DBGFLAT_BMP=' + path.join(root, 'build', 'bgflat.bmp'),
   '/DAPP_ICON=' + path.join(root, 'src', 'renderer', 'assets', 'icon.ico'),
   '/DAPP_EXE=NolimitCoder V3.exe',
   path.join(root, 'build', 'custom-setup.nsi')];

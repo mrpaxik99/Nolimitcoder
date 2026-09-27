@@ -35,6 +35,12 @@ Unicode True
 !ifndef APP_ICON
   !define APP_ICON "icon.ico"
 !endif
+!ifndef BGFLAT_BMP
+  !define BGFLAT_BMP "bgflat.bmp"
+!endif
+!ifndef BGFLAT_BMP
+  !define BGFLAT_BMP "bgflat.bmp"
+!endif
 
 Name "${APP_NAME}"
 Caption "${APP_NAME} Setup"
@@ -68,6 +74,17 @@ Var TxtDir
 Var ChkLaunch
 Var UnLblStatus
 Var UnBarProgress
+Var BgBmp
+; Full-bleed flat dark bitmap as page background (created FIRST = bottom z-order)
+; + green accent bar. Deterministic on any DPI: oversized bitmap gets clipped.
+!macro PageChrome
+  nsDialogs::CreateControl STATIC 0x5000000E 0 0 0 302 202 ""
+  Pop $0
+  SendMessage $0 0x0172 0 $BgBmp
+  ${NSD_CreateLabel} 0 0 302 4 ""
+  Pop $0
+  SetCtlColors $0 ${C_BG} ${C_GREEN}
+!macroend
 
 ; ---------- dark window: dark titlebar + dark class brush (created once) ----------
 !macro DarkSetup FINDNAME
@@ -235,9 +252,15 @@ Function WelcomeShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  !insertmacro DarkPageNow
   InitPluginsDir
   File /oname=$PLUGINSDIR\logo.ico "${LOGO_ICO}"
+  File /oname=$PLUGINSDIR\bgflat.bmp "${BGFLAT_BMP}"
+  System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\bgflat.bmp", i 0, i 0, i 0, i 0x10) i .r0'
+  StrCpy $BgBmp $0
+  BgImage::SetBg /NOUNLOAD /FILLSCREEN "$PLUGINSDIR\bg.bmp"
+  BgImage::Redraw
+  !insertmacro PageChrome
+  ${NSD_CreateTimer} BgRedrawTimer 500
   ${NSD_CreateIcon} 12 12 56 56 ""
   Pop $1
   System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\logo.ico", i ${IMAGE_ICON}, i 64, i 64, i 0x10) i .r0'
@@ -263,7 +286,7 @@ Function LicenseShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  !insertmacro DarkPageNow
+  !insertmacro PageChrome
   !insertmacro NavText "I Agree" ${ID_NEXT}
   !insertmacro PageTitle "License Agreement" 12
   ${NSD_CreateLabel} 12 42 280 12 "Please review the terms before installing."
@@ -291,7 +314,7 @@ Function DirShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  !insertmacro DarkPageNow
+  !insertmacro PageChrome
   !insertmacro NavText "Next >" ${ID_NEXT}
   !insertmacro PageTitle "Choose Install Location" 12
   ${NSD_CreateLabel} 12 44 280 12 "Where should ${APP_NAME} be installed?"
@@ -325,7 +348,7 @@ Function InstallShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  !insertmacro DarkPageNow
+  !insertmacro PageChrome
   !insertmacro PageTitle "Installing…" 12
   ${NSD_CreateLabel} 12 48 280 12 "Copying files…"
   Pop $LblStatus
@@ -338,6 +361,10 @@ Function InstallShow
   !insertmacro DisableBackNext
   ${NSD_CreateTimer} InstallTimer 250
   nsDialogs::Show
+FunctionEnd
+Function BgRedrawTimer
+  ${NSD_KillTimer} BgRedrawTimer
+  BgImage::Redraw
 FunctionEnd
 Function InstallTimer
   ${NSD_KillTimer} InstallTimer
@@ -413,7 +440,7 @@ Function FinishShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  !insertmacro DarkPageNow
+  !insertmacro PageChrome
   !insertmacro NavText "Finish" ${ID_NEXT}
   !insertmacro PageTitle "Installation complete" 12
   ${NSD_CreateLabel} 12 44 280 24 "${APP_NAME} is ready in:$\r$\n$INSTDIR"
@@ -452,7 +479,14 @@ Function un.ConfirmShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  !insertmacro DarkPageNow
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\bgflat.bmp "${BGFLAT_BMP}"
+  System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\bgflat.bmp", i 0, i 0, i 0, i 0x10) i .r0'
+  StrCpy $BgBmp $0
+  BgImage::SetBg /NOUNLOAD /FILLSCREEN "$PLUGINSDIR\bg.bmp"
+  BgImage::Redraw
+  !insertmacro PageChrome
+  ${NSD_CreateTimer} un.BgRedrawTimer 500
   !insertmacro NavText "Uninstall" ${ID_NEXT}
   !insertmacro PageTitle "Uninstall ${APP_NAME}" 12
   ${NSD_CreateLabel} 12 44 280 36 "This removes the application, shortcuts and registry entries.$\r$\nYour projects and settings are kept."
@@ -467,7 +501,7 @@ Function un.WorkShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  !insertmacro DarkPageNow
+  !insertmacro PageChrome
   !insertmacro NavText "Close" ${ID_NEXT}
   !insertmacro PageTitle "Uninstalling…" 12
   ${NSD_CreateLabel} 12 48 280 12 "Removing files…"
@@ -484,6 +518,10 @@ Function un.WorkTimer
   Call un.DoUninstall
   StrCpy $DidWork 1
   !insertmacro ClickNext
+FunctionEnd
+Function un.BgRedrawTimer
+  ${NSD_KillTimer} un.BgRedrawTimer
+  BgImage::Redraw
 FunctionEnd
 
 Function un.DoUninstall
@@ -509,7 +547,7 @@ Function un.FinishShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  !insertmacro DarkPageNow
+  !insertmacro PageChrome
   !insertmacro NavText "Close" ${ID_NEXT}
   !insertmacro PageTitle "Uninstall complete" 12
   ${NSD_CreateLabel} 12 48 280 24 "${APP_NAME} was removed from your PC.$\r$\nYour projects and settings were kept."
