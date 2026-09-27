@@ -75,15 +75,15 @@ Var UnBarProgress
 
 ; ---------- dark window: dark titlebar + dark background for ALL dialogs ----------
 !macro DarkSetup FINDNAME
-  System::Call 'user32::FindWindow(t "#32770", t "${FINDNAME}") i .r0'
-  ${If} $0 != 0
-    System::Call 'dwmapi::DwmSetWindowAttribute(i $0, i 20, i *i 1, i 4)'
-    System::Call 'dwmapi::DwmSetWindowAttribute(i $0, i 19, i *i 1, i 4)'
-    System::Call 'user32::GetClassLongA(i $0, i -10) i .r0'
-    StrCpy $OldBgBrush $0
-    System::Call 'gdi32::CreateSolidBrush(i ${C_BG}) p .r0'
-    StrCpy $DarkBrush $0
-    System::Call 'user32::SetClassLongA(i $0, i -10, i $DarkBrush)'
+  System::Call 'user32::FindWindow(t "#32770", t "${FINDNAME}") i .r1'
+  ${If} $1 != 0
+    System::Call 'dwmapi::DwmSetWindowAttribute(i $1, i 20, i *i 1, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(i $1, i 19, i *i 1, i 4)'
+    System::Call 'user32::GetClassLongA(i $1, i -10) i .r2'
+    StrCpy $OldBgBrush $2
+    System::Call 'gdi32::CreateSolidBrush(i ${C_BG}) p .r2'
+    StrCpy $DarkBrush $2
+    System::Call 'user32::SetClassLongA(i $1, i -10, i $DarkBrush)'
   ${EndIf}
 !macroend
 !macro DarkCleanup FINDNAME
