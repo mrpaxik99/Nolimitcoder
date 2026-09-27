@@ -98,6 +98,9 @@ body:hover .cursor-glow{opacity:1}
 .hero{width:100%;padding:72px 0 8px;position:relative}
 .hero-inner{max-width:var(--max);margin:0 auto;padding:0 32px;width:100%}
 .hero-copy{max-width:780px;margin:0 auto;text-align:center}
+.hero-logo-big{width:116px;height:116px;border-radius:30px;object-fit:cover;display:block;margin:0 auto 22px;
+  box-shadow:0 0 70px #ffffff2e,0 24px 60px #000000aa;animation:logo-big-float 6s ease-in-out infinite}
+@keyframes logo-big-float{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-10px) scale(1.03)}}
 .hero-copy h1{font-size:clamp(42px,5vw,68px);margin:0 0 14px;letter-spacing:-.03em;color:var(--text-strong);font-weight:700;line-height:1.02}
 .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px;justify-content:center}
 .hero-badges{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:26px;justify-content:center}
@@ -130,13 +133,6 @@ body:hover .cursor-glow{opacity:1}
 .hero-shots.single-lg .app-shot-body{min-height:440px}
 .hero-shots.single-lg .as-side{width:250px;min-width:250px}
 .hero-shots.single-lg .as-main{padding:26px;font-size:14px}
-.term{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.9;color:var(--text-weak);
-  background:#0b0b0b;border:1px solid var(--border-weaker);border-radius:8px;padding:12px 14px;animation:term-glow 3.5s ease-in-out infinite}
-.term .tp{color:var(--text-strong);margin-right:6px}
-.term .tok{color:#30d158}
-@keyframes term-glow{0%,100%{border-color:var(--border-weaker)}50%{border-color:#30d15855}}
-.live-mini.plan{color:#c9a94a;border-color:#8a6d1f88;background:#8a6d1f18}
-.live-mini.plan i{background:#c9a94a}
 .app-shot{text-align:left;border-radius:12px;overflow:hidden;
   background:var(--bg-base);border:1px solid var(--border-weak);
   box-shadow:0 36px 80px 0 #00000088,0 13px 29px 0 #00000066,0 0 0 1px #ffffff08,0 0 80px #ffffff0d;
@@ -184,7 +180,6 @@ body:hover .cursor-glow{opacity:1}
   animation:chip-float 4.5s ease-in-out infinite;white-space:nowrap;z-index:2}
 .chip-a{top:8%;right:-14px}
 .chip-b{bottom:10%;left:-18px;animation-delay:-2.2s}
-.chip-c{top:6%;left:-14px;animation-delay:-1.1s}
 @keyframes chip-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 
 /* ===== Marquee — full bleed ===== */
@@ -298,11 +293,10 @@ footer{margin:0}
 
 @media(max-width:1024px){
   .hero-copy h1{font-size:40px}
-  .hero-shots{grid-template-columns:1fr;max-width:640px;margin-left:auto;margin-right:auto}
-  .shot-back .app-shot{transform:rotate(0deg) scale(1)}
+  .hero-shots{margin-top:40px}
   .rezimy-inner{grid-template-columns:1fr}
   .feat-grid{grid-template-columns:repeat(2,1fr)}
-  .chip-a{right:6px}.chip-b{left:6px}.chip-c{right:6px}
+  .chip-a{right:6px}.chip-b{left:6px}
 }
 @media(max-width:640px){
   .hero h1,.hero-copy h1{font-size:30px}
