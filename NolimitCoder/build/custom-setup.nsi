@@ -156,7 +156,7 @@ FunctionEnd
   Push $0
   Push $1
   ${If} $TitleFont == ""
-    System::Call 'gdi32::CreateFont(i -19, i 0, i 0, i 0, i 700, i 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0, t "Segoe UI") p .r0'
+    System::Call 'gdi32::CreateFont(i -19, i 0, i 0, i 0, i 700, i 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0, t "Segoe UI") i .r0'
     StrCpy $TitleFont $0
   ${EndIf}
   Pop $1
@@ -261,7 +261,7 @@ Function WelcomeShow
   BgImage::Redraw
   ${NSD_CreateIcon} 12 12 56 56 ""
   Pop $1
-  System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\logo.ico", i ${IMAGE_ICON}, i 64, i 64, i 0x10) p .r0'
+  System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\logo.ico", i ${IMAGE_ICON}, i 64, i 64, i 0x10) i .r0'
   ${If} $0 != 0
     SendMessage $1 ${STM_SETIMAGE} ${IMAGE_ICON} $0
   ${EndIf}
