@@ -1436,11 +1436,17 @@ async function runAgent(convo, intent) {
     saveConvos(); renderMessages(); renderChatList();
     setFooter('Hotovo'); playDone();
     // Video project: primárním výstupem je MP4 — po každém zápisu reklamy ho rovnou automaticky nahraj
-    // (index.html zůstává uvnitř jako zdroj, ze kterého se nahrává). Jen když se opravdu něco zapsalo.
+    // (index.html zůstává uvnitř jako zdroj, ze kterého se nahrává). index.html musí ve složce VŽDY být:
+    // když ho AI jen vypsala do chatu, pojistka ho vytáhne a zapíše sama, jak bývalo zvykem.
     try {
       if (activeProjectType() === 'video' && !stopRequested) {
         const writes = runToolMsgs(convo).filter(m => !m.skipped && m.ok && ['write_file', 'append_file', 'edit_file'].includes(m.tool));
-        if (writes.length) {
+        let htmlReady = writes.length > 0;
+        if (!htmlReady) {
+          htmlReady = await ensureVideoHtml(convo);
+          if (htmlReady) saveConvos();
+        }
+        if (htmlReady) {
           setFooter('Nahrávám MP4…');
           await videoExportRun();
           setFooter('Hotovo · MP4 nahráno');
@@ -1774,7 +1780,8 @@ async function ensureVideoHtml(convo) {
     }
     return false;
   } catch { return false; }
-} { const p = $('#videoProgress'); if (p) p.textContent = t || ''; }
+}
+function setVideoProgress(t) { const p = $('#videoProgress'); if (p) p.textContent = t || ''; }
 async function videoExportRun() {
   if (videoExporting) return;
   if (!prefs.activeProject) { setVideoProgress('No project selected'); return; }
