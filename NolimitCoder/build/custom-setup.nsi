@@ -109,7 +109,8 @@ Function un.onGUIEnd
   !insertmacro DarkCleanup "$(^Name)"
 FunctionEnd
 
-Function MakeTitleFont
+; Shared helpers as MACROS (not Functions) so both installer and uninstaller code can use them.
+!macro MakeTitleFont
   Push $0
   Push $1
   ${If} $TitleFont == ""
@@ -118,45 +119,78 @@ Function MakeTitleFont
   ${EndIf}
   Pop $1
   Pop $0
-FunctionEnd
-; Big white title at (12, Y). Usage: Push text / Push Y / Call PageTitle (returns nothing)
-Function PageTitle
-  Exch $0
-  Pop $1
+!macroend
+; Big white title at (12, Y): !insertmacro PageTitle "Text" Y
+!macro PageTitle TEXT Y
+  Push $0
+  Push $1
   Push $2
   Push $3
-  Call MakeTitleFont
-  ${NSD_CreateLabel} 12 $0 280 26 "$1"
+  !insertmacro MakeTitleFont
+  ${NSD_CreateLabel} 12 ${Y} 280 26 "${TEXT}"
   Pop $2
   SendMessage $2 ${WM_SETFONT} $TitleFont 1
   SetCtlColors $2 ${C_TEXT} transparent
   Pop $3
   Pop $2
-FunctionEnd
-; Set outer nav button text. Usage: Push "Text" / Push ID / Call NavText (returns nothing)
-Function NavText
-  Exch $0
   Pop $1
+  Pop $0
+!macroend
+; Outer nav button text: !insertmacro NavText "Text" ID
+!macro NavText TEXT ID
+  Push $0
+  Push $1
   Push $2
-  GetDlgItem $2 $HWNDPARENT $0
-  SendMessage $2 ${WM_SETTEXT} 0 "STR:$1"
+  GetDlgItem $2 $HWNDPARENT ${ID}
+  SendMessage $2 ${WM_SETTEXT} 0 "STR:${TEXT}"
   Pop $2
-FunctionEnd
-Function ClickNext
+  Pop $1
+  Pop $0
+!macroend
+!macro ClickNext
   Push $0
   GetDlgItem $0 $HWNDPARENT ${ID_NEXT}
   EnableWindow $0 1
   SendMessage $0 ${BM_CLICK} 0 0
   Pop $0
-FunctionEnd
-Function DisableBackNext
+!macroend
+!macro DisableBackNext
   Push $0
   GetDlgItem $0 $HWNDPARENT ${ID_BACK}
   EnableWindow $0 0
   GetDlgItem $0 $HWNDPARENT ${ID_NEXT}
   EnableWindow $0 0
   Pop $0
-FunctionEnd
+!macroend
+!macro SetProg N
+  Push $0
+  Push $1
+  ${If} $BarProgress != 0
+  ${AndIf} $BarProgress != ""
+    SendMessage $BarProgress ${PBM_SETPOS} ${N} 0
+  ${EndIf}
+  Pop $1
+  Pop $0
+!macroend
+!macro SetPhase TEXT
+  Push $0
+  Push $1
+  ${If} $LblStatus != 0
+  ${AndIf} $LblStatus != ""
+    SendMessage $LblStatus ${WM_SETTEXT} 0 "STR:${TEXT}"
+  ${EndIf}
+  Pop $1
+  Pop $0
+  Sleep 120
+!macroend
+!macro SetUnProg N
+  Push $0
+  Push $1
+  SendMessage $UnBarProgress ${PBM_SETPOS} ${N} 0
+  Pop $1
+  Pop $0
+  Sleep 150
+!macroend
 
 ; ================= INSTALL PAGES =================
 Page custom WelcomeShow
@@ -179,9 +213,7 @@ Function WelcomeShow
   ${If} $0 != 0
     SendMessage $1 ${STM_SETIMAGE} ${IMAGE_ICON} $0
   ${EndIf}
-  Push "NolimitCoder V4"
-  Push 14
-  Call PageTitle
+  !insertmacro PageTitle "NolimitCoder V4" 14
   ${NSD_CreateLabel} 76 44 214 12 "Version ${APP_VERSION}  ·  by ${APP_PUBLISHER}"
   Pop $0
   SetCtlColors $0 ${C_GREEN} transparent
@@ -272,9 +304,7 @@ Function InstallShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  Push "Installing…"
-  Push 12
-  Call PageTitle
+  !insertmacro PageTitle "Installing…" 12
   ${NSD_CreateLabel} 12 48 280 12 "Copying files…"
   Pop $LblStatus
   SetCtlColors $LblStatus ${C_GREEN} transparent
@@ -283,7 +313,7 @@ Function InstallShow
   ${NSD_CreateLabel} 12 88 280 24 "${APP_NAME} ${APP_VERSION}$\r$\nPlease wait, this takes a moment."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
-  Call DisableBackNext
+  !insertmacro DisableBackNext
   ${NSD_CreateTimer} InstallTimer 250
   nsDialogs::Show
 FunctionEnd
@@ -291,7 +321,7 @@ Function InstallTimer
   ${NSD_KillTimer} InstallTimer
   Call DoInstallFiles
   StrCpy $DidWork 1
-  Call ClickNext
+  !insertmacro ClickNext
 FunctionEnd
 
 Function SetProg
