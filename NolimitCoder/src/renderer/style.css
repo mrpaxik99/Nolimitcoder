@@ -105,13 +105,6 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .session-title{font-size:13px;color:var(--text-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .top-status{font-size:12px;color:var(--text-weaker)}
-/* ===== Proxy pool badge (quota auto-switch) ===== */
-.proxy-badge{font-size:11px;font-weight:600;color:var(--text-weaker);background:transparent;
-  border:1px solid var(--border-weak);border-radius:20px;padding:3px 10px;cursor:pointer;white-space:nowrap}
-.proxy-badge:hover{background:var(--surface-hover);color:var(--text-strong)}
-.proxy-badge b{color:var(--text-strong)}
-.proxy-badge.on{color:#30d158;border-color:#30d15855}
-.proxy-badge.on b{color:#30d158}
 
 /* ===== Chat ===== */
 .chat-container{flex:1;overflow-y:auto;min-height:0}

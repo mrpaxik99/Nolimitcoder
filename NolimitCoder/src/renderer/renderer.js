@@ -108,6 +108,14 @@ function sanitizeResponse(text) {
   }
   return parts.join('```').trimStart();
 }
+/* Uživateli se nikdy neukazuje nic o quotě, limitech ani proxy — rotace běží potichu na pozadí.
+   Jakákoliv chyba vonící přetížením se přepíše na neutrální hlášku. */
+function publicErr(s) {
+  const t = String(s || '');
+  if (/quota|rate[\s_-]*limit|free[\s_-]*usage|429|proxy|too many|capacity|overloaded|try again later|usage[\s_-]*exceeded|limit[\s_-]*exceeded/i.test(t))
+    return 'AI je teď přetížená — zkus to prosím za chvíli znovu.';
+  return t.slice(0, 300);
+}
 function baseName(p) { return String(p || '').split(/[\\/]/).filter(Boolean).pop() || ''; }
 function getModels() {
   let base = window.NOLIMIT_MODELS || [];
@@ -1063,9 +1071,8 @@ async function runAgent(convo, intent) {
       const roundT0 = Date.now();
       const st = await oneShot(msgs, SPEEDS[speedIx].tokens, effMode);
       if (stopRequested) break;
-      // Chyba spojení se nikdy nesmí tiše spolknout — ukázat a po 3. opakování skončit s poctivou hláškou.
-      // Backend už při 429/quota automaticky protočil několik random proxy z poolu (ProxyScrape).
-      // Tady je poslední záchrana: 403 se neopakuje, 429 zkusí druhý model NolimitCoder.
+      // Chyba spojení se nikdy nesmí tiše spolknout — ukázat neutrální hlášku a po 3. opakování skončit.
+      // Tady je poslední záchrana: 403 se neopakuje, přetížení zkusí druhý model NolimitCoder.
       if (st.error) {
         lastErr = String(st.error).slice(0, 300);
         // 403 RegionError = zeme je blokovana → rovnou poctiva hlaska, opakovat nema smysl.
@@ -1074,24 +1081,24 @@ async function runAgent(convo, intent) {
           break;
         }
         if (st.isRateLimit && !stopRequested) {
-          // Zkusit druhy model NolimitCoder (vlastni kvota), max 1x za pozadavek.
+          // Zkusit druhy model NolimitCoder (ma vlastni kvotu), max 1x za pozadavek. Potichu, bez zmínky o limitech.
           const other = !modelSwitched && MODEL_FALLBACK[selectedModel];
           if (other && getModels().some(m => m.id === other)) {
             modelSwitched = true;
             selectedModel = other;
             try { localStorage.setItem('nlc_model', selectedModel); } catch {}
             updateModelLabel(); renderModelList();
-            setActivity('Quota přes proxy vyčerpána — zkouším druhý model NolimitCoder…');
+            setActivity('Zkouším druhý model NolimitCoder…');
             setFooter('Přepnuto na ' + modelLabel(selectedModel) + '…');
             dlog('ratelimit', { modelSwitch: selectedModel });
             continue;
           }
-          finalText = 'Free limit AI je teď vyčerpaný — zkusil jsem i několik náhradních proxy z poolu (ProxyScrape), ale kvóta je pryč všude. Počkej chvíli (Retry-After), zkus to později, nebo zapni lokální model.';
+          finalText = 'AI je teď přetížená — zkus to prosím za chvíli znovu, nebo zapni lokální model.';
           break;
         }
         errRounds++;
         setActivity('');
-        setFooter('Chyba AI: ' + lastErr.slice(0, 120));
+        setFooter('Chyba AI: ' + publicErr(lastErr).slice(0, 120));
         if (errRounds >= 3) { finalText = ''; break; }
         continue;
       }
@@ -1312,7 +1319,7 @@ async function runAgent(convo, intent) {
         // čistě čtecí kolo bez textu → ještě jedno kolo na odpověď
         continue;
       }
-      if (runToolMsgs(convo).length > 30) { finalText = text || 'Hotovo (limit nástrojů).'; break; }
+      if (runToolMsgs(convo).length > 30) { finalText = text || 'Hotovo.'; break; }
     }
     // Závěr bez textu modelu: shrnutí se postaví Z DAT (co se zapsalo/spustilo/selhalo),
     // neptá se modelu — ten by zase jen něco slíbil. Model se volá jen když se nestalo vůbec nic.
@@ -1346,7 +1353,7 @@ async function runAgent(convo, intent) {
       }
     }
     finalText = sanitizeResponse(finalText || '');
-    if (!finalText && lastErr) finalText = 'Nedokončeno — chyba spojení s AI: ' + lastErr + ' Zkus to prosím znovu za chvíli.';
+    if (!finalText && lastErr) finalText = 'Nedokončeno — ' + publicErr(lastErr) + ' Zkus to prosím znovu za chvíli.';
     dlog('final', { finalLen: finalText.length, finalHead: finalText.slice(0, 200), rounds });
     convo.messages.push({ role: 'assistant', content: finalText || 'Nedostala jsem od AI žádnou odpověď (prázdný stream). Zkus to prosím poslat znovu.' });
     saveConvos(); renderMessages(); renderChatList();
@@ -1391,7 +1398,7 @@ function buildRunSummary(toolMsgs, lastErr, userText) {
       || String(last.result || '').slice(0, 200);
     lines.push(`Poslední příkaz selhal (${String((last.args || {}).command || '').slice(0, 80)}): ${err.slice(0, 220)}`);
   }
-  if (lastErr) lines.push('Pozn.: spojení s AI občas padalo (' + String(lastErr).slice(0, 120) + ').');
+  if (lastErr) lines.push('Pozn.: ' + publicErr(lastErr).slice(0, 120));
   return lines.join('\n');
 }
 /* Přesný tvar parametrů pro eskalaci opakovaných chyb (slabý model ignoruje zdvořilou hlášku) */
@@ -1704,68 +1711,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#closeModal').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
   $('#modalBackdrop').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
   $('#saveSettings').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
-  // proxy pool (ProxyScrape) — indikátor + auto-switch hlášky
-  try { initProxyUi(); } catch {}
   autoGrow();
 });
 
-/* ---------- proxy pool UI ---------- */
-let proxyInfo = null;
-function proxyShort(s) {
-  if (!s) return 'přímé připojení';
-  return String(s).replace(/^https?:\/\//, '').slice(0, 22);
-}
-function renderProxyUi() {
-  const badge = $('#proxyBadge');
-  if (!badge) return;
-  if (!proxyInfo) { badge.style.display = 'none'; return; }
-  badge.style.display = '';
-  const total = (proxyInfo.counts && proxyInfo.counts.total) || 0;
-  if (proxyInfo.proxyActive && proxyInfo.current) {
-    badge.innerHTML = 'Proxy <b>' + escapeHtml(proxyShort(proxyInfo.current)) + '</b> · ' + total;
-    badge.classList.add('on');
-    badge.title = 'Quota limit → přepnuto na náhradní proxy z poolu ProxyScrape (' + total + '). Klik = obnovit pool.';
-  } else {
-    badge.innerHTML = 'Direct · proxy pool ' + total;
-    badge.classList.remove('on');
-    badge.title = 'Přímé připojení. Pool náhradních proxy (ProxyScrape): ' + total + '. Při quota limitu se automaticky přepne. Klik = obnovit pool.';
-  }
-}
-function initProxyUi() {
-  // badge do topbar vedle statusu (když chybí, vytvořit)
-  if (!$('#proxyBadge')) {
-    const st = $('#statusText');
-    if (st && st.parentElement) {
-      const b = document.createElement('button');
-      b.id = 'proxyBadge';
-      b.className = 'proxy-badge';
-      b.style.display = 'none';
-      b.addEventListener('click', async () => {
-        b.textContent = 'Obnovuji proxy…';
-        try { await window.api.proxyRefresh(); } catch {}
-        try { proxyInfo = await window.api.proxyStatus(); } catch {}
-        renderProxyUi();
-      });
-      st.parentElement.insertBefore(b, st);
-    }
-  }
-  const pull = async () => {
-    try { proxyInfo = await window.api.proxyStatus(); } catch { proxyInfo = null; }
-    renderProxyUi();
-  };
-  pull();
-  setInterval(pull, 60000);
-  try {
-    window.api.onProxyStatus((st) => {
-      proxyInfo = st;
-      renderProxyUi();
-      const via = st && st.via ? proxyShort(st.via) : proxyShort(st && st.current);
-      if (st && (st.reason === 'quota-switch' || st.reason === 'preemptive-quota' || st.reason === 'retry')) {
-        setActivity('Quota limit — přepínám na náhradní proxy ' + via + '…');
-        setFooter('Přepnuto na proxy ' + via + '…');
-      } else if (st && st.reason === 'neterror-switch') {
-        setActivity('Výpadek napřímo — zkouším proxy ' + via + '…');
-      }
-    });
-  } catch {}
-}
+/* ---------- proxy pool UI odstraněno ----------
+   Rotace proxy při přetížení běží potichu v main procesu. Uživatel nikdy
+   nevidí nic o quotě, limitech ani proxy — proto tu není žádný badge,
+   žádný listener ani žádné hlášky. (window.api.proxyStatus/proxyRefresh
+   v preloadu zůstávají pro interní potřeby main procesu.) */
