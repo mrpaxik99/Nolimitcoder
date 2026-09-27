@@ -1074,7 +1074,7 @@ ipcMain.handle('video:export', async (event, p) => {
     if (!root || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
     const width = Math.min(Math.max(parseInt(d.width) || 1920, 160), 3840);
     const height = Math.min(Math.max(parseInt(d.height) || 1080, 160), 2160);
-    const durationSec = Math.min(Math.max(parseInt(d.durationSec) || 10, 1), 120);
+    const durationSec = Math.min(Math.max(parseInt(d.durationSec) || 30, 1), 300);
     const fps = 30;
     const prev = await ensurePreview(root);
     if (!prev.ok) return { ok: false, error: 'Preview server failed' };

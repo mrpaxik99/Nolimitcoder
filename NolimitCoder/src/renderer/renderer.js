@@ -235,7 +235,14 @@ const VIDEO_RESOLUTIONS = {
 };
 let videoRes = localStorage.getItem('nlc_videores') || '1920x1080';
 if (!VIDEO_RESOLUTIONS[videoRes]) videoRes = '1920x1080';
-let videoDur = parseInt(localStorage.getItem('nlc_videodur') || '10', 10) || 10;
+// Length steps: 0:30 → 5:00 in 30 s steps
+const VIDEO_DURS = [30, 60, 90, 120, 150, 180, 210, 240, 270, 300];
+let videoDur = parseInt(localStorage.getItem('nlc_videodur') || '30', 10) || 30;
+if (!VIDEO_DURS.includes(videoDur)) {
+  videoDur = VIDEO_DURS.reduce((a, b) => Math.abs(b - videoDur) < Math.abs(a - videoDur) ? b : a);
+}
+function videoDurIx() { const i = VIDEO_DURS.indexOf(videoDur); return i >= 0 ? i : 0; }
+function fmtDur(s) { return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 let lastVideoPath = null;
 let videoExporting = false;
 // Typ aktivního projektu z registru (universal | website | video)
@@ -1616,7 +1623,8 @@ function setVideoMode(on) {
   if (blocker) blocker.style.display = on ? '' : 'none';
   if (on) {
     const rs = $('#videoRes'); if (rs) rs.value = videoRes;
-    const du = $('#videoDur'); if (du) du.value = String(videoDur);
+    const du = $('#videoDurRange'); if (du) { du.value = String(videoDurIx()); try { du.style.setProperty('--fill', (videoDurIx() / (VIDEO_DURS.length - 1) * 100) + '%'); } catch {} }
+    const dl2 = $('#videoDurLabel'); if (dl2) dl2.textContent = fmtDur(videoDur);
     setVideoProgress('');
     const dl = $('#videoDownload'); if (dl) dl.style.display = 'none';
     lastVideoPath = null;
@@ -1634,6 +1642,7 @@ function fitVideoFrame() {
   frame.style.width = w + 'px';
   frame.style.height = h + 'px';
   frame.style.transform = 'scale(' + s + ')';
+  try { frame.style.setProperty('--s', s); } catch {}
   frame.style.flex = 'none';
 }
 async function startPreview(root, type) {
@@ -1641,8 +1650,10 @@ async function startPreview(root, type) {
     const r = await window.api.previewStart(root);
     if (r && r.ok) {
       $('#previewPane').style.display = '';
-      $('#previewToggle').style.display = '';
-      $('#previewToggle').textContent = 'Preview ✓';
+      // Video (commercial) has no Preview toggle button — the preview is always there.
+      const isVid = type === 'video' || isVideoMode();
+      $('#previewToggle').style.display = isVid ? 'none' : '';
+      if (!isVid) $('#previewToggle').textContent = 'Preview ✓';
       $('#previewUrl').textContent = r.url;
       $('#previewFrame').src = r.url;
       if (type === 'video' || isVideoMode()) {
@@ -1735,7 +1746,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   setMode(mode);
   // rychlost
   const slider = $('#speedSlider'), slabel = $('#speedLabel');
-  const speedFill = () => { try { slider.style.setProperty('--fill', (parseInt(slider.value, 10) / 2 * 100) + '%'); } catch {} };
+  const speedFill = () => {
+    try {
+      const v = parseInt(slider.value, 10) || 0;
+      slider.style.setProperty('--fill', (v / 2 * 100) + '%');
+      const dot = $('#speedDot');
+      if (dot) dot.className = 'speed-dot' + (v === 2 ? ' high' : v === 1 ? ' mid' : '');
+    } catch {}
+  };
   if (slider) {
     slider.value = String(speedIx);
     const names = ['Fast', 'Medium', 'High'];
@@ -1785,15 +1803,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     vres.addEventListener('change', () => {
       videoRes = vres.value;
       try { localStorage.setItem('nlc_videores', videoRes); } catch {}
+      // ultra-smooth bubble pop on resolution switch
+      try {
+        const fr = $('#previewFrame');
+        if (fr) { fr.classList.remove('res-pop'); void fr.offsetWidth; fr.classList.add('res-pop'); }
+      } catch {}
       fitVideoFrame();
     });
   }
-  const vdur = $('#videoDur');
+  const vdur = $('#videoDurRange'), vdlab = $('#videoDurLabel');
+  const durFill = () => {
+    try {
+      const ix = parseInt(vdur.value, 10) || 0;
+      vdur.style.setProperty('--fill', (ix / (VIDEO_DURS.length - 1) * 100) + '%');
+      if (vdlab) vdlab.textContent = fmtDur(VIDEO_DURS[ix] || 30);
+    } catch {}
+  };
   if (vdur) {
-    vdur.value = String(videoDur);
-    vdur.addEventListener('change', () => {
-      videoDur = parseInt(vdur.value, 10) || 10;
+    vdur.value = String(videoDurIx());
+    durFill();
+    vdur.addEventListener('input', () => {
+      videoDur = VIDEO_DURS[parseInt(vdur.value, 10) || 0] || 30;
       try { localStorage.setItem('nlc_videodur', String(videoDur)); } catch {}
+      durFill();
     });
   }
   const vexp = $('#videoExport');

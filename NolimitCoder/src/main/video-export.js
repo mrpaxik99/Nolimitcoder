@@ -163,7 +163,7 @@ async function exportVideo(opts) {
   const url = String(o.url || '');
   const width = Math.min(Math.max(parseInt(o.width) || 1920, 160), 3840);
   const height = Math.min(Math.max(parseInt(o.height) || 1080, 160), 2160);
-  const durationSec = Math.min(Math.max(parseInt(o.durationSec) || 10, 1), 120);
+  const durationSec = Math.min(Math.max(parseInt(o.durationSec) || 30, 1), 300);
   const fps = Math.min(Math.max(parseInt(o.fps) || 30, 10), 60);
   const outPath = String(o.outPath || '');
   const onProg = o.onProg;

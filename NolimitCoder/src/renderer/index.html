@@ -107,7 +107,7 @@
               </div>
               <span class="free-tag">FREE</span>
               <div class="speed-ctl" title="Fast = short quick answers · Medium = balanced · High = most detailed">
-                <span class="speed-dot"></span>
+                <span class="speed-dot" id="speedDot"></span>
                 <input type="range" id="speedSlider" min="0" max="2" step="1" value="1">
                 <span id="speedLabel">Medium</span>
               </div>
@@ -162,12 +162,8 @@
           </select>
         </label>
         <label class="video-label">Length
-          <select id="videoDur" class="video-select">
-            <option value="5">5 s</option>
-            <option value="10" selected>10 s</option>
-            <option value="15">15 s</option>
-            <option value="30">30 s</option>
-          </select>
+          <input type="range" id="videoDurRange" class="video-range" min="0" max="9" step="1" value="0" title="Video length: 0:30 – 5:00 in 30 s steps">
+          <span id="videoDurLabel" class="video-dur-label">0:30</span>
         </label>
         <button class="mini-btn" id="videoExport">Export to MP4</button>
         <button class="mini-btn" id="videoDownload" style="display:none">⬇ Download MP4</button>
