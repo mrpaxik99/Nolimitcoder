@@ -1,6 +1,6 @@
 const MODELS = [
-  { icon: '🚀', name: 'NolimitCoderV3', desc: 'Nejnovější vlajkový model NolimitCode — kód, reasoning i text. Nejchytřejší volba na složité úkoly.', ep: 'vlajkový model', foot: 'Kód • reasoning • čeština' },
-  { icon: '⚡', name: 'NolimitCoderV2', desc: 'Osvědčený model NolimitCode — rychlé odpovědi i kód. Ideální na každodenní práci.', ep: 'osvědčený model', foot: 'Rychlost • stabilita • kód' },
+  { icon: '🚀', name: 'NolimitCoderV3', desc: 'The latest flagship NolimitCode model — code, reasoning, and text. The smartest choice for complex tasks.', ep: 'flagship model', foot: 'Code • reasoning • text' },
+  { icon: '⚡', name: 'NolimitCoderV2', desc: 'A proven NolimitCode model — fast answers and code. Ideal for everyday work.', ep: 'proven model', foot: 'Speed • stability • code' },
 ];
 
 const grid = document.getElementById('modelGrid');
@@ -15,7 +15,7 @@ if (grid) {
   `).join('');
 }
 
-// Demo "psaní" v obou ukázkách aplikace
+// Demo "typing" in both app previews
 function typeLoop(id, texts, typeSpeed, delSpeed) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -34,13 +34,13 @@ function typeLoop(id, texts, typeSpeed, delSpeed) {
   })();
 }
 typeLoop('demoInput', [
-  'Vytvoř přihlašovací stránku...',
-  'Oprav chybu v košíku...',
-  '/plan — navrhni databázi...'
+  'Create a login page...',
+  'Fix the cart bug...',
+  '/plan — design the database...'
 ], 70, 40);
 typeLoop('demoInput2', [
   'git push origin main',
-  '/build — přidej košík...',
+  '/build — add the cart...',
   'npm run preview'
 ], 90, 50);
 
@@ -62,7 +62,7 @@ typeLoop('demoInput2', [
   els.forEach(e => io.observe(e));
 })();
 
-// Scroll progress + nav stín + parallax pozadí (pozadí scroluje se stránkou)
+// Scroll progress + nav shadow + background parallax (background scrolls with the page)
 (function () {
   const bar = document.getElementById('scrollProgress');
   const nav = document.getElementById('nav');
@@ -75,7 +75,7 @@ typeLoop('demoInput2', [
     const p = h > 0 ? (y / h) * 100 : 0;
     if (bar) bar.style.width = p + '%';
     if (nav) nav.classList.toggle('scrolled', y > 12);
-    // parallax: každá vrstva pozadí jede jinou rychlostí → pozadí "žije" při scrollu
+    // parallax: each background layer moves at a different speed → the background feels "alive" on scroll
     if (orbs) orbs.style.transform = 'translateY(' + (y * 0.12) + 'px)';
     if (gridBg) gridBg.style.transform = 'translateY(' + (y * 0.05) + 'px)';
     ticking = false;
@@ -86,7 +86,7 @@ typeLoop('demoInput2', [
   onScroll();
 })();
 
-// Cursor glow následující myš
+// Cursor glow following the mouse
 (function () {
   const glow = document.getElementById('cursorGlow');
   if (!glow) return;
@@ -100,7 +100,7 @@ typeLoop('demoInput2', [
   })();
 })();
 
-// Jemné hvězdičky / prach na pozadí (levné canvas částice, scrolují se stránkou)
+// Subtle stars / dust in the background (cheap canvas particles, scrolling with the page)
 (function () {
   const cv = document.getElementById('stars');
   if (!cv) return;
@@ -137,7 +137,7 @@ typeLoop('demoInput2', [
   })();
 })();
 
-// 3D tilt obou ukázek za myší — přední víc, zadní míň (hloubka)
+// 3D tilt of both previews following the mouse — front more, back less (depth)
 (function () {
   const zone = document.getElementById('heroShots');
   const front = document.getElementById('appShot');

@@ -1,4 +1,4 @@
-/* NolimitWebsite V2 — full-bleed, živé pozadí se scrollem */
+/* NolimitWebsite V2 — full-bleed, live background that scrolls */
 :root{
   --bg-base:#101010; --bg-strong:#121212; --bg-stronger:#151515; --surface-float:#1c1c1c;
   --surface:#ffffff09; --surface-hover:#ffffff0a; --surface-active:#ffffff14;
@@ -28,7 +28,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 .scroll-progress{position:fixed;top:0;left:0;height:3px;width:0%;z-index:60;
   background:linear-gradient(90deg,#fff,#777);box-shadow:0 0 12px #ffffff55}
 
-/* ===== Pozadí — SCROLUJE SE STRÁNKOU (absolute, ne fixed) + parallax z JS ===== */
+/* ===== Background — SCROLLS WITH THE PAGE (absolute, not fixed) + parallax from JS ===== */
 .bg-grid{position:absolute;inset:0;z-index:-3;pointer-events:none;
   background-image:linear-gradient(#ffffff0d 1px,transparent 1px),linear-gradient(90deg,#ffffff0d 1px,transparent 1px);
   background-size:44px 44px;
@@ -57,7 +57,7 @@ body:hover .cursor-glow{opacity:1}
 .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}
 .reveal.visible{opacity:1;transform:none}
 
-/* ===== Nav — plná šířka ===== */
+/* ===== Nav — full width ===== */
 .nav{position:sticky;top:0;z-index:20;background:#101010cc;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-bottom:1px solid var(--border-weaker);transition:box-shadow .3s,background .3s}
 .nav.scrolled{background:#0c0c0cf2;box-shadow:0 10px 40px #00000088}
@@ -78,7 +78,7 @@ body:hover .cursor-glow{opacity:1}
 .nav-links a:hover::after{width:100%}
 .nav-cta{margin-left:8px;white-space:nowrap}
 
-/* ===== Buttons — normální velikost, lesk ===== */
+/* ===== Buttons — normal size, gloss ===== */
 .btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;
   padding:12px 26px;border-radius:8px;font-weight:600;
   text-decoration:none;font-size:14px;border:1px solid transparent;overflow:hidden;
@@ -92,10 +92,10 @@ body:hover .cursor-glow{opacity:1}
 .btn-ghost{border-color:var(--border-weak);color:var(--text);background:#ffffff05}
 .btn-ghost:hover{background:var(--surface-hover);transform:translateY(-2px)}
 .btn-sm{padding:8px 16px;font-size:12.5px}
-/* zpětná kompatibilita: staré obří btn-xl už není obří */
+/* backwards compatibility: old oversized btn-xl is no longer oversized */
 .btn-xl{padding:12px 26px;font-size:14px;border-radius:8px}
 
-/* ===== HERO — text na prostřed, pod ním 2 okna ===== */
+/* ===== HERO — centered text, 2 windows below ===== */
 .hero{width:100%;padding:72px 0 8px;position:relative}
 .hero-inner{max-width:var(--max);margin:0 auto;padding:0 32px;width:100%}
 .hero-copy{max-width:780px;margin:0 auto;text-align:center}
@@ -121,7 +121,7 @@ body:hover .cursor-glow{opacity:1}
 .stat b{display:block;font-size:20px;color:var(--text-strong)}
 .stat small{color:var(--text-weaker);font-size:12px}
 
-/* ===== Dvě okna aplikace — plovoucí, tilt z JS ===== */
+/* ===== Two app windows — floating, tilt from JS ===== */
 .hero-shots{position:relative;display:grid;grid-template-columns:1.12fr .92fr;gap:30px;align-items:center;
   margin-top:52px;perspective:1500px}
 .hero-shots::before{content:'';position:absolute;inset:8% -4% -6% -4%;z-index:-1;pointer-events:none;
@@ -201,7 +201,7 @@ body:hover .cursor-glow{opacity:1}
 .marquee-track .hl{color:#fff;border:1px solid var(--border-strong);background:#ffffff0d;border-radius:999px;padding:6px 16px;box-shadow:0 0 24px #ffffff18}
 @keyframes marquee{to{transform:translateX(-50%)}}
 
-/* ===== Sections — full bleed pásy, obsah max-width ===== */
+/* ===== Sections — full-bleed bands, max-width content ===== */
 .section{width:100%;padding:76px 0}
 .section-inner{max-width:var(--max);margin:0 auto;padding:0 32px;width:100%}
 .section.band{background:#0c0c0c99;border-top:1px solid var(--border-weaker);border-bottom:1px solid var(--border-weaker)}
@@ -237,7 +237,7 @@ body:hover .cursor-glow{opacity:1}
 .tech-box{padding:16px 18px;border-radius:var(--radius);background:var(--bg-stronger);
   border:1px solid var(--border-weak);font-size:13px;line-height:1.9;color:var(--text-weak)}
 
-/* ===== Funkce + režimy ===== */
+/* ===== Features + modes ===== */
 .feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 .feat{padding:24px;border-radius:var(--radius-lg);background:linear-gradient(180deg,#161616,#111111);border:1px solid var(--border-weak);
   transition:transform .25s,border-color .25s,box-shadow .25s}
@@ -275,7 +275,7 @@ body:hover .cursor-glow{opacity:1}
   letter-spacing:.1em;background:#ededed;color:#101010;border-radius:999px;padding:5px 14px;white-space:nowrap}
 .price-note{color:var(--text-weaker);font-size:12.5px;margin:22px 0 0}
 
-/* ===== Footer — plná šířka ===== */
+/* ===== Footer — full width ===== */
 footer{border-top:1px solid var(--border-weaker);width:100%;background:#0a0a0a}
 footer{margin:0}
 .foot-inner{max-width:var(--max);margin:0 auto;padding:10px 32px;display:flex;align-items:center;gap:10px;width:100%}
@@ -287,7 +287,7 @@ footer{margin:0}
 .foot-links a:hover{color:var(--text-strong)}
 .foot-links a:hover::after{width:100%}
 
-/* ===== Právní stránky ===== */
+/* ===== Legal pages ===== */
 .legal{max-width:820px;margin:0 auto;padding:64px 32px 90px;width:100%}
 .legal .back{display:inline-block;color:var(--text-weak);text-decoration:none;font-size:13px;margin-bottom:26px;
   border:1px solid var(--border-weak);border-radius:8px;padding:8px 16px;background:#ffffff05;transition:color .2s,border-color .2s}
