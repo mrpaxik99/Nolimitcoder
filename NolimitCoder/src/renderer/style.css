@@ -445,8 +445,9 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .preview-frame{flex:1;width:100%;align-self:stretch;border:none;background:#fff;min-height:0}
 /* Video mode: localhost URL stays hidden (technical address, user never needs it) */
 .preview-pane.video .preview-url{display:none}
-/* Video mode: exact-size frame scaled to fit, with a visible frame around it.
-   Size changes glide ultra-smooth + a little bubble pop on resolution switch. */
+/* Video běží: pozadí kolem zmizí — čistá černá, vidět je jen video */
+.preview-pane.video .preview-stage.clean{background:#000}
+.preview-pane.video .preview-stage.clean::before,.preview-pane.video .preview-stage.clean::after{display:none}
 .preview-pane.video .preview-frame{flex:none;align-self:center;transform-origin:center center;background:#26262c;border:1px solid #ffffff1f;border-radius:6px;box-shadow:0 20px 80px #000000cc;
   transition:width .45s cubic-bezier(.22,1,.36,1),height .45s cubic-bezier(.22,1,.36,1),transform .45s cubic-bezier(.22,1,.36,1)}
 .preview-frame.res-pop{animation:res-bubble .55s ease}

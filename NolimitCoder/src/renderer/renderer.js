@@ -279,7 +279,7 @@ function activeProjectType() {
 function videoResWH() { return VIDEO_RESOLUTIONS[videoRes] || VIDEO_RESOLUTIONS['1920x1080']; }
 /* System prompt pro reklamní videa: jedno responzivní index.html, celé viewport,
    animované, bez potřeby klikání (v náhledu ani klikat nejde — chová se jako video). */
-const VIDEO_ADD = ' VIDEO AD PROJECT: output a single self-contained advertising commercial as index.html in the project root (inline CSS+JS, no build). The ad fills the whole viewport at the target resolution and is ALWAYS in motion — layered CSS/JS animations (background, headline, CTA, particles) run continuously and concurrently from page load (autoplay, no interaction), looping seamlessly with no static frames. Hook in the first second, persistent logo and CTA, readable typography, strong contrast — it must look like a real paid ad at every moment. If the brief mentions a platform (YouTube, TikTok, Reels…), FIRST research its current ad/creative specs via web_search (resolution, duration, safe zones) and build exactly to spec. No clicks needed — the page behaves like a video (nothing must require interaction). Keep everything responsive so it looks right at any of 1920x1080, 1280x720, 1440x1080, 1080x1080, 1080x1920. The finished index.html is automatically recorded to MP4 by the app — the MP4 is the primary deliverable, index.html stays inside as its editable source.';
+const VIDEO_ADD = ' VIDEO AD PROJECT: output a single self-contained advertising commercial as index.html in the project root (inline CSS+JS, no build). The ad fills the whole viewport at the target resolution and is ALWAYS in motion — layered CSS/JS animations (background, headline, CTA, particles) run continuously and concurrently from page load (autoplay, no interaction), looping seamlessly with no static frames. MANDATORY animation recipe: at least 3 independent @keyframes timelines (e.g. floating background shapes, staggered headline entrance, pulsing CTA + particles) PLUS a requestAnimationFrame JS loop driving something visible (parallax, progress, counters). Use only transform/opacity for motion (GPU, smooth). Structure the ad as SCENES IN TIME like a real video commercial — never one static page: e.g. scene 1 (0-3 s) logo intro with rotation/drop, scene 2 (3-7 s) product story with sliding lines and floating elements, scene 3 (7-10 s) finale with breathing CTA — driven by a JS timeline (setTimeout chain or time-based rAF state machine) that switches scenes automatically and loops seamlessly back to scene 1. Every second must show movement; no scene may sit still. Hook in the first second, persistent logo and CTA, readable typography, strong contrast — it must look like a real paid ad at every moment, never a static page. Example: Kofola brief → big Kofola logo drops in with rotation, headline slides line by line, bubbles float up forever, CTA button breathes. If the brief mentions a platform (YouTube, TikTok, Reels…), FIRST research its current ad/creative specs via web_search (resolution, duration, safe zones) and build exactly to spec. No clicks needed — the page behaves like a video (nothing must require interaction). Keep everything responsive so it looks right at any of 1920x1080, 1280x720, 1440x1080, 1080x1080, 1080x1920. The finished index.html is automatically recorded to MP4 by the app — the MP4 is the primary deliverable, index.html stays inside as its editable source.';
 
 /* ---------- projekty ---------- */
 function renderProjects() {
@@ -1447,6 +1447,7 @@ async function runAgent(convo, intent) {
           if (htmlReady) saveConvos();
         }
         if (htmlReady) {
+          try { reloadPreviewFrame(); } catch {} // video je vidět INSTANTNĚ, MP4 se donahraje potom
           setFooter('Nahrávám MP4…');
           await videoExportRun();
           setFooter('Hotovo · MP4 nahráno');
@@ -1713,8 +1714,23 @@ async function startPreview(root, type) {
    plus the waiting text on top. As soon as index.html exists, the real ad shows. */
 const VIDEO_EMPTY_PAGE = 'data:text/html;charset=utf-8,' + encodeURIComponent(
   '<body style="margin:0;background:#26262c">');
+/* Tvrdý reload náhledu — po vygenerování se video ukáže INSTANTNĚ, nečeká se na nic. */
+function reloadPreviewFrame() {
+  const frame = $('#previewFrame');
+  if (!frame) return;
+  try {
+    const url = $('#previewUrl') ? $('#previewUrl').textContent : '';
+    if (url && url.startsWith('http')) {
+      const cur = String(frame.src || '');
+      if (cur === url || cur === url + '/') {
+        try { frame.contentWindow.location.reload(); return; } catch {}
+      }
+      frame.src = url;
+    }
+  } catch {}
+}
 async function refreshVideoEmpty() {
-  const empty = $('#videoEmpty'), frame = $('#previewFrame');
+  const empty = $('#videoEmpty'), frame = $('#previewFrame'), stage = $('#previewStage');
   if (!empty || !frame) return;
   if (!isVideoMode() || !prefs.activeProject) { empty.style.display = 'none'; return; }
   let hasIndex = false;
@@ -1725,13 +1741,10 @@ async function refreshVideoEmpty() {
       hasIndex = paths.includes('index.html') || paths.includes('dist/index.html');
     }
   } catch {}
+  try { if (stage) stage.classList.toggle('clean', hasIndex); } catch {}
   if (hasIndex) {
     empty.style.display = 'none';
-    const src = String(frame.src || '');
-    if (!src || src === 'about:blank' || src.startsWith('data:')) {
-      const url = $('#previewUrl') ? $('#previewUrl').textContent : '';
-      if (url && url.startsWith('http')) frame.src = url;
-    }
+    reloadPreviewFrame();
     fitVideoFrame();
   } else {
     try { if (String(frame.src || '') !== VIDEO_EMPTY_PAGE) frame.src = VIDEO_EMPTY_PAGE; } catch {}
