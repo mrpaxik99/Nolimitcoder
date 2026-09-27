@@ -1,6 +1,6 @@
 ; NolimitCoder V4 - FULL CUSTOM dark installer (no MUI, pure nsDialogs).
 ; Dark background on every dialog, white text, green accents, themed buttons.
-; Built with: makensis build/custom-setup.nsi  (see build/makensis-run.js)
+; Built with: node build/makensis-run.js  (Devel: npm run build:installer)
 Unicode True
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
@@ -63,6 +63,9 @@ SetShellVarContext current
 !define IMAGE_ICON 0x0001
 !define PBM_SETPOS 1026
 !define EM_REPLACESEL 194
+!define ID_NEXT 1
+!define ID_CANCEL 2
+!define ID_BACK 3
 
 Var Dialog
 Var DidWork
@@ -73,8 +76,6 @@ Var LblStatus
 Var BarProgress
 Var TxtDir
 Var ChkLaunch
-Var UnLblStatus
-Var UnBarProgress
 
 ; ---------- dark window: dark titlebar + dark background for ALL dialogs ----------
 !macro DarkSetup FINDNAME
@@ -118,60 +119,56 @@ Function un.onGUIEnd
   !insertmacro DarkCleanup "$(^Name)"
 FunctionEnd
 
-; ---------- shared helpers ----------
 Function MakeTitleFont
+  Push $0
+  Push $1
   ${If} $TitleFont == ""
     System::Call 'gdi32::CreateFont(i -19, i 0, i 0, i 0, i 700, i 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0, t "Segoe UI") p .r0'
     StrCpy $TitleFont $0
   ${EndIf}
-FunctionEnd
-; White 15pt title label. Usage: Push text / Push y / Call AddTitle -> pops hwnd
-Function AddTitle
-  Exch $R9
-  Exch
-  Exch $R8
-  Push $0
-  Call MakeTitleFont
-  ${NSD_CreateLabel} 12 $R8 280 26 "$R9"
-  Pop $0
-  SendMessage $0 ${WM_SETFONT} $TitleFont 1
-  SetCtlColors $0 ${C_TEXT} transparent
-  StrCpy $0 $0
-  Pop $R8
-  Pop $R9
-  Exch $0
-FunctionEnd
-; Gray body label (auto height via explicit h). Usage: Push text / Push "x y w h" — simplified: fixed positions inline instead.
-; Nav buttons of the outer dialog: 1 = Next/Install, 2 = Cancel, 3 = Back
-Function SetNavText
-  Exch $R9
-  Exch
-  Exch $R8
-  Push $0
-  GetDlgItem $0 $HWNDPARENT $R8
-  SendMessage $0 ${WM_SETTEXT} 0 "STR:$R9"
-  Pop $R8
-  Pop $R9
-  Exch $0
-FunctionEnd
-Function NextText
-  Exch $0
-  Push $1
-  GetDlgItem $1 $HWNDPARENT 1
-  SendMessage $1 ${WM_SETTEXT} 0 "STR:$0"
   Pop $1
   Pop $0
 FunctionEnd
+; Set outer nav button text. Usage: Push "Text" / Push ID / Call NavText
+Function NavText
+  Exch $0
+  Exch $1
+  Push $2
+  GetDlgItem $2 $HWNDPARENT $0
+  SendMessage $2 ${WM_SETTEXT} 0 "STR:$1"
+  Pop $2
+  Push $1
+  Push $0
+FunctionEnd
 Function ClickNext
-  GetDlgItem $0 $HWNDPARENT 1
+  Push $0
+  GetDlgItem $0 $HWNDPARENT ${ID_NEXT}
   EnableWindow $0 1
   SendMessage $0 ${BM_CLICK} 0 0
+  Pop $0
 FunctionEnd
 Function DisableBackNext
-  GetDlgItem $0 $HWNDPARENT 3
+  Push $0
+  GetDlgItem $0 $HWNDPARENT ${ID_BACK}
   EnableWindow $0 0
-  GetDlgItem $0 $HWNDPARENT 1
+  GetDlgItem $0 $HWNDPARENT ${ID_NEXT}
   EnableWindow $0 0
+  Pop $0
+FunctionEnd
+; Big white title at (12, Y). Usage: Push text / Push Y / Call PageTitle (returns nothing)
+Function PageTitle
+  Exch $0
+  Exch $1
+  Push $2
+  Push $3
+  Call MakeTitleFont
+  ${NSD_CreateLabel} 12 $0 280 26 "$1"
+  Pop $2
+  SendMessage $2 ${WM_SETFONT} $TitleFont 1
+  SetCtlColors $2 ${C_TEXT} transparent
+  Pop $3
+  Push $1
+  Push $0
 FunctionEnd
 
 ; ================= INSTALL PAGES =================
@@ -189,23 +186,22 @@ Function WelcomeShow
   ${EndIf}
   InitPluginsDir
   File /oname=$PLUGINSDIR\logo.ico "${LOGO_ICO}"
-  ${NSD_CreateIcon} 12 12 52 52 ""
+  ${NSD_CreateIcon} 12 12 56 56 ""
   Pop $0
-  System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\logo.ico", i ${IMAGE_ICON}, i 48, i 48, i 0x10) p .r0'
+  System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\logo.ico", i ${IMAGE_ICON}, i 64, i 64, i 0x10) p .r0'
   ${If} $0 != 0
     SendMessage $0 ${STM_SETIMAGE} ${IMAGE_ICON} $0
   ${EndIf}
   Push "NolimitCoder V4"
-  Push 16
-  Call AddTitle
-  Pop $0
-  ${NSD_CreateLabel} 76 44 210 12 "Version ${APP_VERSION}  ·  by ${APP_PUBLISHER}"
+  Push 14
+  Call PageTitle
+  ${NSD_CreateLabel} 76 44 214 12 "Version ${APP_VERSION}  ·  by ${APP_PUBLISHER}"
   Pop $0
   SetCtlColors $0 ${C_GREEN} transparent
-  ${NSD_CreateLabel} 12 76 280 36 "AI chat with NolimitCoder models.$\r$\nFast setup  ·  No API key  ·  Windows 64-bit"
+  ${NSD_CreateLabel} 12 76 280 30 "AI chat with NolimitCoder models.$\r$\nFast setup  ·  No API key  ·  Windows 64-bit"
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
-  ${NSD_CreateLabel} 12 128 280 12 "Click Next to install."
+  ${NSD_CreateLabel} 12 122 280 12 "Click Next to install."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
   nsDialogs::Show
@@ -213,8 +209,8 @@ FunctionEnd
 
 Function LicenseShow
   Push "Next >"
-  Call NextText
-  Pop $0
+  Push ${ID_NEXT}
+  Call NavText
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
@@ -222,8 +218,7 @@ Function LicenseShow
   ${EndIf}
   Push "License Agreement"
   Push 12
-  Call AddTitle
-  Pop $0
+  Call PageTitle
   ${NSD_CreateLabel} 12 42 280 12 "Please review the terms before installing."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
@@ -241,14 +236,14 @@ Function LicenseShow
   ${EndIf}
   nsDialogs::Show
   Push "I Agree"
-  Call NextText
-  Pop $0
+  Push ${ID_NEXT}
+  Call NavText
 FunctionEnd
 
 Function DirShow
   Push "Next >"
-  Call NextText
-  Pop $0
+  Push ${ID_NEXT}
+  Call NavText
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
@@ -256,17 +251,16 @@ Function DirShow
   ${EndIf}
   Push "Choose Install Location"
   Push 12
-  Call AddTitle
-  Pop $0
+  Call PageTitle
   ${NSD_CreateLabel} 12 44 280 12 "Where should ${APP_NAME} be installed?"
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
   ${NSD_CreateDirRequest} 12 62 200 13 "$INSTDIR"
   Pop $TxtDir
-  ${NSD_CreateBrowseButton} 218 61 70 15 "Browse…"
+  ${NSD_CreateBrowseButton} 218 61 62 15 "Browse…"
   Pop $0
   ${NSD_OnClick} $0 OnBrowseDir
-  ${NSD_CreateLabel} 12 84 280 24 "About 300 MB of free space is required.$\r$\nYour projects and settings stay untouched."
+  ${NSD_CreateLabel} 12 84 280 26 "About 300 MB of free space is required.$\r$\nYour projects and settings stay untouched."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
   nsDialogs::Show
@@ -291,8 +285,7 @@ Function InstallShow
   ${EndIf}
   Push "Installing…"
   Push 12
-  Call AddTitle
-  Pop $0
+  Call PageTitle
   ${NSD_CreateLabel} 12 48 280 12 "Copying files…"
   Pop $LblStatus
   SetCtlColors $LblStatus ${C_GREEN} transparent
@@ -314,13 +307,23 @@ FunctionEnd
 
 Function SetProg
   Exch $0
-  SendMessage $BarProgress ${PBM_SETPOS} $0 0
-  Pop $0
+  Push $1
+  ${If} $BarProgress != 0
+  ${AndIf} $BarProgress != ""
+    SendMessage $BarProgress ${PBM_SETPOS} $0 0
+  ${EndIf}
+  Pop $1
+  Push $0
 FunctionEnd
 Function SetPhase
   Exch $0
-  SendMessage $LblStatus ${WM_SETTEXT} 0 "STR:$0"
-  Pop $0
+  Push $1
+  ${If} $LblStatus != 0
+  ${AndIf} $LblStatus != ""
+    SendMessage $LblStatus ${WM_SETTEXT} 0 "STR:$0"
+  ${EndIf}
+  Pop $1
+  Push $0
   Sleep 120
 FunctionEnd
 
@@ -339,8 +342,16 @@ Function DoInstallFiles
   Push 18
   Call SetProg
   SetOutPath "$INSTDIR"
-  File "${SRC_DIR}\*.exe"
-  File "${SRC_DIR}\*.dll"
+  CopyLoop:
+    ClearErrors
+    File "${SRC_DIR}\*.exe"
+    File "${SRC_DIR}\*.dll"
+    IfErrors CopyRetry
+    Goto CopyLibs
+  CopyRetry:
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Some files are locked (is ${APP_NAME} running?). Close it and click Retry." IDRETRY CopyLoop
+    Abort "Installation cancelled. No files were changed."
+  CopyLibs:
   Push "Copying libraries…"
   Call SetPhase
   Push 45
@@ -388,8 +399,8 @@ FunctionEnd
 
 Function FinishShow
   Push "Finish"
-  Call NextText
-  Pop $0
+  Push ${ID_NEXT}
+  Call NavText
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
@@ -397,8 +408,7 @@ Function FinishShow
   ${EndIf}
   Push "Installation complete"
   Push 12
-  Call AddTitle
-  Pop $0
+  Call PageTitle
   ${NSD_CreateLabel} 12 44 280 24 "${APP_NAME} is ready in:$\r$\n$INSTDIR"
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
@@ -436,13 +446,14 @@ Function un.ConfirmShow
   ${EndIf}
   Push "Uninstall ${APP_NAME}"
   Push 12
-  Call AddTitle
+  Call PageTitle
   Pop $0
-  ${NSD_CreateLabel} 12 48 280 36 "This removes the application, shortcuts and registry entries.$\r$\nYour projects and settings are kept."
+  ${NSD_CreateLabel} 12 44 280 36 "This removes the application, shortcuts and registry entries.$\r$\nYour projects and settings are kept."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
   Push "Uninstall"
-  Call NextText
+  Push ${ID_NEXT}
+  Call NavText
   Pop $0
   nsDialogs::Show
 FunctionEnd
@@ -455,7 +466,7 @@ Function un.WorkShow
   ${EndIf}
   Push "Uninstalling…"
   Push 12
-  Call AddTitle
+  Call PageTitle
   Pop $0
   ${NSD_CreateLabel} 12 48 280 12 "Removing files…"
   Pop $UnLblStatus
@@ -463,7 +474,8 @@ Function un.WorkShow
   ${NSD_CreateProgressBar} 12 66 276 14 ""
   Pop $UnBarProgress
   Push "Close"
-  Call NextText
+  Push ${ID_NEXT}
+  Call NavText
   Pop $0
   Call DisableBackNext
   ${NSD_CreateTimer} un.WorkTimer 250
@@ -473,9 +485,16 @@ Function un.WorkTimer
   ${NSD_KillTimer} un.WorkTimer
   Call un.DoUninstall
   StrCpy $DidWork 1
-  SendMessage $UnBarProgress ${PBM_SETPOS} 100 0
-  Sleep 200
   Call ClickNext
+FunctionEnd
+
+Function un.SetUnProg
+  Exch $0
+  Push $1
+  SendMessage $UnBarProgress ${PBM_SETPOS} $0 0
+  Pop $1
+  Push $0
+  Sleep 150
 FunctionEnd
 
 Function un.DoUninstall
@@ -483,12 +502,18 @@ Function un.DoUninstall
   ${If} $0 < 10
     Abort "Install folder not found."
   ${EndIf}
+  Push 20
+  Call un.SetUnProg
   Delete "$DESKTOP\NolimitCoder.lnk"
   Delete "$SMPROGRAMS\NolimitCoder\NolimitCoder.lnk"
   Delete "$SMPROGRAMS\NolimitCoder\Uninstall.lnk"
   RMDir "$SMPROGRAMS\NolimitCoder"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
+  Push 55
+  Call un.SetUnProg
   RMDir /r "$INSTDIR"
+  Push 100
+  Call un.SetUnProg
 FunctionEnd
 
 Function un.FinishShow
@@ -499,13 +524,14 @@ Function un.FinishShow
   ${EndIf}
   Push "Uninstall complete"
   Push 12
-  Call AddTitle
+  Call PageTitle
   Pop $0
   ${NSD_CreateLabel} 12 48 280 24 "${APP_NAME} was removed from your PC.$\r$\nYour projects and settings were kept."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
   Push "Close"
-  Call NextText
+  Push ${ID_NEXT}
+  Call NavText
   Pop $0
   nsDialogs::Show
 FunctionEnd
