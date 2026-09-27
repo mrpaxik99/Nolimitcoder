@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
   previewStop: (dirPath) => ipcRenderer.invoke('preview:stop', dirPath),
   videoExport: (data) => ipcRenderer.invoke('video:export', data),
   videoReveal: (filePath) => ipcRenderer.invoke('video:reveal', filePath),
+  videoAbort: () => ipcRenderer.invoke('video:abort'),
   onVideoProgress: (cb) => ipcRenderer.on('video:progress', (_, d) => cb(d)),
   termRun: (data) => ipcRenderer.invoke('term:run', data),
   isAdmin: () => ipcRenderer.invoke('sys:isAdmin'),

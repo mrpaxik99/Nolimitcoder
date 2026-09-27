@@ -1096,6 +1096,9 @@ ipcMain.handle('video:export', async (event, p) => {
 ipcMain.handle('video:reveal', (_, fp) => {
   try { shell.showItemInFolder(String(fp)); return true; } catch { return false; }
 });
+ipcMain.handle('video:abort', () => {
+  try { VX.requestAbort(); return true; } catch { return false; }
+});
 app.on('before-quit', () => {
   for (const [, s] of previewServers) { try { s.server.close(); } catch {} }
   previewServers.clear();

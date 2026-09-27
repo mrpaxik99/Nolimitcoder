@@ -1462,6 +1462,8 @@ async function runAgent(convo, intent) {
     el.sendBtn.disabled = false; el.stopBtn.style.display = 'none';
     try { window.api.removeListeners(); } catch {}
     try { if (activeProjectType() === 'video') refreshVideoEmpty(); } catch {}
+    // Po Stopu se fronta maže — nic dalšího se už nespustí. Jinak jede další zpráva ve frontě.
+    if (stopRequested && pendingQueue.length) { pendingQueue.length = 0; }
     if (pendingQueue.length) { const nx = pendingQueue.shift(); updateQueue(); sendMessage(nx); }
     else updateQueue();
   }
@@ -1811,10 +1813,12 @@ async function videoExportRun() {
       if (dl) dl.style.display = '';
       playDone();
     } else {
-      setVideoProgress('Export failed: ' + ((r && r.error) || 'unknown error').slice(0, 160));
+      const errMsg = String((r && r.error) || 'unknown error');
+      setVideoProgress(/cancelled/i.test(errMsg) ? 'Zastaveno' : 'Export failed: ' + errMsg.slice(0, 160));
     }
   } catch (e) {
-    setVideoProgress('Export failed: ' + String((e && e.message) || e).slice(0, 160));
+    const errMsg = String((e && e.message) || e);
+    setVideoProgress(/cancelled/i.test(errMsg) ? 'Zastaveno' : 'Export failed: ' + errMsg.slice(0, 160));
   }
   videoExporting = false;
   if (btn) btn.disabled = false;
@@ -1879,7 +1883,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
   el.sendBtn.addEventListener('click', () => sendMessage());
-  el.stopBtn.addEventListener('click', () => { stopRequested = true; try { window.api.chatStreamAbort(); } catch {} setFooter('Zastaveno'); });
+  el.stopBtn.addEventListener('click', () => {
+    // STOP zastaví VŠECHNY generace v chatu: stream, frontu zpráv i nahrávání MP4
+    stopRequested = true;
+    pendingQueue.length = 0; updateQueue();
+    try { window.api.chatStreamAbort(); } catch {}
+    try { window.api.videoAbort(); } catch {}
+    videoExporting = false;
+    setVideoProgress('');
+    setFooter('Zastaveno');
+  });
   document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); newConvo(); renderMessages(); } });
   $('#newChatBtn').addEventListener('click', () => { newConvo(); renderMessages(); });
   $('#backBtn').addEventListener('click', () => { showView('projects'); renderProjects(); });

@@ -157,7 +157,16 @@ function loadHidden(url, width, height) {
   });
 }
 
-// Record the page: fps PNG frames for durationSec, then encode to MP4.
+// Stop support: renderer Stop button aborts recording + encoding mid-flight.
+let abortFlag = false;
+let ffProc = null;
+function requestAbort() {
+  abortFlag = true;
+  try { if (ffProc) ffProc.kill(); } catch {}
+}
+function resetAbort() { abortFlag = false; ffProc = null; }
+
+// Record the page: fps JPEG frames for durationSec, then encode to MP4.
 async function exportVideo(opts) {
   const o = opts || {};
   const url = String(o.url || '');
@@ -168,6 +177,7 @@ async function exportVideo(opts) {
   const outPath = String(o.outPath || '');
   const onProg = o.onProg;
   if (!url || !outPath) return { ok: false, error: 'missing url/outPath' };
+  resetAbort();
   const framesDir = path.join(os.tmpdir(), 'nolimitcoder', 'frames-' + Date.now().toString(36));
   try { fs.mkdirSync(framesDir, { recursive: true }); } catch (e) { return { ok: false, error: 'tmp failed: ' + e.message }; }
   const total = durationSec * fps;
@@ -178,6 +188,12 @@ async function exportVideo(opts) {
   } catch (e) { return { ok: false, error: e.message }; }
   try {
     for (let i = 0; i < total; i++) {
+      if (abortFlag) {
+        try { win && win.destroy(); } catch {}
+        try { fs.rmSync(framesDir, { recursive: true, force: true }); } catch {}
+        resetAbort();
+        return { ok: false, error: 'cancelled' };
+      }
       const t0 = Date.now();
       try {
         const img = await win.webContents.capturePage();
@@ -199,12 +215,15 @@ async function exportVideo(opts) {
     '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p', '-crf', '23', '-movflags', '+faststart', outPath];
   const code = await new Promise((resolve) => {
     const cp = spawn(ff, args, { windowsHide: true, timeout: 600000 });
-    cp.on('error', () => resolve(-1));
-    cp.on('close', (c) => resolve(c == null ? -1 : c));
+    ffProc = cp;
+    cp.on('error', () => { ffProc = null; resolve(-1); });
+    cp.on('close', (c) => { ffProc = null; resolve(c == null ? -1 : c); });
   });
   try { fs.rmSync(framesDir, { recursive: true, force: true }); } catch {}
+  if (abortFlag) { resetAbort(); try { fs.rmSync(outPath, { force: true }); } catch {} return { ok: false, error: 'cancelled' }; }
+  resetAbort();
   if (code !== 0 || !fs.existsSync(outPath)) return { ok: false, error: 'ffmpeg encode failed (code ' + code + ')' };
   return { ok: true, path: outPath };
 }
 
-module.exports = { ensureFfmpeg, exportVideo, ffmpegOk, ffmpegExePath };
+module.exports = { ensureFfmpeg, exportVideo, ffmpegOk, ffmpegExePath, requestAbort };
