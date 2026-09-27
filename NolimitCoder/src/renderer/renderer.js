@@ -68,22 +68,24 @@ function detectIntent(raw) {
   return 'chat';
 }
 /* Commercial video: popis reklamy je VŽDY úkol (i bez rozkazovacích sloves) — model nesmí
-   skončit u otázek, musí rovnou stavět. Pokecem zůstane jen pozdrav a skutečná otázka. */
+   skončit u otázek, musí rovnou stavět. Pokecem zůstane jen pozdrav a skutečná otázka.
+   Dvojjazyčně (EN + CS): uživatel často píše česky. */
 function detectCommercialIntent(raw) {
   const t = String(raw || '').trim();
   if (!t) return 'chat';
   // otazník: úkol jen když žádá akci, jinak otázka
   if (/\?/.test(t)) {
-    if (/(make|create|build|fix|add|generate|change|rewrite|finish|complete|prepare)/i.test(t)) return 'build';
+    if (/(make|create|build|fix|add|generate|change|rewrite|finish|complete|prepare|udělej|udelej|udělat|udelat|vytvoř|vytvor|vytvořit|vytvorit|přidej|pridej|přidat|pridat|oprav|opravit|změň|zmen|změnit|zmenit|napiš|napis|napsat|dodělej|dodelej|dodělat|dodelat)/i.test(t)) return 'build';
     return 'chat';
   }
   // holý pozdrav / díky → pokec
-  if (/^(hi|hello|hey|yo|thanks|thank you|ok|okay|good (morning|afternoon|evening))\b[\s!.,]*$/i.test(t)) return 'chat';
+  if (/^(hi|hello|hey|yo|thanks|thank you|ok|okay|ahoj|čau|cau|zdar|čus|cus|dobrý den|dobry den|díky|diky|děkuji|dekuji|good (morning|afternoon|evening))\b[\s!.,]*$/i.test(t)) return 'chat';
   // tázací začátek → otázka
-  const noHi = t.replace(/^(hi|hello|hey|yo|please|well|so|ok|okay)\b[\s,]+/i, '').trim() || t;
-  if (/^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know)\b/i.test(noHi)) return 'chat';
+  const noHi = t.replace(/^(hi|hello|hey|yo|ahoj|čau|cau|zdar|please|prosím|prosim|well|so|ok|okay|tak|no|hele)\b[\s,]+/i, '').trim() || t;
+  if (/^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know|jak|co|proč|proc|kde|kdy|kdo|kolik|čí|či|jestli|vysvětli|vysvetli|řekni|rekni|popiš|popis|poradíš|poradis)\b/i.test(noHi)) return 'chat';
   // zadání videa → vždy úkol: video klíčová slova, rozlišení/poměr, délka, akční slovesa, delší popis
-  if (/(video|\bad\b|advert|commercial|animat|intro|outro|subscribe|\blike\b|bell|logo|youtube|tiktok|reels|shorts|vertical|square|full[\s-]?hd|\bhd\b|\b4k\b|resolution|\d{3,4}\s*x\s*\d{3,4}|\b(16:9|9:16|1:1|4:3)\b|\b\d+\s*(s|sec|seconds?|min|minutes?)\b)/i.test(t)) return 'build';
+  if (/(video|\bad\b|advert|commercial|animat|intro|outro|subscribe|\blike\b|bell|logo|youtube|tiktok|reels|shorts|vertical|square|full[\s-]?hd|\bhd\b|\b4k\b|resolution|\d{3,4}\s*x\s*\d{3,4}|\b(16:9|9:16|1:1|4:3)\b|\b\d+\s*(s|sec|seconds?|min|minutes?)\b|reklam|animac|vide|odběr|odber|vertikál|vertikal|čtverec|ctverec|rozlišen|rozlisen|délk|delk|sekund|vteřin|minut)/i.test(t)) return 'build';
+  if (/(make|create|build|write|fix|repair|add|update|change|remove|delete|refactor|implement|generate|install|run|rename|move|copy|download|test|scaffold|udělej|udelej|vytvoř|vytvor|naprogramuj|napiš|napis|uprav|změň|zmen|přidej|pridej|oprav|dodělej|dodelej|vygeneruj|spusť|spust)/i.test(t)) return 'build';
   if (t.length > 40) return 'build'; // delší popis = zadání, ne pokec
   return detectIntent(t); // zbytek podle obecných pravidel
 }
