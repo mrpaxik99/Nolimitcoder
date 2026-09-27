@@ -1735,6 +1735,7 @@ async function startPreview(root, type) {
       if (!isVid) $('#previewToggle').textContent = 'Preview ✓';
       $('#previewUrl').textContent = r.url;
       $('#previewFrame').src = r.url;
+      try { window.api.previewWatch(root); } catch {} // hlídej složku: jakýkoliv nový soubor = instantní reload
       if (type === 'video' || isVideoMode()) {
         setVideoMode(true);
         setTimeout(fitVideoFrame, 60);
@@ -1901,6 +1902,7 @@ function hidePreview() {
   $('#previewPane').style.display = 'none';
   $('#previewToggle').style.display = 'none';
   try { $('#previewFrame').src = 'about:blank'; } catch {}
+  try { if (prefs.activeProject) window.api.previewUnwatch(prefs.activeProject); } catch {}
 }
 
 /* ---------- init ---------- */
@@ -2031,6 +2033,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     // záměrně ticho: žádná čára ani sekundy průběhu, jen výsledek (Done/chybu píše videoExportRun sám)
     window.api.onVideoProgress(() => {});
+  } catch {}
+  // file watcher: jakýkoliv soubor ve složce projektu = náhled se hned sám přenačte (žádné ruční REFRESH)
+  try {
+    window.api.onPreviewFileChanged((d) => {
+      try {
+        if (!d || !d.root || !prefs.activeProject) return;
+        const a = String(d.root).replace(/\\/g, '/').toLowerCase();
+        const b = String(prefs.activeProject).replace(/\\/g, '/').toLowerCase();
+        if (a !== b) return;
+        const pane = $('#previewPane');
+        if (!pane || pane.style.display === 'none') return;
+        reloadPreviewFrame();
+        if (isVideoMode()) refreshVideoEmpty();
+      } catch {}
+    });
   } catch {}
   window.addEventListener('resize', () => { try { fitVideoFrame(); } catch {} });
   $('#previewReload').addEventListener('click', () => { try { $('#previewFrame').contentWindow.location.reload(); } catch {} try { refreshVideoEmpty(); } catch {} });

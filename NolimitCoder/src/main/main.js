@@ -1058,6 +1058,37 @@ ipcMain.handle('preview:stop', async (_, dirPath) => {
   }
   return true;
 });
+// ===== FILE WATCHER: jakmile do složky přistane jakýkoliv soubor, renderer hned přenačte náhled =====
+const previewWatchers = new Map(); // rootPath -> { watcher, timer }
+function broadcastPreviewChanged(root) {
+  try {
+    for (const w of BrowserWindow.getAllWindows()) { try { w.webContents.send('preview:file-changed', { root }); } catch {} }
+  } catch {}
+}
+ipcMain.handle('preview:watch', (_, dirPath) => {
+  try {
+    const root = path.resolve(String(dirPath || ''));
+    if (!root || !fs.existsSync(root)) return false;
+    if (previewWatchers.has(root)) return true;
+    const watcher = fs.watch(root, { recursive: true }, () => {
+      const cur = previewWatchers.get(root);
+      if (!cur) return;
+      clearTimeout(cur.timer);
+      cur.timer = setTimeout(() => broadcastPreviewChanged(root), 400);
+    });
+    watcher.on('error', () => { try { watcher.close(); } catch {} previewWatchers.delete(root); });
+    previewWatchers.set(root, { watcher, timer: null });
+    return true;
+  } catch { return false; }
+});
+ipcMain.handle('preview:unwatch', (_, dirPath) => {
+  try {
+    const root = path.resolve(String(dirPath || ''));
+    const cur = previewWatchers.get(root);
+    if (cur) { clearTimeout(cur.timer); try { cur.watcher.close(); } catch {} previewWatchers.delete(root); }
+    return true;
+  } catch { return false; }
+});
 
 // ===== AI COMMERCIAL VIDEO → MP4 (local machine power) =====
 // Records the ad HTML in a hidden window at the exact resolution (capturePage
@@ -1102,4 +1133,6 @@ ipcMain.handle('video:abort', () => {
 app.on('before-quit', () => {
   for (const [, s] of previewServers) { try { s.server.close(); } catch {} }
   previewServers.clear();
+  for (const [, w] of previewWatchers) { try { clearTimeout(w.timer); } catch {} try { w.watcher.close(); } catch {} }
+  previewWatchers.clear();
 });
