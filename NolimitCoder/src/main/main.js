@@ -667,8 +667,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       });
     } catch {}
 
-    // --- Gateway request: direct, on quota/429 automatically via a random proxy ---
-    const MAX_PROXY_TRIES = 5;
+    // --- Gateway request: direct, on quota/429 automatically via random proxies, infinitely ---
     let finished = false;
     let currentAbort = null;
     const safeSend = (ch, data) => { try { sender.send(ch, data); } catch {} };
@@ -871,45 +870,59 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       bumpIdle();
     });
 
-    // Main loop: direct → on quota/netError immediately a random proxy (max 5x), each a different one.
+    // Main loop: INFINITE — keep trying to connect somewhere until it goes through or the user stops it.
+    // Cycle: direct → proxies → direct → … with a growing pause + random jitter between attempts,
+    // so multiple users hitting the limit at once spread out instead of hammering at the same moment.
+    // Retry-After from the gateway is honored (capped at 120 s).
     (async () => {
       if (localBase) { await streamDirect(); return; }
-      // When approaching the limit (fresh 429), start via proxy right away — it is faster than another direct 429.
-      if (PX.shouldUseProxyFirst()) {
-        for (let i = 0; i < MAX_PROXY_TRIES && !finished; i++) {
-          const proxy = PX.getRandomProxy(i === 0 ? null : undefined);
-          if (!proxy) break;
-          notifyProxy(proxy, i === 0 ? 'preemptive-quota' : 'retry');
-          safeSend('chat:stream-chunk', ''); // keep the connection alive
-          const r = await streamViaProxy(proxy);
-          if (r.fatal) return;
-          if (r.quota) { PX.markBad(proxy); continue; }       // quota even via proxy → next random proxy
-          if (r.proxyFail) { PX.markBad(proxy); continue; }    // dead proxy → next one
-          if (r.streaming) return; // running — the rest is handled by forwarding
+      // The Stop button must also work while waiting between attempts (no attempt is listening then).
+      const onLoopAbort = () => { try { currentAbort && currentAbort(); } catch {} finishOnce('chat:stream-end', undefined, 0, 0); };
+      ipcMain.on('chat:stream-abort', onLoopAbort);
+      let n = 0; // failed attempts in this request (drives backoff growth)
+      let waitCap = 0; // Retry-After from the last quota hit (ms, capped)
+      const sleep = (ms) => new Promise((res) => {
+        const t0 = Date.now();
+        const iv = setInterval(() => {
+          if (finished || (Date.now() - t0) >= ms) { clearInterval(iv); res(); }
+        }, 250);
+      });
+      const backoffMs = () => {
+        const base = Math.min(1000 * Math.pow(2, Math.min(n, 5)), 30000); // 1,2,4,8,16,30,30… s
+        const jitter = Math.floor(Math.random() * 2000); // random spread so users don't fire at once
+        return Math.min(Math.max(base + jitter, waitCap), 120000);
+      };
+      try {
+        while (!finished) {
+          // After a fresh quota hit, go via proxy right away — faster than another direct 429.
+          if (PX.shouldUseProxyFirst()) {
+            const proxy = PX.getRandomProxy();
+            if (proxy) {
+              notifyProxy(proxy, n === 0 ? 'preemptive-quota' : 'retry');
+              const r = await streamViaProxy(proxy);
+              if (!r || r.fatal) return;
+              if (r.quota || r.proxyFail) {
+                if (r.quota && r.retryAfterMs) waitCap = Math.min(r.retryAfterMs, 120000);
+                PX.markBad(proxy);
+                n++;
+                await sleep(backoffMs());
+                continue;
+              }
+              return; // streaming — the rest is handled by forwarding
+            }
+          }
+          const d = await streamDirect();
+          if (!d || d.fatal || d.streaming) return; // done / running / fatal error
+          if (d.quota || d.netError) {
+            if (d.retryAfterMs) waitCap = Math.min(d.retryAfterMs, 120000);
+            n++;
+            await sleep(backoffMs());
+            continue;
+          }
+          return;
         }
-        // proxy pool exhausted → fall back to direct (so the renderer at least gets an honest 429)
-      }
-      const d = await streamDirect();
-      if (d && (d.quota || d.netError)) {
-        const whyQuota = !!d.quota;
-        if (whyQuota) { try { safeSend('chat:stream-chunk', ''); } catch {} }
-        for (let i = 0; i < MAX_PROXY_TRIES && !finished; i++) {
-          const proxy = PX.getRandomProxy();
-          if (!proxy) break;
-          notifyProxy(proxy, whyQuota ? 'quota-switch' : 'neterror-switch');
-          const r = await streamViaProxy(proxy);
-          if (r.fatal) return;
-          if (r.quota || r.proxyFail) { PX.markBad(proxy); continue; }
-          if (r.streaming) return;
-        }
-        // All proxies failed → honest message with quota flag (renderer tries the 2nd model)
-        if (!finished) {
-          const raMs = d.retryAfterMs || 0;
-          finishOnce('chat:stream-error', {
-            error: scrubModels(`HTTP ${d.status || 429}: ${String(d.body || d.error || 'quota').slice(0, 1200)} (also tried via ${MAX_PROXY_TRIES} proxies)`),
-            url, isRateLimit: true, retryAfterMs: raMs, viaExhausted: true,
-          }, 0, 0);
-        }
+      } finally {
+        try { ipcMain.removeListener('chat:stream-abort', onLoopAbort); } catch {}
       }
     })();
 
