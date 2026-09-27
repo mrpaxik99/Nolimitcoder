@@ -67,6 +67,26 @@ function detectIntent(raw) {
   if (/```|Traceback|SyntaxError|TypeError|ReferenceError|\berror TS\d+|^\s*at\s+\S+\s*\(|\b[A-Za-z-]+\.(js|ts|tsx|py|java|cs|cpp|c|go|rs|php|rb):\d+/im.test(t) && !/\?/.test(t)) return 'build';
   return 'chat';
 }
+/* Commercial video: popis reklamy je VŽDY úkol (i bez rozkazovacích sloves) — model nesmí
+   skončit u otázek, musí rovnou stavět. Pokecem zůstane jen pozdrav a skutečná otázka. */
+function detectCommercialIntent(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return 'chat';
+  // otazník: úkol jen když žádá akci, jinak otázka
+  if (/\?/.test(t)) {
+    if (/(make|create|build|fix|add|generate|change|rewrite|finish|complete|prepare)/i.test(t)) return 'build';
+    return 'chat';
+  }
+  // holý pozdrav / díky → pokec
+  if (/^(hi|hello|hey|yo|thanks|thank you|ok|okay|good (morning|afternoon|evening))\b[\s!.,]*$/i.test(t)) return 'chat';
+  // tázací začátek → otázka
+  const noHi = t.replace(/^(hi|hello|hey|yo|please|well|so|ok|okay)\b[\s,]+/i, '').trim() || t;
+  if (/^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know)\b/i.test(noHi)) return 'chat';
+  // zadání videa → vždy úkol: video klíčová slova, rozlišení/poměr, délka, akční slovesa, delší popis
+  if (/(video|\bad\b|advert|commercial|animat|intro|outro|subscribe|\blike\b|bell|logo|youtube|tiktok|reels|shorts|vertical|square|full[\s-]?hd|\bhd\b|\b4k\b|resolution|\d{3,4}\s*x\s*\d{3,4}|\b(16:9|9:16|1:1|4:3)\b|\b\d+\s*(s|sec|seconds?|min|minutes?)\b)/i.test(t)) return 'build';
+  if (t.length > 40) return 'build'; // delší popis = zadání, ne pokec
+  return detectIntent(t); // zbytek podle obecných pravidel
+}
 
 /* ---------- helpers: markdown / highlight ---------- */
 function dlog(tag, data) { try { if (window.api && window.api.debugLog) window.api.debugLog(tag, data); } catch {} }
@@ -972,7 +992,8 @@ async function sendMessage(overrideText) {
   activeConvoId = convo.id; localStorage.setItem('nlc_active', convo.id);
   if (convo.messages.length === 0) { convo.title = text.slice(0, 48) || 'Nová konverzace'; }
   // Rozpoznej otázku vs. úkol ještě před @expanzí (přiložený obsah by mátl detekci) — Build podle toho odpoví, nebo maká.
-  const intent = detectIntent(text);
+  // Commercial video má vlastní detekci: popis reklamy je vždy úkol, nikdy pokec s otázkami.
+  const intent = activeProjectType() === 'video' ? detectCommercialIntent(text) : detectIntent(text);
   // @ kontext: @cesta → přilož obsah souboru
   text = await expandAtRefs(text);
   convo.messages.push({ role: 'user', content: text });
