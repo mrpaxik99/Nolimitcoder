@@ -118,3 +118,28 @@ typeLoop('demoInput2', [
     if (back) back.style.transform = '';
   });
 })();
+
+// Logged-in user in nav (Google login via login.html)
+(function () {
+  const btn = document.getElementById('loginBtn');
+  if (!btn) return;
+  let user = null;
+  try { user = JSON.parse(localStorage.getItem('nolimit_user')); } catch (e) {}
+  if (!user) return;
+  const chip = document.createElement('span');
+  chip.className = 'nav-user';
+  const first = (user.name || 'U').trim().charAt(0).toUpperCase();
+  chip.innerHTML = (user.picture
+    ? '<img src="' + user.picture + '" alt="">'
+    : '<img src="./assets/logo.png" alt="">') +
+    '<span>' + first + ' · ' + (user.name || 'User').split(' ')[0] + '</span>';
+  const out = document.createElement('button');
+  out.textContent = 'Log out';
+  out.title = 'Log out';
+  out.addEventListener('click', () => {
+    try { localStorage.removeItem('nolimit_user'); } catch (e) {}
+    location.reload();
+  });
+  chip.appendChild(out);
+  btn.replaceWith(chip);
+})();
