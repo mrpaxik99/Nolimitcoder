@@ -120,19 +120,16 @@ body:hover .cursor-glow{opacity:1}
 .stat b{display:block;font-size:20px;color:var(--text-strong)}
 .stat small{color:var(--text-weaker);font-size:12px}
 
-/* ===== Two app windows — floating, tilt from JS ===== */
-.hero-shots{position:relative;display:grid;grid-template-columns:1.12fr .92fr;gap:30px;align-items:center;
-  margin-top:52px;perspective:1500px}
+/* ===== One big app window — 1:1 look, floating, tilt from JS ===== */
+.hero-shots{position:relative;max-width:1020px;margin:52px auto 0;perspective:1500px}
 .hero-shots::before{content:'';position:absolute;inset:8% -4% -6% -4%;z-index:-1;pointer-events:none;
-  background:radial-gradient(600px 300px at 30% 40%,#ffffff12,transparent 65%),
-  radial-gradient(500px 280px at 75% 60%,#ffffff0c,transparent 65%)}
+  background:radial-gradient(700px 320px at 50% 40%,#ffffff12,transparent 65%)}
 .hero-shot{position:relative;min-width:0}
-.shot-main{z-index:2}
 .shot-main .app-shot{animation:shot-float-a 7s ease-in-out infinite}
-.shot-back{z-index:1}
-.shot-back .app-shot{transform:scale(.96);opacity:.94;animation:shot-float-b 8.5s ease-in-out infinite}
 @keyframes shot-float-a{0%,100%{translate:0 0}50%{translate:0 -10px}}
-@keyframes shot-float-b{0%,100%{translate:0 0;rotate:2.5deg}50%{translate:0 10px;rotate:1.2deg}}
+.hero-shots.single-lg .app-shot-body{min-height:440px}
+.hero-shots.single-lg .as-side{width:250px;min-width:250px}
+.hero-shots.single-lg .as-main{padding:26px;font-size:14px}
 .term{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.9;color:var(--text-weak);
   background:#0b0b0b;border:1px solid var(--border-weaker);border-radius:8px;padding:12px 14px;animation:term-glow 3.5s ease-in-out infinite}
 .term .tp{color:var(--text-strong);margin-right:6px}
