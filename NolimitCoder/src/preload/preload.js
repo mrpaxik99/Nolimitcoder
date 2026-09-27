@@ -35,7 +35,6 @@ contextBridge.exposeInMainWorld('api', {
   proxyStatus: () => ipcRenderer.invoke('proxy:status'),
   proxyRefresh: () => ipcRenderer.invoke('proxy:refresh'),
   onProxyStatus: (cb) => ipcRenderer.on('proxy:status', (_, d) => cb(d)),
-  instructionsGet: () => ipcRenderer.invoke('instructions:get'),
 
   onChunk: (cb) => ipcRenderer.on('chat:stream-chunk', (_, d) => cb(d)),
   onEnd: (cb) => ipcRenderer.on('chat:stream-end', () => cb()),

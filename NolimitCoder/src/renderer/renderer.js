@@ -273,20 +273,6 @@ function activeProjectType() {
   } catch {}
   return 'universal';
 }
-/* INSTRUCTIONS/ — AI instructions by project type (commercial/website/universal).
-   Loaded once from the main process; missing files = built-in code defaults. */
-let INSTR = null;
-function instrType() {
-  const t = activeProjectType();
-  return t === 'video' ? 'commercial' : (t === 'website' ? 'website' : 'universal');
-}
-function instrSec(name, fallback) {
-  try {
-    const s = INSTR && INSTR[instrType()] && INSTR[instrType()].sections;
-    if (s && s[name]) return s[name];
-  } catch {}
-  return fallback;
-}
 function videoResWH() { return VIDEO_RESOLUTIONS[videoRes] || VIDEO_RESOLUTIONS['1920x1080']; }
 /* System prompt pro reklamní videa: jedno responzivní index.html, celé viewport,
    animované, bez potřeby klikání (v náhledu ani klikat nejde — chová se jako video). */
@@ -1111,10 +1097,8 @@ async function runAgent(convo, intent) {
         if (r && r.ok) projCtx = '\n\n[Aktivní projekt: ' + prefs.activeProject + '\nSoubory (max 300):\n' + (r.tree || []).slice(0, 120).map(t => (t.dir ? t.path : t.path)).join('\n') + ']';
       } catch {}
     }
-    if (!INSTR) { try { const ir = await window.api.instructionsGet(); if (ir && ir.ok && ir.data) INSTR = ir.data; } catch {} }
-    const itype = instrType();
-    const sysBase = (effMode === 'build' ? instrSec('build', BUILD_SYS) : (isQuestion ? instrSec('chat', CHAT_SYS) : instrSec('plan', PLAN_PROMPT)))
-      + ((effMode === 'build' && itype === 'commercial') ? instrSec('video', VIDEO_ADD) : '');
+    const sysBase = (effMode === 'build' ? BUILD_SYS : (isQuestion ? CHAT_SYS : PLAN_PROMPT))
+      + ((effMode === 'build' && activeProjectType() === 'video') ? VIDEO_ADD : '');
     if (activeProjectType() === 'video') {
       const vr = videoResWH();
       projCtx += '\n[Video project: target resolution ' + vr.w + 'x' + vr.h + ' (' + vr.label + '), single index.html ad.]';
@@ -1258,12 +1242,6 @@ async function runAgent(convo, intent) {
           const blockedMsg = isQuestion ? 'Odpovídám na otázku — nezapisuji ani nespouštím, jen čtu a odpovídám textem.' : 'Nedostupné v Plan módu (jen čtení).';
           convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: blockedMsg, ok: false });
           renderToolCard(c.name, c.args, isQuestion ? 'Odpovídám na otázku.' : 'Nedostupné v Plan módu.', false);
-          continue;
-        }
-        // Commercial video: HTML video ads ONLY (full access otherwise) — block non-video scaffolding.
-        if (activeProjectType() === 'video' && ['scaffold_electron'].includes(c.name)) {
-          convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: 'Video project: HTML video ads only — apps and other work are not allowed here. Build the ad as index.html.', ok: false });
-          renderToolCard(c.name, c.args, 'Jen HTML videa.', false);
           continue;
         }
         if (c.name === 'question') {

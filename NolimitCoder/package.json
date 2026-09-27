@@ -27,7 +27,6 @@
                   "files":  [
                                 "src/**/*",
                                 "proxies/**/*",
-                                "INSTRUCTIONS/**/*",
                                 "package.json"
                             ],
                   "win":  {
