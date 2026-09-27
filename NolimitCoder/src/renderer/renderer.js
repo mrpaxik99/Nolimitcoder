@@ -1,5 +1,5 @@
 'use strict';
-/* NolimitCoder V2 — renderer (kompletní) */
+/* NolimitCoder V2 — renderer (complete) */
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 
@@ -9,29 +9,29 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-/* ---------- stav ---------- */
+/* ---------- state ---------- */
 let selectedModel = localStorage.getItem('nlc_model') || 'free/nolimitcoder-v3';
 let searchQuery = '';
 let conversations = [];
 try { conversations = JSON.parse(localStorage.getItem('nlc_convos') || '[]'); if (!Array.isArray(conversations)) conversations = []; } catch { conversations = []; }
-// stará data bez projektu → null (globální), ať se nemíchají s projektovými
+// legacy data without a project → null (global), so they do not mix with project ones
 for (const c of conversations) { if (!c || c.projectPath === undefined) c.projectPath = null; }
 let activeConvoId = localStorage.getItem('nlc_active') || null;
 let isStreaming = false;
 let stopRequested = false;
 let prefs = { activeProject: null, mode: 'build', terminal: 'auto', shellBackend: 'auto', sound: true, googleSearch: true };
 let mode = localStorage.getItem('nlc_mode') || 'build';
-if (mode === 'auto') { mode = 'build'; try { localStorage.setItem('nlc_mode', 'build'); } catch {} } // Auto zrušeno — Build už sám pozná otázku od úkolu
+if (mode === 'auto') { mode = 'build'; try { localStorage.setItem('nlc_mode', 'build'); } catch {} } // Auto removed — Build tells questions apart from tasks on its own
 let projectRegistry = [];
 try { projectRegistry = JSON.parse(localStorage.getItem('nlc_projects') || '[]'); } catch { projectRegistry = []; }
-let autoShell = false; // "Pokračovat vždy" platí do zavření aplikace
-const approvedOnce = new Set(); // příkazy schválené tlačítkem Pokračovat — opakování už se neptá
-const autoInstalled = new Set(); // nástroje doinstalované automaticky v této session
-const HEAVY_IDS = new Set(['msvc', 'docker', 'android', 'unity', 'unreal']); // GB toolchainy — jen po souhlasu
+let autoShell = false; // "Continue always" lasts until the app is closed
+const approvedOnce = new Set(); // commands approved with the Continue button — repeats no longer ask
+const autoInstalled = new Set(); // tools auto-installed in this session
+const HEAVY_IDS = new Set(['msvc', 'docker', 'android', 'unity', 'unreal']); // GB toolchains — only with consent
 const UNIVERSAL_SET = ['node', 'python', 'git', 'gcc', 'cmake', 'make', 'dotnet', 'java', 'go', 'rust', 'bun', 'deno'];
-let envData = null; // poslední sken prostředí
-let envBusy = false; // probíhá sken/instalace
-let lastUserRequest = ''; // poslední zadání uživatele (pro detekci potřebných nástrojů)
+let envData = null; // last environment scan
+let envBusy = false; // scan/install in progress
+let lastUserRequest = ''; // last user input (for detecting needed tools)
 let pendingQueue = [];
 
 const SPEEDS = [
@@ -42,39 +42,33 @@ const SPEEDS = [
 let speedIx = parseInt(localStorage.getItem('nlc_speed') || '1', 10);
 if (!(speedIx >= 0 && speedIx <= 2)) speedIx = 1;
 
-const IDENTITY = 'Jsi NolimitCoder od NolimitCode. Odpovidej cesky a strucne.';
-const PLAN_PROMPT = 'PLAN: jen text, zadne akce. K dispozici mas jen cteci nastroje. Prozkoumej soubory a napis strucny plan: co a v jakych souborech (cesta:radek) se zmeni + jak se to overi. Zadny kod.';
-const BUILD_SYS = 'Pracuj pres nastroje, ne vypisovanim do chatu. Nikdy neoznamuj akci textem bez soucasneho volani nastroje - prvni odpoved na pozadavek musi obsahovat tool-call. Kazdy tool-call volej VZDY s kompletnimi parametry v jednom volani - nikdy prazdne {} a nikdy po kouskach (kdyz se odpoved usekne, zavolej znovu KOMPLETNE); volej, jen kdyz mas vsechny parametry pohromade - kdyz nevis cestu, nejdriv ji zjisti pres list_dir (nehadej naslepo). Nezavisle akce volej najednou v jednom kroku, zavisle postupne. Soubory: cti read_file, UPRAVU existujiciho souboru delat VZDY pres edit_file s presnym malym oldString zkopirovanym z read_file (musi sedet 1x, bez radkovych cisel a bez vlastnich uprav), cely write_file jen na nove soubory. Terminal: shell. Relativni cesty = aktivni projekt; Documents, Desktop, Downloads staci jmenovat.'
-  + ' Pred kompilaci/spustenim volej env_prepare s request (samo doinstaluje chybejici nastroje z internetu). Uzivateli nikdy nerikej, at si neco instaluje rucne. Velke toolchainy (MSVC, Docker, Android) jen s heavy: true, a to az kdyz uzivatel souhlasil (zeptej se question).'
-  + ' EXE: neurcil-li technologii, zeptej se question. Electron: scaffold_electron, dopis kod, shell npm install (timeout 600000), shell npm run dist (timeout 600000), over exe pres file_info a nahlas cestu. Web: index.html v korenu projektu. Hotove vzdy over spustenim. Nic necommituj bez vyslovneho prani.'
-  + ' PREBUILD existujiciho projektu (uzivatel chce sestavit/znovu zkompilovat/dist): nejdriv read package.json (zjisti build script), pak ROVNOU shell npm install (timeout 600000), pak ROVNOU shell npm run dist nebo dany build script (timeout 600000), pak over vysledek pres file_info a nahlas cestu k exe. Nečti dokola stejné soubory a neschovávej se za průzkum - po přečtení package.json IHNED spusť instalaci a build přes shell. Na schválení příkazu se neptáš, to řeší aplikace s uživatelem.'
-  + ' CSS v generovaných appkách: NIKDY nepoužívej backdrop-filter ani -webkit-backdrop-filter (zpomaluje a rozmazává) — jen plné barvy, gradienty a stíny.';
+const IDENTITY = 'You are NolimitCoder by NolimitCode. Respond in English, briefly.';
+const PLAN_PROMPT = 'PLAN: text only, no actions. You only have read tools. Explore the files and write a brief plan: what changes in which files (path:line) + how to verify it. No code.';
+const BUILD_SYS = 'Work through tools, not by printing into chat. Never announce an action in text without a simultaneous tool call - the first response to a request must contain a tool-call. Always call each tool-call with COMPLETE parameters in a single call - never empty {} and never in pieces (if the response gets cut off, call again COMPLETELY); only call when you have all parameters together - if you do not know a path, find it first via list_dir (never guess blindly). Independent actions: call them together in one step, dependent ones sequentially. Files: read with read_file, ALWAYS edit an existing file via edit_file with an exact small oldString copied from read_file (must match 1x, no line numbers, no own modifications), full write_file only for new files. Terminal: shell. Relative paths = active project; just name Documents, Desktop, Downloads.'
+  + ' Before compiling/running, call env_prepare with request (it auto-installs missing tools from the internet). Never tell the user to install anything manually. Large toolchains (MSVC, Docker, Android) only with heavy: true, and only after the user agreed (ask via question).'
+  + ' EXE: if no technology was specified, ask via question. Electron: scaffold_electron, write the code, shell npm install (timeout 600000), shell npm run dist (timeout 600000), verify the exe via file_info and report the path. Web: index.html in the project root. Always verify finished work by running it. Never commit without an explicit request.'
+  + ' CSS in generated apps: NEVER use backdrop-filter or -webkit-backdrop-filter (slow and blurry) — only solid colors, gradients and shadows.';
 const AGENT_NUDGE = '';
-const CHAT_SYS = 'Odpovidej cesky a strucne, primo na otazku. Nic nemen, nic nezapisuj, nic nespoustej. Kdyz potrebujes nahlednout do souboru projektu, smis pouzit jen cteci nastroje. Kod vypisuj jen kdyz se na nej uzivatel primo pta.';
-/* ---------- Režim Build: otázka vs. úkol ----------
-   Build VŽDY nejdřív rozpozná, co uživatel chce (detectIntent), a podle toho
-   buď jen odpoví textem (otázka/pokec — čtecí nástroje smí), nebo maká nástroji
-   (úkol — zápis, terminál, build). Pravidla detekce viz detectIntent níže:
-   tázací forma vyhrává nad infinitivem, přímý rozkaz je vždy úkol. Nejasné = otázka. */
+const CHAT_SYS = 'Respond in English, briefly and to the point. Change nothing, write nothing, run nothing. If you need to peek into project files, you may only use read tools. Show code only when the user explicitly asks for it.';
+/* ---------- Build mode: question vs. task ----------
+   Build ALWAYS first recognizes what the user wants (detectIntent), and then
+   either just answers with text (question/chit-chat — read tools allowed), or works
+   with tools (task — writes, terminal, build). See detection rules in detectIntent below:
+   interrogative form wins over the infinitive, a direct command is always a task. Unclear = question. */
 function detectIntent(raw) {
   const t = String(raw || '').trim();
   if (!t) return 'chat';
-  const noFill = t.replace(/^(ahoj|čau|cau|zdar|hej|čus|cus|dobrý den|dobry den|prosím|prosim|hele|tak|no|ale|a|to|teda|ted|teď)\b[\s,]+/i, '').trim() || t;
-  // 1) tázací forma na začátku → otázka (i s kódem: "co dělá tahle funkce? <kód>")
-  //    výjimka: přímý rozkaz uvnitř ("proč to padá, oprav to") → úkol (infinitiv "opravit" se nepočítá)
-  if (/^(jak|co|proč|proc|kde|kdy|kdo|kolik|jestli|jestliže|čí|či|dokážeš|dokazes|umíš|umis|znáš|znas|víš|vis|pamatuješ|vysvětli|vysvetli|řekni|rekni|popiš|popis|poraď|porad|můžeš mi (vysvětlit|vysvetlit|říct|rict|popisat|poradit))\b/i.test(noFill)) {
-    if (/\b(oprav|uprav|napiš|napis|udělej|udelej|přidej|pridej|vytvoř|vytvor|smaž|smaz|spusť|spust|nainstaluj|otestuj|přepiš|prepis|napište|udělejte)(?![a-záčďéěíňóřšťúůýž])/i.test(t)) return 'build';
+  const noFill = t.replace(/^(hi|hello|hey|yo|good morning|good afternoon|good evening|please|well|so|ok|okay)\b[\s,]+/i, '').trim() || t;
+  if (/^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know|can you explain|could you explain)\b/i.test(noFill)) {
+    if (/\b(fix|update|edit|write|make|create|add|delete|remove|run|install|test|rewrite|refactor|rename|generate|finish|complete|prepare)\b/i.test(t)) return 'build';
     return 'chat';
   }
-  // 2) přímý rozkaz / prosba o akci → úkol (i s otazníkem: "opravíš to?", "můžeš přidat tlačítko?")
-  if (/(udělej|udelej|vytvoř|vytvor|naprogramuj|napiš|napis|uprav|změň|zmen|přebarvi|prebarvi|odstraň|odstran|přidej|pridej|přidat|pridat|oprav|opravit|odlad|vylaď|vylad|sestav|sestavit|zkompiluj|přebuilduj|prebuild|překompiluj|prekompiluj|nainstaluj|nainstalovat|odinstaluj|smaž|smaz|smazat|vyrob|vyrobit|postav|postavit|přepiš|prepis|prepsat|rozšiř|rozsir|rozsirit|dodělej|dodelej|dodelat|vygeneruj|doplň|dopln|doplnit|spusť|spust|spustit|rozjeď|rozjed|nasad|refaktoruj|přejmenuj|prejmenuj|přesuň|presun|zkopíruj|zkopiruj|stáhni|stahni|stahnout|otestuj|napište|udělejte|chci,?\s*(abys|aby)|potřebuju|potrebuju|potřebuji|potrebuji|potřebuju hotové|potrebuju hotove|zařiď|zarid|připrav mi|priprav mi|zkus (to |ten |tu )?(opravit|sestavit|spustit|rozchodit|dokončit|dokoncit|prepsat))/i.test(t)) return 'build';
-  // 3) holý kód / chybový výpis bez otázky → úkol (předpoklad "oprav to")
+  if (/(make|create|build|write|fix|repair|add|update|change|remove|delete|refactor|implement|generate|install|set up|settle|uninstall|compile|rebuild|program|remove|rewrite|extend|finish|complete|run|launch|deploy|rename|move|copy|download|test|scaffold|i want you to|i need|i would like)/i.test(t)) return 'build';
   if (/```|Traceback|SyntaxError|TypeError|ReferenceError|\berror TS\d+|^\s*at\s+\S+\s*\(|\b[A-Za-z-]+\.(js|ts|tsx|py|java|cs|cpp|c|go|rs|php|rb):\d+/im.test(t) && !/\?/.test(t)) return 'build';
-  // 4) jinak otázka/pokec (pozdrav, díky, krátké, nejasné) — bezpečnější než sahat do souborů
   return 'chat';
 }
 
-/* ---------- pomocné: markdown / highlight ---------- */
+/* ---------- helpers: markdown / highlight ---------- */
 function dlog(tag, data) { try { if (window.api && window.api.debugLog) window.api.debugLog(tag, data); } catch {} }
 const CODE_KW = /\b(const|let|var|function|return|if|else|for|while|do|class|extends|new|import|from|export|default|try|catch|finally|throw|switch|case|break|continue|typeof|instanceof|in|of|this|null|true|false|def|lambda|pass|with|as|assert|yield|async|await|elif|and|or|not|is|None|struct|impl|fn|mut|match|use|pub|int|float|string|bool|void|public|private|static|package|interface|echo|set)\b/;
 function highlightCode(code) {

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="cs">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,45 +16,45 @@
       <div class="pv-head">
         <img class="pv-logo" src="./assets/logo.png" alt="Nolimit">
         <div class="pv-title">My Projects</div>
-        <div class="pv-sub">Vyber složku, ve které bude AI pracovat</div>
+        <div class="pv-sub">Pick the folder the AI will work in</div>
       </div>
       <div class="pv-grid" id="projectCards"></div>
       <button class="pv-create" id="createProjectBtn"><span class="plus">+</span> Create project</button>
     </div>
   </div>
 
-  <!-- VIEW: chat v projektu -->
+  <!-- VIEW: chat in a project -->
   <div class="chat-view" id="viewChat" style="display:none">
     <aside class="sidebar" id="sidebar">
       <div class="proj-head">
         <img class="app-logo" src="./assets/logo.png" alt="Nolimit">
-        <span class="proj-head-name" id="projHeadName">Projekt</span>
+        <span class="proj-head-name" id="projHeadName">Project</span>
       </div>
-      <button class="btn-new" id="newChatBtn" title="Nový chat v tomto projektu">
+      <button class="btn-new" id="newChatBtn" title="New chat in this project">
         <span class="plus">+</span><span>Create chat</span>
         <kbd>Ctrl+N</kbd>
       </button>
-      <div class="side-label">Chaty</div>
+      <div class="side-label">Chats</div>
       <div class="chat-list" id="chatList"></div>
       <div class="side-bottom">
         <div class="dl-widget" id="dlWidget">
           <div class="dl-panel" id="dlPanel" style="display:none">
-            <div class="dl-title">Právě se stahuje <span class="dl-cancelall" id="dlCancelAll" title="Zrušit vše">Zrušit vše</span></div>
-            <div id="dlActive"><div class="dl-empty">Zatím nic.</div></div>
-            <div class="dl-title">Stažené</div>
-            <div id="dlHistory"><div class="dl-empty">Zatím nic staženého.</div></div>
+            <div class="dl-title">Downloading now <span class="dl-cancelall" id="dlCancelAll" title="Cancel all">Cancel all</span></div>
+            <div id="dlActive"><div class="dl-empty">Nothing yet.</div></div>
+            <div class="dl-title">Downloaded</div>
+            <div id="dlHistory"><div class="dl-empty">Nothing downloaded yet.</div></div>
           </div>
-          <button class="dl-fab" id="dlFab" title="Stahování">
+          <button class="dl-fab" id="dlFab" title="Downloads">
             <span class="dl-fab-row"><span class="dl-label">Downloads</span><span class="dl-pct" id="dlPct">–</span></span>
             <div class="dl-line"><div id="dlFill"></div></div>
             <span class="dl-badge" id="dlBadge" style="display:none"></span>
           </button>
         </div>
-        <button class="side-btn" id="prefsBtn" title="Nastavení">
-          <span class="ico">⚙</span><span>Nastavení</span>
+        <button class="side-btn" id="prefsBtn" title="Settings">
+          <span class="ico">⚙</span><span>Settings</span>
         </button>
-        <button class="side-btn" id="settingsBtn" title="O aplikaci">
-          <span class="ico">ⓘ</span><span>O aplikaci</span>
+        <button class="side-btn" id="settingsBtn" title="About the app">
+          <span class="ico">ⓘ</span><span>About</span>
         </button>
         <div class="side-ver" id="sideVer">NolimitCode</div>
       </div>
@@ -62,12 +62,12 @@
 
     <main class="main">
       <div class="topbar">
-        <button class="back-btn" id="backBtn" title="Zpět na My Projects">← My Projects</button>
-        <button class="back-btn" id="previewToggle" style="display:none" title="Zobrazit preview">Preview</button>
-        <div class="session-title" id="sessionTitle">Nová konverzace</div>
+        <button class="back-btn" id="backBtn" title="Back to My Projects">← My Projects</button>
+        <button class="back-btn" id="previewToggle" style="display:none" title="Show preview">Preview</button>
+        <div class="session-title" id="sessionTitle">New conversation</div>
         <div class="top-right">
-          <span class="top-status" id="statusText">Připojeno</span>
-          <button class="back-btn" id="termToggle" title="Terminál">›_</button>
+          <span class="top-status" id="statusText">Connected</span>
+          <button class="back-btn" id="termToggle" title="Terminal">›_</button>
         </div>
       </div>
 
@@ -77,7 +77,7 @@
       </div>
 
       <div class="composer-wrap">
-        <div class="plan-hint" id="planHint" style="display:none"><span>Jsi v <b>Plan módu</b> (jen plánování) — na stavění přepni na Build.</span><span class="plan-hint-btns"><button class="primary-btn" id="planSwitchBtn">Přepnout na Build a provést</button><button class="icon-btn" id="planDismissBtn" title="Zavřít">✕</button></span></div>
+        <div class="plan-hint" id="planHint" style="display:none"><span>You are in <b>Plan mode</b> (planning only) — switch to Build to build.</span><span class="plan-hint-btns"><button class="primary-btn" id="planSwitchBtn">Switch to Build and run</button><button class="icon-btn" id="planDismissBtn" title="Close">✕</button></span></div>
         <div class="queue-bar" id="queueBar" style="display:none"></div>
         <div class="activity-bar" id="activityBar" style="display:none"></div>
         <div class="plan-box" id="planBox" style="display:none"></div>
@@ -85,59 +85,59 @@
           <textarea id="promptInput" placeholder="Ask anything, / for commands, @ for context..." rows="1"></textarea>
           <div class="composer-bar">
             <div class="composer-left">
-              <div class="mode-seg" id="modeSeg" title="Build = pozná otázku od úkolu a maká · Plan = jen plánuje">
+              <div class="mode-seg" id="modeSeg" title="Build = tells questions apart from tasks and works · Plan = only plans">
                 <button data-mode="build" class="active">Build</button>
                 <button data-mode="plan">Plan</button>
               </div>
               <div class="model-picker" id="modelSelector">
-                <button class="picker-btn" id="modelCurrent" title="Vybrat model">
+                <button class="picker-btn" id="modelCurrent" title="Pick a model">
                   <span id="curName">NolimitCoderV3</span>
                   <span class="picker-chev">▾</span>
                 </button>
                 <div class="model-dropdown" id="modelDropdown">
                   <div class="dropdown-search">
-                    <input id="modelSearch" placeholder="Hledat model..." autocomplete="off">
+                    <input id="modelSearch" placeholder="Search models..." autocomplete="off">
                   </div>
                   <div class="model-list" id="modelList"></div>
                   <div class="dropdown-footer">
-                    <span>Modely NolimitCode</span>
-                    <a href="#" id="fetchZenBtn">Obnovit seznam</a>
+                    <span>NolimitCode models</span>
+                    <a href="#" id="fetchZenBtn">Refresh list</a>
                   </div>
                 </div>
               </div>
               <span class="free-tag">FREE</span>
-              <div class="speed-ctl" title="Fast = krátké rychlé odpovědi · Medium = vyvážené · High = nejpodrobnější">
+              <div class="speed-ctl" title="Fast = short quick answers · Medium = balanced · High = most detailed">
                 <input type="range" id="speedSlider" min="0" max="2" step="1" value="1">
                 <span id="speedLabel">Medium</span>
               </div>
             </div>
             <div class="composer-right">
               <span class="hint">Enter ↵</span>
-              <button class="send-btn" id="sendBtn" title="Odeslat">↑</button>
-              <button class="stop-btn" id="stopBtn" style="display:none" title="Zastavit">■</button>
+              <button class="send-btn" id="sendBtn" title="Send">↑</button>
+              <button class="stop-btn" id="stopBtn" style="display:none" title="Stop">■</button>
             </div>
           </div>
         </div>
       <div class="composer-foot">
         <span id="footerModel">NolimitCoderV3</span>
         <span class="dot-sep">·</span>
-        <span id="footerStatus">Připraven</span>
+        <span id="footerStatus">Ready</span>
       </div>
     </div>
     </main>
     <aside class="term-pane" id="termPane" style="display:none">
       <div class="term-bar">
         <span class="term-dot"></span>
-        <span class="term-title">Terminál</span>
+        <span class="term-title">Terminal</span>
         <span class="preview-tools">
-          <button class="icon-btn" id="termClear" title="Vymazat">✕</button>
-          <button class="icon-btn" id="termHide" title="Skrýt terminál">→</button>
+          <button class="icon-btn" id="termClear" title="Clear">✕</button>
+          <button class="icon-btn" id="termHide" title="Hide terminal">→</button>
         </span>
       </div>
       <div class="term-out" id="termOut"></div>
       <div class="term-in">
         <span class="term-prompt" id="termPrompt">&gt;</span>
-        <input id="termInput" autocomplete="off" spellcheck="false" placeholder="příkaz… (Enter = spustit)">
+        <input id="termInput" autocomplete="off" spellcheck="false" placeholder="command… (Enter = run)">
       </div>
     </aside>
     <section class="preview-pane" id="previewPane" style="display:none">
@@ -145,9 +145,9 @@
         <span class="preview-dot"></span>
         <span class="preview-url" id="previewUrl">localhost</span>
         <span class="preview-tools">
-          <button class="icon-btn" id="previewReload" title="Obnovit preview">↻</button>
-          <button class="icon-btn" id="previewOpen" title="Otevřít v prohlížeči">↗</button>
-          <button class="icon-btn" id="previewHide" title="Skrýt preview">✕</button>
+          <button class="icon-btn" id="previewReload" title="Reload preview">↻</button>
+          <button class="icon-btn" id="previewOpen" title="Open in browser">↗</button>
+          <button class="icon-btn" id="previewHide" title="Hide preview">✕</button>
         </span>
       </div>
       <iframe class="preview-frame" id="previewFrame" sandbox="allow-scripts allow-same-origin allow-forms allow-modals" title="Preview"></iframe>
@@ -161,27 +161,27 @@
     <div class="modal-header"><span>Create project</span></div>
     <div class="pm-body">
       <div class="pm-main">
-        <div id="pmPicked" class="prompt-text">Zatím nevybrána žádná složka</div>
-        <button class="mini-btn" id="pmPick">Vybrat složku…</button>
-        <div class="pref-title" style="margin-top:12px">Typ projektu</div>
+        <div id="pmPicked" class="prompt-text">No folder selected yet</div>
+        <button class="mini-btn" id="pmPick">Pick a folder…</button>
+        <div class="pref-title" style="margin-top:12px">Project type</div>
         <div class="type-cards col">
-          <label class="type-card"><input type="radio" name="ptype" value="universal" checked><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><span><b>Universal Project</b><small>Chat + soubory, jako doteď</small></span></label>
-          <label class="type-card"><input type="radio" name="ptype" value="website"><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 0 18a13.5 13.5 0 0 1 0-18z"/></svg></span><span><b>Website Project</b><small>Chat vlevo + živé preview webu vpravo</small></span></label>
+          <label class="type-card"><input type="radio" name="ptype" value="universal" checked><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><span><b>Universal Project</b><small>Chat + files, as before</small></span></label>
+          <label class="type-card"><input type="radio" name="ptype" value="website"><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 0 18a13.5 13.5 0 0 1 0-18z"/></svg></span><span><b>Website Project</b><small>Chat on the left + live website preview on the right</small></span></label>
         </div>
-        <div class="pref-title" style="margin-top:12px">Název projektu</div>
-        <input class="text-input" id="pmName" placeholder="Můj projekt" autocomplete="off">
+        <div class="pref-title" style="margin-top:12px">Project name</div>
+        <input class="text-input" id="pmName" placeholder="My project" autocomplete="off">
         <div class="prompt-actions">
-          <button class="ghost-btn2" id="pmCancel">Zrušit</button>
+          <button class="ghost-btn2" id="pmCancel">Cancel</button>
           <button class="enter-btn" id="pmNext">Next ⏎</button>
         </div>
       </div>
       <div class="pm-side"><div class="pm-side-inner">
-        <div class="pref-title">Framework webu</div>
+        <div class="pref-title">Web framework</div>
         <div class="type-cards col">
-          <label class="type-card"><input type="radio" name="pframe" value="html" checked><span class="tc-ico fw">&lt;/&gt;</span><span><b>HTML / CSS / JS</b><small>Bez buildu, rovnou preview</small></span></label>
+          <label class="type-card"><input type="radio" name="pframe" value="html" checked><span class="tc-ico fw">&lt;/&gt;</span><span><b>HTML / CSS / JS</b><small>No build, straight to preview</small></span></label>
           <label class="type-card"><input type="radio" name="pframe" value="react"><span class="tc-ico fw">⚛</span><span><b>React (Vite)</b><small>Build do dist/</small></span></label>
           <label class="type-card"><input type="radio" name="pframe" value="vue"><span class="tc-ico fw">▲</span><span><b>Vue (Vite)</b><small>Build do dist/</small></span></label>
-          <label class="type-card"><input type="radio" name="pframe" value="express"><span class="tc-ico fw">⬣</span><span><b>Node Express</b><small>Server + statický frontend</small></span></label>
+          <label class="type-card"><input type="radio" name="pframe" value="express"><span class="tc-ico fw">⬣</span><span><b>Node Express</b><small>Server + static frontend</small></span></label>
         </div>
       </div></div>
     </div>
@@ -192,66 +192,66 @@
   <div class="modal-backdrop" id="prefsBackdrop"></div>
   <div class="modal-content">
     <div class="modal-header">
-      <span>Nastavení</span>
+      <span>Settings</span>
       <button class="icon-btn" id="prefsClose">✕</button>
     </div>
     <div class="modal-body prefs-layout">
       <nav class="prefs-nav" id="prefsNav">
-        <button data-pref="general" class="active">Obecné</button>
-        <button data-pref="terminal">Terminál</button>
-        <button data-pref="env">Prostředí</button>
-        <button data-pref="search">Vyhledávání</button>
-        <button data-pref="projects">Projekty</button>
-        <button data-pref="danger">Nebezpečná zóna</button>
+        <button data-pref="general" class="active">General</button>
+        <button data-pref="terminal">Terminal</button>
+        <button data-pref="env">Environment</button>
+        <button data-pref="search">Search</button>
+        <button data-pref="projects">Projects</button>
+        <button data-pref="danger">Danger zone</button>
       </nav>
       <div class="prefs-pages" id="prefsPages">
         <section class="pref-page" data-ppage="general">
           <div class="pref-group">
-            <div class="pref-title">Režim</div>
-            <div class="settings-info" style="margin:0">AI má automaticky <b>plný přístup</b> — soubory i instalace běží samy. Terminál schvaluješ v chatu tlačítky <b>Pokračovat</b> / <b>Pokračovat vždy</b> (platí do zavření aplikace). Vše běží bez oken od Windows.</div>
+            <div class="pref-title">Mode</div>
+            <div class="settings-info" style="margin:0">The AI automatically has <b>full access</b> — files and installs run on their own. You approve the terminal in chat with the <b>Continue</b> / <b>Always continue</b> buttons (valid until the app is closed). Everything runs with no Windows popups.</div>
           </div>
           <div class="pref-group">
-            <div class="pref-title">Zvuk</div>
-            <label class="switch-row"><input type="checkbox" id="soundCheck" checked><span class="switch"><span class="switch-dot"></span></span><span><b>Zvuk po dokončení</b><small>Krátké cinknutí, když AI dogeneruje odpověď.</small></span></label>
+            <div class="pref-title">Sound</div>
+            <label class="switch-row"><input type="checkbox" id="soundCheck" checked><span class="switch"><span class="switch-dot"></span></span><span><b>Sound on completion</b><small>A short chime when the AI finishes generating an answer.</small></span></label>
           </div>
         </section>
         <section class="pref-page" data-ppage="terminal" style="display:none">
           <div class="pref-group">
-            <div class="pref-title">Terminál</div>
-            <label class="radio-row"><input type="radio" name="shellbe" value="auto" checked><span><b>Auto</b><small>AI si vybere terminál samo a když něco nepojede, zkusí jiný.</small></span></label>
-            <label class="radio-row"><input type="radio" name="shellbe" value="all"><span><b>Vše</b><small>Všechny terminály k dispozici, AI volí z nich.</small></span></label>
-            <label class="radio-row"><input type="radio" name="shellbe" value="cmd"><span><b>Shell (cmd)</b><small>Vždy příkazový řádek Windows.</small></span></label>
-            <label class="radio-row"><input type="radio" name="shellbe" value="powershell"><span><b>PowerShell</b><small>Vždy Windows PowerShell.</small></span></label>
+            <div class="pref-title">Terminal</div>
+            <label class="radio-row"><input type="radio" name="shellbe" value="auto" checked><span><b>Auto</b><small>The AI picks a terminal itself and tries another one if something fails.</small></span></label>
+            <label class="radio-row"><input type="radio" name="shellbe" value="all"><span><b>All</b><small>All terminals available, the AI chooses among them.</small></span></label>
+            <label class="radio-row"><input type="radio" name="shellbe" value="cmd"><span><b>Shell (cmd)</b><small>Always the Windows command prompt.</small></span></label>
+            <label class="radio-row"><input type="radio" name="shellbe" value="powershell"><span><b>PowerShell</b><small>Always Windows PowerShell.</small></span></label>
           </div>
         </section>
         <section class="pref-page" data-ppage="env" style="display:none">
           <div class="pref-group">
-            <div class="pref-title">Prostředí a nástroje</div>
+            <div class="pref-title">Environment and tools</div>
             <div class="env-actions">
-              <button class="mini-btn" id="envScanBtn">Skenovat počítač</button>
+              <button class="mini-btn" id="envScanBtn">Scan computer</button>
               <button class="primary-btn" id="envFixAllBtn">Fix ALL</button>
             </div>
-            <label class="switch-row"><input type="checkbox" id="envHeavyCheck"><span class="switch"><span class="switch-dot"></span></span><span><b>Včetně velkých toolchainů</b><small>Visual Studio Build Tools, Docker, Android Studio… (jednotky GB, dlouho stahuje). Bez této volby se instalují jen malé a střední nástroje.</small></span></label>
-            <div class="env-summary" id="envSummary">Zatím neskenováno.</div>
+            <label class="switch-row"><input type="checkbox" id="envHeavyCheck"><span class="switch"><span class="switch-dot"></span></span><span><b>Include large toolchains</b><small>Visual Studio Build Tools, Docker, Android Studio… (several GB, slow download). Without this option only small and medium tools are installed.</small></span></label>
+            <div class="env-summary" id="envSummary">Not scanned yet.</div>
             <div class="env-list" id="envList"></div>
           </div>
         </section>
         <section class="pref-page" data-ppage="search" style="display:none">
           <div class="pref-group">
-            <div class="pref-title">Vyhledávání</div>
-            <label class="switch-row"><input type="checkbox" id="googleCheck" checked><span class="switch"><span class="switch-dot"></span></span><span class="google-row"><svg class="google-g" viewBox="0 0 24 24" width="16" height="16"><path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.5-.3-2.3H12v4.5h6.5c-.1 1.1-.8 2.7-2.4 3.8l-.1.1 3.5 2.7.2.1c2.2-2 3.8-5 3.8-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.8-2.9c-1 .7-2.4 1.2-4.1 1.2-3.1 0-5.8-2.1-6.8-5l-.1.1-3.6 2.8v.1C3.5 21.4 7.4 24 12 24z"/><path fill="#FBBC05" d="M5.2 14.4c-.2-.7-.4-1.5-.4-2.4s.1-1.7.4-2.4l-.1-.1-3.6-2.8-.1.1C.5 8.6 0 10.2 0 12s.5 3.4 1.4 4.9l3.8-2.5z"/><path fill="#EA4335" d="M12 4.7c1.8 0 3 .8 3.7 1.4l3.3-3.2C17.9 1.1 15.2 0 12 0 7.4 0 3.5 2.6 1.4 6.7l3.8 2.9c1-2.8 3.7-4.9 6.8-4.9z"/></svg><span><b>Google search</b><small>AI smí hledat na internetu. Vypnuté = nástroj web_search se vůbec nenabídne.</small></span></span></label>
+            <div class="pref-title">Search</div>
+            <label class="switch-row"><input type="checkbox" id="googleCheck" checked><span class="switch"><span class="switch-dot"></span></span><span class="google-row"><svg class="google-g" viewBox="0 0 24 24" width="16" height="16"><path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.5-.3-2.3H12v4.5h6.5c-.1 1.1-.8 2.7-2.4 3.8l-.1.1 3.5 2.7.2.1c2.2-2 3.8-5 3.8-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.8-2.9c-1 .7-2.4 1.2-4.1 1.2-3.1 0-5.8-2.1-6.8-5l-.1.1-3.6 2.8v.1C3.5 21.4 7.4 24 12 24z"/><path fill="#FBBC05" d="M5.2 14.4c-.2-.7-.4-1.5-.4-2.4s.1-1.7.4-2.4l-.1-.1-3.6-2.8-.1.1C.5 8.6 0 10.2 0 12s.5 3.4 1.4 4.9l3.8-2.5z"/><path fill="#EA4335" d="M12 4.7c1.8 0 3 .8 3.7 1.4l3.3-3.2C17.9 1.1 15.2 0 12 0 7.4 0 3.5 2.6 1.4 6.7l3.8 2.9c1-2.8 3.7-4.9 6.8-4.9z"/></svg><span><b>Google search</b><small>The AI may search the internet. Off = the web_search tool is not offered at all.</small></span></span></label>
           </div>
         </section>
         <section class="pref-page" data-ppage="projects" style="display:none">
           <div class="pref-group">
-            <div class="pref-title">Složka projektů</div>
-            <div class="proj-dir-row"><code id="projectsDirPath">…</code><button class="mini-btn" id="openProjectsDir">Otevřít</button></div>
+            <div class="pref-title">Projects folder</div>
+            <div class="proj-dir-row"><code id="projectsDirPath">…</code><button class="mini-btn" id="openProjectsDir">Open</button></div>
           </div>
         </section>
         <section class="pref-page" data-ppage="danger" style="display:none">
           <div class="pref-group danger">
-            <div class="pref-title">Nebezpečná zóna</div>
-            <button class="danger-btn" id="clearAllBtn">Smazat všechny konverzace</button>
+            <div class="pref-title">Danger zone</div>
+            <button class="danger-btn" id="clearAllBtn">Delete all conversations</button>
           </div>
         </section>
       </div>
@@ -262,20 +262,20 @@
 <div class="modal" id="whereModal">
   <div class="modal-backdrop"></div>
   <div class="modal-content small">
-    <div class="modal-header"><span>Kam to uložit?</span></div>
+    <div class="modal-header"><span>Where to save it?</span></div>
     <div class="modal-body">
       <div id="whereSub" class="prompt-text"></div>
       <div id="whereOptions">
-        <label class="radio-row" data-w="project"><input type="radio" name="where" value="project"><span><b>Aktivní projekt</b><small id="whereProjectPath">—</small></span></label>
-        <label class="radio-row" data-w="docs"><input type="radio" name="where" value="docs"><span><b>Dokumenty</b><small id="whereDocsPath">—</small></span></label>
-        <label class="radio-row" data-w="desktop"><input type="radio" name="where" value="desktop"><span><b>Plocha</b><small id="whereDesktopPath">—</small></span></label>
-        <label class="radio-row" data-w="downloads"><input type="radio" name="where" value="downloads"><span><b>Stažené</b><small id="whereDownloadsPath">—</small></span></label>
-        <label class="radio-row" data-w="custom"><input type="radio" name="where" value="custom"><span><b>Vlastní cesta</b><small>např. D:\Moje\veci</small></span></label>
+        <label class="radio-row" data-w="project"><input type="radio" name="where" value="project"><span><b>Active project</b><small id="whereProjectPath">—</small></span></label>
+        <label class="radio-row" data-w="docs"><input type="radio" name="where" value="docs"><span><b>Documents</b><small id="whereDocsPath">—</small></span></label>
+        <label class="radio-row" data-w="desktop"><input type="radio" name="where" value="desktop"><span><b>Desktop</b><small id="whereDesktopPath">—</small></span></label>
+        <label class="radio-row" data-w="downloads"><input type="radio" name="where" value="downloads"><span><b>Downloads</b><small id="whereDownloadsPath">—</small></span></label>
+        <label class="radio-row" data-w="custom"><input type="radio" name="where" value="custom"><span><b>Custom path</b><small>e.g. D:\My\Stuff</small></span></label>
       </div>
-      <input class="text-input" id="whereCustom" placeholder="Vlastní cesta…" autocomplete="off" style="margin-top:8px">
-      <div class="where-browse-row"><button class="mini-btn" id="whereBrowse">Procházet…</button></div>
+      <input class="text-input" id="whereCustom" placeholder="Custom path…" autocomplete="off" style="margin-top:8px">
+      <div class="where-browse-row"><button class="mini-btn" id="whereBrowse">Browse…</button></div>
       <div class="prompt-actions">
-        <button class="ghost-btn2" id="whereCancel">Zrušit</button>
+        <button class="ghost-btn2" id="whereCancel">Cancel</button>
         <button class="enter-btn" id="whereEnter">Enter ⏎</button>
       </div>
     </div>
@@ -285,13 +285,13 @@
 <div class="modal" id="questionModal">
   <div class="modal-backdrop"></div>
   <div class="modal-content">
-    <div class="modal-header"><span id="qTitle">Otázka</span></div>
+    <div class="modal-header"><span id="qTitle">Question</span></div>
     <div class="modal-body">
       <div id="qText" class="prompt-text"></div>
       <div id="qOptions"></div>
-      <input class="text-input" id="qCustom" placeholder="Vlastní odpověď… (Enter = potvrdit)" autocomplete="off" style="margin-top:10px">
+      <input class="text-input" id="qCustom" placeholder="Custom answer… (Enter = confirm)" autocomplete="off" style="margin-top:10px">
       <div class="prompt-actions">
-        <button class="enter-btn" id="qOk">Potvrdit ⏎</button>
+        <button class="enter-btn" id="qOk">Confirm ⏎</button>
       </div>
     </div>
   </div>
@@ -300,13 +300,13 @@
 <div class="modal" id="promptModal">
   <div class="modal-backdrop"></div>
   <div class="modal-content small">
-    <div class="modal-header"><span id="promptTitle">Název</span></div>
+    <div class="modal-header"><span id="promptTitle">Name</span></div>
     <div class="modal-body">
       <div id="promptText" class="prompt-text"></div>
       <input class="text-input" id="promptInput2" autocomplete="off">
       <div class="prompt-actions">
-        <button class="ghost-btn2" id="promptCancel">Zrušit</button>
-        <button class="ghost-btn2" id="promptExtra" style="display:none">Vždy povolit</button>
+        <button class="ghost-btn2" id="promptCancel">Cancel</button>
+        <button class="ghost-btn2" id="promptExtra" style="display:none">Always allow</button>
         <button class="primary-btn" id="promptOk">OK</button>
       </div>
     </div>
@@ -317,14 +317,14 @@
   <div class="modal-backdrop" id="modalBackdrop"></div>
   <div class="modal-content">
     <div class="modal-header">
-      <span>O aplikaci</span>
+      <span>About</span>
       <button class="icon-btn" id="closeModal">✕</button>
     </div>
     <div class="modal-body">
-      <p class="about-line"><b>NolimitCoder V3</b> — AI chat s modely <b>NolimitCoderV2</b> a <b>NolimitCoderV3</b> od <b>NolimitCode</b>.</p>
-      <p class="about-line">Vše běží na cloudu NolimitCode. Žádný klíč, nic se nenastavuje — jen vyber složku projektu a piš.</p>
+      <p class="about-line"><b>NolimitCoder V3</b> — AI chat with <b>NolimitCoderV2</b> and <b>NolimitCoderV3</b> models by <b>NolimitCode</b>.</p>
+      <p class="about-line">Everything runs on the NolimitCode cloud. No key, nothing to set up — just pick a project folder and write.</p>
       <div class="settings-actions">
-        <button class="primary-btn" id="saveSettings">Zavřít</button>
+        <button class="primary-btn" id="saveSettings">Close</button>
       </div>
     </div>
   </div>
