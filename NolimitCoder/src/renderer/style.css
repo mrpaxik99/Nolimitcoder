@@ -170,8 +170,12 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
   color:var(--text-strong);font-size:14px;line-height:1.55;font-family:inherit;
   padding:12px 14px 4px;max-height:160px;min-height:44px}
 #promptInput::placeholder{color:var(--text-weaker)}
-.composer-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 8px}
-.composer-left{display:flex;align-items:center;gap:8px;position:relative}
+.composer-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 8px;flex-wrap:wrap;gap:6px}
+.composer-left{display:flex;align-items:center;gap:8px;position:relative;flex-wrap:wrap;min-width:0}
+/* Narrow video chat: keep every control visible, hide the Enter hint */
+.chat-view.flip.video .composer-left{gap:6px}
+.chat-view.flip.video .hint{display:none}
+.chat-view.flip.video .free-tag{display:none}
 .model-picker{position:relative}
 .picker-btn{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:var(--radius);
   border:1px solid transparent;background:transparent;color:var(--text);font-size:13px;cursor:pointer;max-width:260px}
@@ -180,15 +184,20 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .picker-chev{font-size:10px;color:var(--text-weaker)}
 .free-tag{font-size:10px;color:var(--text-weaker);border:1px solid var(--border-weak);
   border-radius:4px;padding:2px 6px}
-/* ===== Fast / Medium / High speed slider ===== */
-.speed-ctl{display:flex;align-items:center;gap:7px;padding:4px 10px;border:1px solid var(--border-weak);
-  border-radius:var(--radius)}
+/* ===== Fast / Medium / High speed slider (modern) ===== */
+.speed-ctl{display:flex;align-items:center;gap:8px;padding:5px 12px;border:1px solid var(--border-weak);
+  border-radius:999px;background:#ffffff06;flex-shrink:0}
+.speed-ctl .speed-dot{width:7px;height:7px;border-radius:50%;background:#30d158;box-shadow:0 0 8px #30d15888;flex-shrink:0}
 .speed-ctl span{font-size:11px;color:var(--text-weak);min-width:44px}
-#speedSlider{-webkit-appearance:none;appearance:none;width:74px;height:3px;border-radius:999px;
-  background:#2e2e2e;outline:none;cursor:pointer}
-#speedSlider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;
-  background:#ededed;border:none;cursor:pointer}
-#speedSlider::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#ededed;border:none;cursor:pointer}
+#speedSlider{-webkit-appearance:none;appearance:none;width:84px;height:4px;border-radius:999px;
+  background:linear-gradient(90deg,#ededed var(--fill,50%),#2e2e2e var(--fill,50%));outline:none;cursor:pointer}
+#speedSlider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
+  background:#fff;border:none;cursor:pointer;box-shadow:0 0 0 3px #ffffff22,0 0 12px #ffffff66;transition:transform .15s}
+#speedSlider::-webkit-slider-thumb:hover{transform:scale(1.25)}
+#speedSlider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fff;border:none;cursor:pointer;
+  box-shadow:0 0 0 3px #ffffff22,0 0 12px #ffffff66}
+#speedSlider::-moz-range-track{background:transparent}
+#speedSlider:focus-visible{box-shadow:0 0 0 2px #8ec2fc66}
 .composer-right{display:flex;align-items:center;gap:8px}
 .hint{font-size:11px;color:var(--text-weaker)}
 .send-btn{width:28px;height:28px;border-radius:50%;border:none;background:#ededed;color:#101010;
@@ -201,7 +210,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .dot-sep{opacity:.5}
 
 /* ===== Model dropdown (popover) ===== */
-.model-dropdown{position:absolute;bottom:calc(100% + 8px);left:0;width:360px;max-width:calc(100vw - 40px);
+.model-dropdown{position:absolute;bottom:calc(100% + 8px);left:0;width:380px;max-width:calc(100vw - 24px);
   max-height:380px;display:none;flex-direction:column;background:var(--surface-float);
   border:1px solid var(--border-weak);border-radius:8px;overflow:hidden;z-index:30;
   box-shadow:0 36px 80px 0 #00000088,0 13px 29px 0 #00000066}

@@ -192,7 +192,17 @@ function updateModelLabel() {
   if (el.curName) el.curName.textContent = l;
   if (el.footerModel) el.footerModel.textContent = l;
 }
-function closeModels() { if (el.modelDropdown) el.modelDropdown.classList.remove('open'); }
+function closeModels() { if (el.modelDropdown) { el.modelDropdown.classList.remove('open'); el.modelDropdown.style.left = '0px'; } }
+function clampDropdown() {
+  const dd = el.modelDropdown;
+  if (!dd || !dd.classList.contains('open')) return;
+  dd.style.left = '0px';
+  try {
+    const r = dd.getBoundingClientRect();
+    const over = r.right - (window.innerWidth - 12);
+    if (over > 0) dd.style.left = (-over) + 'px';
+  } catch {}
+}
 async function refreshZenLive() {
   setFooter('Načítám modely…');
   try {
@@ -1725,17 +1735,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   setMode(mode);
   // rychlost
   const slider = $('#speedSlider'), slabel = $('#speedLabel');
+  const speedFill = () => { try { slider.style.setProperty('--fill', (parseInt(slider.value, 10) / 2 * 100) + '%'); } catch {} };
   if (slider) {
     slider.value = String(speedIx);
     const names = ['Fast', 'Medium', 'High'];
     if (slabel) slabel.textContent = names[speedIx];
-    slider.addEventListener('input', () => { speedIx = parseInt(slider.value, 10) || 0; localStorage.setItem('nlc_speed', String(speedIx)); if (slabel) slabel.textContent = names[speedIx]; });
+    speedFill();
+    slider.addEventListener('input', () => { speedIx = parseInt(slider.value, 10) || 0; localStorage.setItem('nlc_speed', String(speedIx)); if (slabel) slabel.textContent = names[speedIx]; speedFill(); });
   }
   updateModelLabel(); renderModelList(); renderProjects(); showView('projects');
   renderChatList(); renderMessages();
   try { const d = await window.api.projectsDir(); if ($('#projectsDirPath')) $('#projectsDirPath').textContent = d; } catch {}
-  // model picker
-  el.modelCurrent.addEventListener('click', (e) => { e.stopPropagation(); el.modelDropdown.classList.toggle('open'); if (el.modelDropdown.classList.contains('open')) setTimeout(() => el.modelSearch.focus(), 30); });
+  // model picker — dropdown se vždy vejde do okna (posune se doleva, když by přetekl vpravo)
+  el.modelCurrent.addEventListener('click', (e) => { e.stopPropagation(); el.modelDropdown.classList.toggle('open'); if (el.modelDropdown.classList.contains('open')) { clampDropdown(); setTimeout(() => el.modelSearch.focus(), 30); } });
+  window.addEventListener('resize', () => { try { clampDropdown(); } catch {} });
   document.addEventListener('click', (e) => { if (!el.modelSelector.contains(e.target)) closeModels(); });
   el.modelSearch.addEventListener('input', () => { searchQuery = el.modelSearch.value; renderModelList(); });
   $('#fetchZenBtn').addEventListener('click', (e) => { e.preventDefault(); refreshZenLive(); });
