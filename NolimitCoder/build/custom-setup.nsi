@@ -35,9 +35,13 @@ Unicode True
 !ifndef APP_ICON
   !define APP_ICON "icon.ico"
 !endif
+!ifndef BG_BMP
+  !define BG_BMP "bg.bmp"
+!endif
 
 Name "${APP_NAME}"
 Caption "${APP_NAME} Setup"
+UninstallCaption "${APP_NAME} Uninstall"
 BrandingText "${APP_NAME} ${APP_VERSION}"
 OutFile "${OUT_FILE}"
 Icon "${APP_ICON}"
@@ -66,6 +70,8 @@ Var LblStatus
 Var BarProgress
 Var TxtDir
 Var ChkLaunch
+Var UnLblStatus
+Var UnBarProgress
 
 ; ---------- dark window: dark titlebar + dark background for ALL dialogs ----------
 !macro DarkSetup FINDNAME
@@ -97,16 +103,47 @@ Var ChkLaunch
 !macroend
 
 Function .onGUIInit
-  !insertmacro DarkSetup "$(^Name)"
 FunctionEnd
 Function .onGUIEnd
-  !insertmacro DarkCleanup "$(^Name)"
+  !insertmacro DarkCleanup "${APP_NAME} Setup"
 FunctionEnd
 Function un.onGUIInit
-  !insertmacro DarkSetup "$(^Name)"
 FunctionEnd
 Function un.onGUIEnd
-  !insertmacro DarkCleanup "$(^Name)"
+  !insertmacro DarkCleanup "${APP_NAME} Uninstall"
+FunctionEnd
+; Idempotent dark setup — called at the top of the FIRST page (the outer
+; window does not exist yet in .onGUIInit, so FindWindow would fail there).
+; TEMP DEBUG: logs every step to %TEMP%\nldbg.txt
+Function DbgLog
+  Exch $0
+  Push $1
+  FileOpen $1 "$TEMP\nldbg.txt" a
+  ${If} $1 != ""
+    FileWrite $1 "$0$\r$\n"
+    FileClose $1
+  ${EndIf}
+  Pop $1
+  Pop $0
+FunctionEnd
+Function EnsureDark
+  ${If} $DarkBrush != ""
+    Return
+  ${EndIf}
+  Push "EnsureDark: HWNDPARENT=$HWNDPARENT"
+  Call DbgLog
+  System::Call 'user32::FindWindow(t "#32770", t "${APP_NAME} Setup") i .r0'
+  Push "FindWindow=$0"
+  Call DbgLog
+  !insertmacro DarkSetup "${APP_NAME} Setup"
+  Push "after DarkSetup: DarkBrush=$DarkBrush OldBgBrush=$OldBgBrush"
+  Call DbgLog
+FunctionEnd
+Function un.EnsureDark
+  ${If} $DarkBrush != ""
+    Return
+  ${EndIf}
+  !insertmacro DarkSetup "${APP_NAME} Uninstall"
 FunctionEnd
 
 ; Shared helpers as MACROS (not Functions) so both installer and uninstaller code can use them.
@@ -162,6 +199,11 @@ FunctionEnd
   EnableWindow $0 0
   Pop $0
 !macroend
+; Strip visual styles from the inner page dialog so it paints with the dark
+; class brush. Children (buttons, progress, edits) stay themed and modern.
+!macro UnthemeDialog
+  System::Call 'uxtheme::SetWindowTheme(i $Dialog, i 0, i 0)'
+!macroend
 !macro SetProg N
   Push $0
   Push $1
@@ -195,18 +237,23 @@ FunctionEnd
 ; ================= INSTALL PAGES =================
 Page custom WelcomeShow
 Page custom LicenseShow
-Page custom DirShow
+Page custom DirShow DirLeave
 Page custom InstallShow
-Page custom FinishShow
+Page custom FinishShow FinishLeave
 
 Function WelcomeShow
+  Call EnsureDark
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
     Abort
   ${EndIf}
+  !insertmacro UnthemeDialog
   InitPluginsDir
   File /oname=$PLUGINSDIR\logo.ico "${LOGO_ICO}"
+  File /oname=$PLUGINSDIR\bg.bmp "${BG_BMP}"
+  BgImage::SetBg /NOUNLOAD /FILLSCREEN "$PLUGINSDIR\bg.bmp"
+  BgImage::Redraw
   ${NSD_CreateIcon} 12 12 56 56 ""
   Pop $1
   System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\logo.ico", i ${IMAGE_ICON}, i 64, i 64, i 0x10) p .r0'
@@ -232,12 +279,9 @@ Function LicenseShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  Push "I Agree"
-  Push ${ID_NEXT}
-  Call NavText
-  Push "License Agreement"
-  Push 12
-  Call PageTitle
+  !insertmacro UnthemeDialog
+  !insertmacro NavText "I Agree" ${ID_NEXT}
+  !insertmacro PageTitle "License Agreement" 12
   ${NSD_CreateLabel} 12 42 280 12 "Please review the terms before installing."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
@@ -245,10 +289,6 @@ Function LicenseShow
   Pop $0
   FileOpen $1 "${LICENSE_FILE}" r
   ${If} $1 != ""
-    FileRead $1 $2
-    ${IfNot} ${Errors}
-      SendMessage $0 ${EM_REPLACESEL} 0 "STR:$2$\r$\n"
-    ${EndIf}
     LicenseLoop:
       ClearErrors
       FileRead $1 $2
@@ -267,12 +307,9 @@ Function DirShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  Push "Next >"
-  Push ${ID_NEXT}
-  Call NavText
-  Push "Choose Install Location"
-  Push 12
-  Call PageTitle
+  !insertmacro UnthemeDialog
+  !insertmacro NavText "Next >" ${ID_NEXT}
+  !insertmacro PageTitle "Choose Install Location" 12
   ${NSD_CreateLabel} 12 44 280 12 "Where should ${APP_NAME} be installed?"
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
@@ -304,6 +341,7 @@ Function InstallShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
+  !insertmacro UnthemeDialog
   !insertmacro PageTitle "Installing…" 12
   ${NSD_CreateLabel} 12 48 280 12 "Copying files…"
   Pop $LblStatus
@@ -324,35 +362,11 @@ Function InstallTimer
   !insertmacro ClickNext
 FunctionEnd
 
-Function SetProg
-  Exch $0
-  Push $1
-  ${If} $BarProgress != 0
-  ${AndIf} $BarProgress != ""
-    SendMessage $BarProgress ${PBM_SETPOS} $0 0
-  ${EndIf}
-  Pop $1
-  Push $0
-FunctionEnd
-Function SetPhase
-  Exch $0
-  Push $1
-  ${If} $LblStatus != 0
-  ${AndIf} $LblStatus != ""
-    SendMessage $LblStatus ${WM_SETTEXT} 0 "STR:$0"
-  ${EndIf}
-  Pop $1
-  Push $0
-  Sleep 120
-FunctionEnd
-
 ; The real work — called from the install page (GUI) and from the hidden section (silent).
 Function DoInstallFiles
   SetShellVarContext current
-  Push "Removing previous version…"
-  Call SetPhase
-  Push 6
-  Call SetProg
+  !insertmacro SetPhase "Removing previous version…"
+  !insertmacro SetProg 6
   StrLen $0 $INSTDIR
   ${If} $0 <= 10
     Abort "Invalid install folder."
@@ -371,39 +385,30 @@ Function DoInstallFiles
   SilentLocked:
     Abort "Could not remove the previous version (is ${APP_NAME} running?). Close it and run setup again."
   RmOk:
-  Push "Copying application files…"
-  Call SetPhase
-  Push 18
-  Call SetProg
+  !insertmacro SetPhase "Copying application files…"
+  !insertmacro SetProg 18
   SetOutPath "$INSTDIR"
   File "${SRC_DIR}\*.exe"
   File "${SRC_DIR}\*.dll"
-  Push "Copying libraries…"
-  Call SetPhase
-  Push 45
-  Call SetProg
+  !insertmacro SetPhase "Copying libraries…"
+  !insertmacro SetProg 45
   File "${SRC_DIR}\*.pak"
   File "${SRC_DIR}\*.bin"
   File "${SRC_DIR}\*.dat"
   File "${SRC_DIR}\LICENSE*"
-  Push "Copying resources…"
-  Call SetPhase
-  Push 62
-  Call SetProg
+  !insertmacro SetPhase "Copying resources…"
+  !insertmacro SetProg 62
   File /r "${SRC_DIR}\locales"
+  !insertmacro SetProg 80
   File /r "${SRC_DIR}\resources"
-  Push "Creating shortcuts…"
-  Call SetPhase
-  Push 90
-  Call SetProg
+  !insertmacro SetPhase "Creating shortcuts…"
+  !insertmacro SetProg 90
   CreateDirectory "$SMPROGRAMS\NolimitCoder"
   CreateShortcut "$SMPROGRAMS\NolimitCoder\NolimitCoder.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
   CreateShortcut "$SMPROGRAMS\NolimitCoder\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
   CreateShortcut "$DESKTOP\NolimitCoder.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
-  Push "Writing uninstall info…"
-  Call SetPhase
-  Push 96
-  Call SetProg
+  !insertmacro SetPhase "Writing uninstall info…"
+  !insertmacro SetProg 96
   WriteRegStr HKCU "Software\NolimitCoder" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "DisplayName" "${APP_NAME}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "DisplayVersion" "${APP_VERSION}"
@@ -414,10 +419,8 @@ Function DoInstallFiles
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}" "NoRepair" 1
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  Push 100
-  Call SetProg
-  Push "Done."
-  Call SetPhase
+  !insertmacro SetProg 100
+  !insertmacro SetPhase "Done."
 FunctionEnd
 
 Function FinishShow
@@ -426,12 +429,9 @@ Function FinishShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  Push "Finish"
-  Push ${ID_NEXT}
-  Call NavText
-  Push "Installation complete"
-  Push 12
-  Call PageTitle
+  !insertmacro UnthemeDialog
+  !insertmacro NavText "Finish" ${ID_NEXT}
+  !insertmacro PageTitle "Installation complete" 12
   ${NSD_CreateLabel} 12 44 280 24 "${APP_NAME} is ready in:$\r$\n$INSTDIR"
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
@@ -462,18 +462,19 @@ UninstPage custom un.WorkShow
 UninstPage custom un.FinishShow
 
 Function un.ConfirmShow
+  Call un.EnsureDark
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  Push "Uninstall"
-  Push ${ID_NEXT}
-  Call NavText
-  Push "Uninstall ${APP_NAME}"
-  Push 12
-  Call PageTitle
-  Pop $0
+  !insertmacro UnthemeDialog
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\bg.bmp "${BG_BMP}"
+  BgImage::SetBg /NOUNLOAD /FILLSCREEN "$PLUGINSDIR\bg.bmp"
+  BgImage::Redraw
+  !insertmacro NavText "Uninstall" ${ID_NEXT}
+  !insertmacro PageTitle "Uninstall ${APP_NAME}" 12
   ${NSD_CreateLabel} 12 44 280 36 "This removes the application, shortcuts and registry entries.$\r$\nYour projects and settings are kept."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
@@ -486,19 +487,15 @@ Function un.WorkShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  Push "Close"
-  Push ${ID_NEXT}
-  Call NavText
-  Push "Uninstalling…"
-  Push 12
-  Call PageTitle
-  Pop $0
+  !insertmacro UnthemeDialog
+  !insertmacro NavText "Close" ${ID_NEXT}
+  !insertmacro PageTitle "Uninstalling…" 12
   ${NSD_CreateLabel} 12 48 280 12 "Removing files…"
   Pop $UnLblStatus
   SetCtlColors $UnLblStatus ${C_GREEN} transparent
   ${NSD_CreateProgressBar} 12 66 276 14 ""
   Pop $UnBarProgress
-  Call DisableBackNext
+  !insertmacro DisableBackNext
   ${NSD_CreateTimer} un.WorkTimer 250
   nsDialogs::Show
 FunctionEnd
@@ -506,16 +503,7 @@ Function un.WorkTimer
   ${NSD_KillTimer} un.WorkTimer
   Call un.DoUninstall
   StrCpy $DidWork 1
-  Call ClickNext
-FunctionEnd
-
-Function un.SetUnProg
-  Exch $0
-  Push $1
-  SendMessage $UnBarProgress ${PBM_SETPOS} $0 0
-  Pop $1
-  Push $0
-  Sleep 150
+  !insertmacro ClickNext
 FunctionEnd
 
 Function un.DoUninstall
@@ -524,18 +512,15 @@ Function un.DoUninstall
   ${If} $0 < 10
     Abort "Install folder not found."
   ${EndIf}
-  Push 20
-  Call un.SetUnProg
+  !insertmacro SetUnProg 20
   Delete "$DESKTOP\NolimitCoder.lnk"
   Delete "$SMPROGRAMS\NolimitCoder\NolimitCoder.lnk"
   Delete "$SMPROGRAMS\NolimitCoder\Uninstall.lnk"
   RMDir "$SMPROGRAMS\NolimitCoder"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
-  Push 55
-  Call un.SetUnProg
+  !insertmacro SetUnProg 55
   RMDir /r "$INSTDIR"
-  Push 100
-  Call un.SetUnProg
+  !insertmacro SetUnProg 100
 FunctionEnd
 
 Function un.FinishShow
@@ -544,13 +529,9 @@ Function un.FinishShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
-  Push "Close"
-  Push ${ID_NEXT}
-  Call NavText
-  Push "Uninstall complete"
-  Push 12
-  Call PageTitle
-  Pop $0
+  !insertmacro UnthemeDialog
+  !insertmacro NavText "Close" ${ID_NEXT}
+  !insertmacro PageTitle "Uninstall complete" 12
   ${NSD_CreateLabel} 12 48 280 24 "${APP_NAME} was removed from your PC.$\r$\nYour projects and settings were kept."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
