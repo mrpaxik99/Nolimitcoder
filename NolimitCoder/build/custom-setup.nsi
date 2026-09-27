@@ -79,18 +79,19 @@ Var UnBarProgress
   ${If} $0 != 0
     System::Call 'dwmapi::DwmSetWindowAttribute(i $0, i 20, i *i 1, i 4)'
     System::Call 'dwmapi::DwmSetWindowAttribute(i $0, i 19, i *i 1, i 4)'
-    System::Call 'user32::GetClassLongPtrA(i $0, i -10) p .r0'
+    System::Call 'user32::GetClassLongA(i $0, i -10) i .r0'
     StrCpy $OldBgBrush $0
     System::Call 'gdi32::CreateSolidBrush(i ${C_BG}) p .r0'
     StrCpy $DarkBrush $0
-    System::Call 'user32::SetClassLongPtrA(i $0, i -10, p $DarkBrush)'
+    System::Call 'user32::SetClassLongA(i $0, i -10, i $DarkBrush)'
   ${EndIf}
 !macroend
 !macro DarkCleanup FINDNAME
   System::Call 'user32::FindWindow(t "#32770", t "${FINDNAME}") i .r0'
   ${If} $0 != 0
   ${AndIf} $OldBgBrush != ""
-    System::Call 'user32::SetClassLongPtrA(i $0, i -10, p $OldBgBrush)'
+  ${AndIf} $OldBgBrush != "error"
+    System::Call 'user32::SetClassLongA(i $0, i -10, i $OldBgBrush)'
   ${EndIf}
   ${If} $DarkBrush != ""
     System::Call 'gdi32::DeleteObject(p $DarkBrush) i .r0'
@@ -130,14 +131,10 @@ Function EnsureDark
   ${If} $DarkBrush != ""
     Return
   ${EndIf}
-  Push "EnsureDark: HWNDPARENT=$HWNDPARENT"
-  Call DbgLog
-  System::Call 'user32::FindWindow(t "#32770", t "${APP_NAME} Setup") i .r0'
-  Push "FindWindow=$0"
-  Call DbgLog
   !insertmacro DarkSetup "${APP_NAME} Setup"
-  Push "after DarkSetup: DarkBrush=$DarkBrush OldBgBrush=$OldBgBrush"
-  Call DbgLog
+  FileOpen $9 "$TEMP\nldbg.txt" w
+  FileWrite $9 "DarkBrush=$DarkBrush OldBgBrush=$OldBgBrush$\r$\n"
+  FileClose $9
 FunctionEnd
 Function un.EnsureDark
   ${If} $DarkBrush != ""
