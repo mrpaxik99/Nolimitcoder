@@ -64,7 +64,6 @@ SetShellVarContext current
 !define PBM_SETPOS 1026
 !define EM_REPLACESEL 194
 !define ID_NEXT 1
-!define ID_CANCEL 2
 !define ID_BACK 3
 
 Var Dialog
@@ -129,16 +128,28 @@ Function MakeTitleFont
   Pop $1
   Pop $0
 FunctionEnd
-; Set outer nav button text. Usage: Push "Text" / Push ID / Call NavText
+; Big white title at (12, Y). Usage: Push text / Push Y / Call PageTitle (returns nothing)
+Function PageTitle
+  Exch $0
+  Pop $1
+  Push $2
+  Push $3
+  Call MakeTitleFont
+  ${NSD_CreateLabel} 12 $0 280 26 "$1"
+  Pop $2
+  SendMessage $2 ${WM_SETFONT} $TitleFont 1
+  SetCtlColors $2 ${C_TEXT} transparent
+  Pop $3
+  Pop $2
+FunctionEnd
+; Set outer nav button text. Usage: Push "Text" / Push ID / Call NavText (returns nothing)
 Function NavText
   Exch $0
-  Exch $1
+  Pop $1
   Push $2
   GetDlgItem $2 $HWNDPARENT $0
   SendMessage $2 ${WM_SETTEXT} 0 "STR:$1"
   Pop $2
-  Push $1
-  Push $0
 FunctionEnd
 Function ClickNext
   Push $0
@@ -154,21 +165,6 @@ Function DisableBackNext
   GetDlgItem $0 $HWNDPARENT ${ID_NEXT}
   EnableWindow $0 0
   Pop $0
-FunctionEnd
-; Big white title at (12, Y). Usage: Push text / Push Y / Call PageTitle (returns nothing)
-Function PageTitle
-  Exch $0
-  Exch $1
-  Push $2
-  Push $3
-  Call MakeTitleFont
-  ${NSD_CreateLabel} 12 $0 280 26 "$1"
-  Pop $2
-  SendMessage $2 ${WM_SETFONT} $TitleFont 1
-  SetCtlColors $2 ${C_TEXT} transparent
-  Pop $3
-  Push $1
-  Push $0
 FunctionEnd
 
 ; ================= INSTALL PAGES =================
@@ -187,10 +183,10 @@ Function WelcomeShow
   InitPluginsDir
   File /oname=$PLUGINSDIR\logo.ico "${LOGO_ICO}"
   ${NSD_CreateIcon} 12 12 56 56 ""
-  Pop $0
+  Pop $1
   System::Call 'user32::LoadImage(i 0, t "$PLUGINSDIR\logo.ico", i ${IMAGE_ICON}, i 64, i 64, i 0x10) p .r0'
   ${If} $0 != 0
-    SendMessage $0 ${STM_SETIMAGE} ${IMAGE_ICON} $0
+    SendMessage $1 ${STM_SETIMAGE} ${IMAGE_ICON} $0
   ${EndIf}
   Push "NolimitCoder V4"
   Push 14
@@ -208,14 +204,14 @@ Function WelcomeShow
 FunctionEnd
 
 Function LicenseShow
-  Push "Next >"
-  Push ${ID_NEXT}
-  Call NavText
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
     Abort
   ${EndIf}
+  Push "I Agree"
+  Push ${ID_NEXT}
+  Call NavText
   Push "License Agreement"
   Push 12
   Call PageTitle
@@ -226,7 +222,12 @@ Function LicenseShow
   Pop $0
   FileOpen $1 "${LICENSE_FILE}" r
   ${If} $1 != ""
+    FileRead $1 $2
+    ${IfNot} ${Errors}
+      SendMessage $0 ${EM_REPLACESEL} 0 "STR:$2$\r$\n"
+    ${EndIf}
     LicenseLoop:
+      ClearErrors
       FileRead $1 $2
       IfErrors LicenseDone
       SendMessage $0 ${EM_REPLACESEL} 0 "STR:$2$\r$\n"
@@ -235,20 +236,17 @@ Function LicenseShow
       FileClose $1
   ${EndIf}
   nsDialogs::Show
-  Push "I Agree"
-  Push ${ID_NEXT}
-  Call NavText
 FunctionEnd
 
 Function DirShow
-  Push "Next >"
-  Push ${ID_NEXT}
-  Call NavText
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
     Abort
   ${EndIf}
+  Push "Next >"
+  Push ${ID_NEXT}
+  Call NavText
   Push "Choose Install Location"
   Push 12
   Call PageTitle
@@ -342,14 +340,12 @@ Function DoInstallFiles
   Push 18
   Call SetProg
   SetOutPath "$INSTDIR"
-  CopyLoop:
+  RMDirLoop:
     ClearErrors
     File "${SRC_DIR}\*.exe"
     File "${SRC_DIR}\*.dll"
-    IfErrors CopyRetry
-    Goto CopyLibs
-  CopyRetry:
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Some files are locked (is ${APP_NAME} running?). Close it and click Retry." IDRETRY CopyLoop
+    IfFileExists "$INSTDIR\${APP_EXE}" 0 CopyLibs
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Some files are locked (is ${APP_NAME} running?). Close it and click Retry." IDRETRY RMDirLoop
     Abort "Installation cancelled. No files were changed."
   CopyLibs:
   Push "Copying libraries…"
@@ -365,8 +361,6 @@ Function DoInstallFiles
   Push 62
   Call SetProg
   File /r "${SRC_DIR}\locales"
-  Push 80
-  Call SetProg
   File /r "${SRC_DIR}\resources"
   Push "Creating shortcuts…"
   Call SetPhase
@@ -398,14 +392,14 @@ Function DoInstallFiles
 FunctionEnd
 
 Function FinishShow
-  Push "Finish"
-  Push ${ID_NEXT}
-  Call NavText
   nsDialogs::Create 1018
   Pop $Dialog
   ${If} $Dialog == error
     Abort
   ${EndIf}
+  Push "Finish"
+  Push ${ID_NEXT}
+  Call NavText
   Push "Installation complete"
   Push 12
   Call PageTitle
@@ -444,6 +438,9 @@ Function un.ConfirmShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
+  Push "Uninstall"
+  Push ${ID_NEXT}
+  Call NavText
   Push "Uninstall ${APP_NAME}"
   Push 12
   Call PageTitle
@@ -451,10 +448,6 @@ Function un.ConfirmShow
   ${NSD_CreateLabel} 12 44 280 36 "This removes the application, shortcuts and registry entries.$\r$\nYour projects and settings are kept."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
-  Push "Uninstall"
-  Push ${ID_NEXT}
-  Call NavText
-  Pop $0
   nsDialogs::Show
 FunctionEnd
 
@@ -464,6 +457,9 @@ Function un.WorkShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
+  Push "Close"
+  Push ${ID_NEXT}
+  Call NavText
   Push "Uninstalling…"
   Push 12
   Call PageTitle
@@ -473,10 +469,6 @@ Function un.WorkShow
   SetCtlColors $UnLblStatus ${C_GREEN} transparent
   ${NSD_CreateProgressBar} 12 66 276 14 ""
   Pop $UnBarProgress
-  Push "Close"
-  Push ${ID_NEXT}
-  Call NavText
-  Pop $0
   Call DisableBackNext
   ${NSD_CreateTimer} un.WorkTimer 250
   nsDialogs::Show
@@ -498,6 +490,7 @@ Function un.SetUnProg
 FunctionEnd
 
 Function un.DoUninstall
+  SetShellVarContext current
   StrLen $0 $INSTDIR
   ${If} $0 < 10
     Abort "Install folder not found."
@@ -522,6 +515,9 @@ Function un.FinishShow
   ${If} $Dialog == error
     Abort
   ${EndIf}
+  Push "Close"
+  Push ${ID_NEXT}
+  Call NavText
   Push "Uninstall complete"
   Push 12
   Call PageTitle
@@ -529,10 +525,6 @@ Function un.FinishShow
   ${NSD_CreateLabel} 12 48 280 24 "${APP_NAME} was removed from your PC.$\r$\nYour projects and settings were kept."
   Pop $0
   SetCtlColors $0 ${C_GRAY} transparent
-  Push "Close"
-  Push ${ID_NEXT}
-  Call NavText
-  Pop $0
   nsDialogs::Show
 FunctionEnd
 
