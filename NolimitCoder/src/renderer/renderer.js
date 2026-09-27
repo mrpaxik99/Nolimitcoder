@@ -48,7 +48,8 @@ const BUILD_SYS = 'Work through tools, not by printing into chat. Never announce
   + ' Before compiling/running, call env_prepare with request (it auto-installs missing tools from the internet). Never tell the user to install anything manually. Large toolchains (MSVC, Docker, Android) only with heavy: true, and only after the user agreed (ask via question).'
   + ' EXE: if no technology was specified, ask via question. Electron: scaffold_electron, write the code, shell npm install (timeout 600000), shell npm run dist (timeout 600000), verify the exe via file_info and report the path. Web: index.html in the project root. Always verify finished work by running it. Never commit without an explicit request.'
   + ' CSS in generated apps: NEVER use backdrop-filter or -webkit-backdrop-filter (slow and blurry) — only solid colors, gradients and shadows.'
-  + ' RESEARCH FIRST (all projects): whenever the request mentions something you do not fully know — a brand, a platform like YouTube/TikTok, a format, dimensions, current specs or rules — FIRST look it up with web_search/web_fetch (official docs, ad/creative specs, resolutions, durations, safe zones), THEN build to the researched facts. Figure out what the user means before you act; never guess specs, dimensions or platform rules from memory.';
+  + ' RESEARCH FIRST (all projects): whenever the request mentions something you do not fully know — a brand, a platform like YouTube/TikTok, a format, dimensions, current specs or rules — FIRST look it up with web_search/web_fetch (official docs, ad/creative specs, resolutions, durations, safe zones), THEN build to the researched facts. Figure out what the user means before you act; never guess specs, dimensions or platform rules from memory.'
+  + ' Verify files ALWAYS with the file_info tool ({"path": "..."}) — never invent your own powershell/cmd check one-liners for files (they break on quotes and paths with spaces).';
 const AGENT_NUDGE = '';
 const CHAT_SYS = 'Respond in English, briefly and to the point. Change nothing, write nothing, run nothing. If you need to peek into project files, you may only use read tools. Show code only when the user explicitly asks for it.';
 /* ---------- Build mode: question vs. task ----------
@@ -1343,6 +1344,11 @@ async function runAgent(convo, intent) {
                 res = await window.api.toolsExec({ tool: c.name, args: withBackend(c.name, c.args), root: prefs.activeProject, fullAccess: true });
               } catch (e) { res = { ok: false, output: 'Chyba: ' + (e.message || e) }; }
             }
+          }
+          // Vlastní lámavý ověřovací one-liner (rozbité závorky/cesty s mezerami)? Soubory se kontrolují přes file_info, ne přes shell.
+          if (c.name === 'shell' && /ParserError|Missing closing|was unexpected|unexpected token/i.test(String(res.output || ''))) {
+            res = Object.assign({}, res, { output: String(res.output || '') + '\n[POZOR: tvůj kontrolní shell one-liner má chybu syntaxe (závorky/cesty s mezerami). Soubory příště ověřuj VŽDY nástrojem file_info {"path": "..."} — žádné vlastní powershell/cmd kontrolní příkazy.]' });
+            dlog('parsehint', { cmd: String((c.args || {}).command || '').slice(0, 120) });
           }
         }
         if (!res.cached) taskMemStore(taskMem, c.name, c.args, res, prefs.activeProject);
