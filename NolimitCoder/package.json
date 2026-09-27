@@ -1,0 +1,54 @@
+{
+    "name":  "nolimit-coder-v2",
+    "version":  "3.0.13",
+    "description":  "Ultra modern Electron chat s modely NolimitCoder - vše lokálně, offline po stažení",
+    "main":  "src/main/main.js",
+    "type":  "commonjs",
+    "author":  "NolimitCoder",
+    "license":  "MIT",
+    "scripts":  {
+                    "start":  "electron .",
+                    "dev":  "electron .",
+                    "build":  "electron-builder",
+                    "build:win":  "electron-builder --win",
+                    "postinstall":  "electron-builder install-app-deps"
+                },
+    "devDependencies":  {
+                            "electron":  "^33.2.1",
+                            "electron-builder":  "^25.1.8"
+                        },
+    "dependencies":  {},
+    "build":  {
+                  "appId":  "com.nolimitcoder.v2",
+                  "productName":  "NolimitCoder V3",
+                  "directories":  {
+                                      "output":  "dist"
+                                  },
+                  "files":  [
+                                "src/**/*",
+                                "proxies/**/*",
+                                "package.json"
+                            ],
+                  "win":  {
+                              "icon":  "src/renderer/assets/icon.ico",
+                              "target":  ["nsis", "dir"]
+                          },
+                  "nsis":  {
+                               "installerIcon":  "src/renderer/assets/icon.ico",
+                               "oneClick":  false,
+                               "uninstallerIcon":  "src/renderer/assets/icon.ico",
+                               "deleteAppDataOnUninstall":  false,
+                               "createDesktopShortcut":  true,
+                               "artifactName":  "NolimitCoder V4 Setup.${ext}",
+                               "shortcutName":  "NolimitCoder",
+                               "perMachine":  false,
+                                "license":  "build/license.txt",
+                                "installerSidebar":  "build/installerSidebar.bmp",
+                                "uninstallerSidebar":  "build/installerSidebar.bmp",
+                                "installerHeader":  "build/installerHeader.bmp",
+                                "include":  "build/installer.nsh",
+                                "allowToChangeInstallationDirectory":  true,
+                               "createStartMenuShortcut":  true
+                           }
+              }
+}

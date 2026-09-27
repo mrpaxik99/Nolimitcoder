@@ -1,0 +1,20 @@
+# zavislosti a build vystupy
+node_modules/
+dist/
+out/
+# logy a docasne
+*.log
+*.blockmap
+npm-debug.log*
+# tajemstvi — nikdy necommitovat
+.env
+*.p12
+*.pfx
+*.pem
+# system
+.DS_Store
+Thumbs.db
+Desktop.ini
+# editory
+.vscode/
+.idea/

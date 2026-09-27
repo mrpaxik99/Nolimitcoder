@@ -1,0 +1,46 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  getStore: () => ipcRenderer.invoke('store:get'),
+  setStore: (data) => ipcRenderer.invoke('store:set', data),
+  getVersion: () => ipcRenderer.invoke('app:version'),
+  getPaths: () => ipcRenderer.invoke('app:paths'),
+  fetchZenModels: (apiKey) => ipcRenderer.invoke('net:fetch-zen-models', apiKey),
+  discoverLocal: () => ipcRenderer.invoke('net:discover-local'),
+  chatStreamStart: (payload) => ipcRenderer.send('chat:stream-start', payload),
+  chatStreamAbort: () => ipcRenderer.send('chat:stream-abort'),
+  projectsDir: () => ipcRenderer.invoke('projects:dir'),
+  projectList: () => ipcRenderer.invoke('projects:list'),
+  projectCreate: (name) => ipcRenderer.invoke('projects:create', name),
+  projectRename: (oldName, newName) => ipcRenderer.invoke('projects:rename', oldName, newName),
+  projectRenamePath: (oldPath, newName) => ipcRenderer.invoke('projects:renamePath', oldPath, newName),
+  projectDelete: (name) => ipcRenderer.invoke('projects:delete', name),
+  projectPick: () => ipcRenderer.invoke('projects:pick'),
+  projectFiles: (dirPath, includeContents) => ipcRenderer.invoke('projects:files', dirPath, includeContents),
+  openPath: (p) => ipcRenderer.invoke('projects:openPath', p),
+  toolsExec: (data) => ipcRenderer.invoke('tools:exec', data),
+  cancelDownload: (id) => ipcRenderer.invoke('tools:cancel-download', id),
+  debugLog: (tag, data) => { try { ipcRenderer.send('log:debug', { tag, data }); } catch {} },
+  knownFolders: () => ipcRenderer.invoke('sys:knownFolders'),
+  openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
+  previewStart: (dirPath) => ipcRenderer.invoke('preview:start', dirPath),
+  previewStop: (dirPath) => ipcRenderer.invoke('preview:stop', dirPath),
+  termRun: (data) => ipcRenderer.invoke('term:run', data),
+  isAdmin: () => ipcRenderer.invoke('sys:isAdmin'),
+  relaunchAdmin: () => ipcRenderer.invoke('app:relaunchAdmin'),
+  helperState: () => ipcRenderer.invoke('sys:helperState'),
+  proxyStatus: () => ipcRenderer.invoke('proxy:status'),
+  proxyRefresh: () => ipcRenderer.invoke('proxy:refresh'),
+  onProxyStatus: (cb) => ipcRenderer.on('proxy:status', (_, d) => cb(d)),
+
+  onChunk: (cb) => ipcRenderer.on('chat:stream-chunk', (_, d) => cb(d)),
+  onEnd: (cb) => ipcRenderer.on('chat:stream-end', () => cb()),
+  onError: (cb) => ipcRenderer.on('chat:stream-error', (_, e) => cb(e)),
+  onDownload: (cb) => ipcRenderer.on('nlc-download', (_, p) => cb(p)),
+  removeListeners: () => {
+    ipcRenderer.removeAllListeners('chat:stream-chunk');
+    ipcRenderer.removeAllListeners('chat:stream-end');
+    ipcRenderer.removeAllListeners('chat:stream-error');
+    ipcRenderer.removeAllListeners('nlc-download');
+  }
+});

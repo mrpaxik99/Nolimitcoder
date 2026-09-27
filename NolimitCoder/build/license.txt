@@ -1,0 +1,260 @@
+﻿NOLIMITCODER V3 - END USER LICENSE AGREEMENT (EULA)
+==================================================
+
+IMPORTANT - PLEASE READ CAREFULLY. BY INSTALLING, COPYING OR USING
+NOLIMITCODER V3 (THE "SOFTWARE"), YOU AGREE TO BE BOUND BY THE TERMS
+OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT INSTALL OR USE THE
+SOFTWARE AND DELETE ALL COPIES IN YOUR POSSESSION.
+
+This End User License Agreement ("Agreement") is a legal agreement
+between you (an individual or a legal entity, "You" or "User") and
+NolimitCode, the provider of NolimitCoder V3 ("Provider", "We", "Us").
+This Agreement governs Your installation and use of the Software,
+including any updates, companion files and documentation provided
+together with it.
+
+1. DEFINITIONS
+--------------
+1.1 "Software" means the NolimitCoder V3 desktop application, including
+     all of its features, functions, user interface elements, updates
+     and any accompanying documentation, in any version.
+1.2 "Unlimited Plan" means the paid subscription tier of the Software
+     that unlocks the full, unrestricted feature set as described in
+     Section 3.
+1.3 "Subscription Fee" means the recurring monthly fee for the
+     Unlimited Plan defined in Section 3.2.
+1.4 "Trial Period" means the free evaluation period defined in
+     Section 4.
+1.5 "Confidential Information" means all non-public technical,
+     commercial and organizational information relating to the
+     Software, as defined in Section 7.
+
+2. LICENSE GRANT
+----------------
+2.1 Subject to the terms of this Agreement and to the timely payment
+    of the applicable Subscription Fee, the Provider grants You a
+    limited, non-exclusive, non-transferable, non-sublicensable and
+    revocable license to install and use the Software on computers
+    owned or controlled by You, for Your own lawful purposes.
+2.2 You may install the Software on more than one of Your own
+    computers, provided that the Software is used under the same
+    user account and the same active Unlimited Plan.
+2.3 All rights not expressly granted to You are reserved by the
+    Provider. The Software is licensed, not sold.
+
+3. UNLIMITED PLAN AND SUBSCRIPTION FEE
+--------------------------------------
+3.1 The full, unrestricted version of the Software ("Unlimited") is
+    available exclusively under the Unlimited Plan. The Unlimited
+    Plan removes all usage limits and unlocks every feature of the
+    Software that is subject to a limit in the trial or restricted
+    mode.
+3.2 The Subscription Fee for the Unlimited Plan is USD 9.99 per month
+    (the "Fee"). The Fee is billed in advance for each monthly
+    billing period and is automatically renewed until cancelled by
+    You in accordance with Section 5.
+3.3 NO HIDDEN FEES. The Fee stated in Section 3.2 is the full and
+    final price of the Unlimited Plan. There are no setup fees, no
+    activation fees, no overage charges, no per-feature charges and
+    no other hidden payments of any kind. The amount charged to You
+    will never exceed the Fee applicable to Your billing period,
+    including all taxes only where required by law and always shown
+    before the charge is made.
+3.4 The Provider guarantees that the Fee will not be increased for
+    Your active subscription without Your prior, explicit consent.
+    If You do not consent to a future price change, You may cancel
+    and keep using the Software until the end of the already paid
+    billing period.
+3.5 Payment is processed by a third-party payment processor. By
+    providing payment details You authorize the recurring charge
+    described in this Section.
+
+4. FREE TRIAL - ONE FULL DAY
+-----------------------------
+4.1 Every first installation of the Software includes a free Trial
+    Period of one (1) full day, i.e. twenty-four (24) consecutive
+    hours, starting at the moment the installation completes.
+4.2 During the Trial Period You may use the Software with the full
+    Unlimited feature set, completely free of charge and without
+    providing any payment details.
+4.3 When the Trial Period expires, the Software switches to a
+    restricted mode until an Unlimited Plan is activated. No data
+    created during the Trial Period is deleted by this switch.
+4.4 The Trial Period is available once per User. Any attempt to
+    obtain additional trial periods by reinstalling the Software,
+    creating multiple accounts or otherwise circumventing this
+    limitation is a material breach of this Agreement.
+
+5. RENEWAL, CANCELLATION AND REFUNDS
+-------------------------------------
+5.1 The Unlimited Plan renews automatically each month. You may
+    cancel the renewal at any time with effect from the end of the
+    current billing period. After cancellation You keep Unlimited
+    access until the end of the already paid period.
+5.2 Except where required by applicable consumer-protection law, fees
+    already paid are non-refundable, including partially used billing
+    periods.
+5.3 If a payment fails, the Provider may retry the charge and, after
+    reasonable notice, suspend Unlimited access until the outstanding
+    amount is settled.
+
+6. RESTRICTIONS
+---------------
+You agree that You will NOT, and will not allow any third party to:
+  (a) copy, reproduce or redistribute the Software, in whole or in
+      part, except for a reasonable backup copy for Your own use;
+  (b) reverse engineer, decompile, disassemble, or otherwise attempt
+      to derive the source code, algorithms, models, prompts,
+      internal architecture or any other internals of the Software;
+  (c) rent, lease, lend, sell, resell, sublicense, publish or
+      otherwise make the Software available to any third party;
+  (d) remove, alter or obscure any proprietary notices, labels or
+      marks of the Provider;
+  (e) use the Software for any unlawful purpose, or in violation of
+      any applicable law or regulation;
+  (f) circumvent, disable or interfere with any license verification,
+      usage measurement, trial limitation or security mechanism of
+      the Software;
+  (g) use the Software to develop a competing product based on
+      knowledge gained from the Software.
+
+7. CONFIDENTIALITY AND NON-DISCLOSURE OF INTERNALS
+--------------------------------------------------
+7.1 The internal construction of the Software - including but not
+    limited to its source code, architecture, engineering methods,
+    tools, frameworks, models, prompts, trade secrets and know-how
+    ("Confidential Information") - is strictly confidential and is
+    the exclusive property of the Provider.
+7.2 You agree to keep all Confidential Information strictly secret
+    and not to disclose, publish, discuss or otherwise reveal it to
+    any third party, in whole or in part, in any form or medium,
+    without the prior written consent of the Provider.
+7.3 You shall not state, suggest or imply in public how the Software
+    was built, which internal components it uses, or any other
+    non-public technical detail about it.
+7.4 The obligations of this Section survive any termination or
+    expiration of this Agreement and remain in force indefinitely.
+
+8. INTELLECTUAL PROPERTY
+-------------------------
+8.1 The Software, including all intellectual property rights therein,
+    is and remains the sole and exclusive property of the Provider.
+8.2 Nothing in this Agreement transfers any ownership or
+    intellectual property right in the Software to You.
+8.3 Content, projects and files that You create with the Software
+    using Your own input ("User Content") belong to You. You are
+    solely responsible for the legality of User Content and for
+    respecting third-party rights when creating it.
+
+9. UPDATES
+----------
+9.1 The Provider may provide updates, upgrades, patches or new
+    versions of the Software at its discretion. Updates may add,
+    modify or remove features.
+9.2 Updates are subject to this Agreement unless accompanied by
+    separate license terms, in which case those terms apply.
+9.3 You agree that the Software may check for updates automatically.
+    No update will increase the Fee without Your consent.
+
+10. DATA AND PRIVACY
+---------------------
+10.1 The Software stores projects, conversations and settings locally
+     on Your computer. Uninstalling the Software does not
+     automatically delete this local data unless You choose to
+     remove it.
+10.2 Where the Software communicates with remote services (for
+     example AI models or update checks), only the data necessary
+     to provide the requested function is transmitted.
+10.3 You are responsible for backing up Your own data. The Provider
+     is not liable for any loss of User Content.
+
+11. ACCEPTABLE USE
+-------------------
+11.1 You shall use the Software responsibly and shall not use it to
+     generate, store or distribute malware, infringing material,
+     or content that is unlawful, hateful or abusive.
+11.2 You shall not misuse remote services reachable through the
+     Software, attempt to gain unauthorized access to them, or
+     overload them.
+11.3 The Provider may suspend or terminate access of any User who
+     materially breaches this Section.
+
+12. DISCLAIMER OF WARRANTY
+---------------------------
+12.1 THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT
+     WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+     LIMITED TO THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS
+     FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+12.2 THE PROVIDER DOES NOT WARRANT THAT THE SOFTWARE WILL BE
+     UNINTERRUPTED, ERROR-FREE, COMPLETELY SECURE, OR THAT ANY
+     RESULTS, CODE OR OTHER OUTPUT PRODUCED BY THE SOFTWARE WILL
+     BE CORRECT OR FIT FOR ANY PARTICULAR PURPOSE. YOU ARE
+     RESPONSIBLE FOR REVIEWING AND TESTING ANY OUTPUT BEFORE USE.
+
+13. LIMITATION OF LIABILITY
+----------------------------
+13.1 TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT
+     SHALL THE PROVIDER BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+     SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES, OR ANY LOSS OF
+     PROFITS, REVENUE, DATA OR USE, ARISING OUT OF OR RELATED TO
+     THIS AGREEMENT OR THE SOFTWARE, EVEN IF ADVISED OF THE
+     POSSIBILITY OF SUCH DAMAGES.
+13.2 THE TOTAL AGGREGATE LIABILITY OF THE PROVIDER FOR ANY CLAIM
+     ARISING OUT OF OR RELATED TO THIS AGREEMENT OR THE SOFTWARE
+     SHALL NOT EXCEED THE AMOUNTS ACTUALLY PAID BY YOU FOR THE
+     UNLIMITED PLAN DURING THE TWELVE (12) MONTHS PRECEDING THE
+     EVENT GIVING RISE TO THE CLAIM, OR, IF NO AMOUNTS WERE PAID,
+     THE AMOUNT OF USD 10.
+13.3 NOTHING IN THIS AGREEMENT EXCLUDES LIABILITY THAT CANNOT BE
+     EXCLUDED UNDER APPLICABLE LAW.
+
+14. TERM AND TERMINATION
+-------------------------
+14.1 This Agreement enters into force when You install or first use
+     the Software and remains in force until terminated.
+14.2 You may terminate this Agreement at any time by uninstalling
+     the Software, deleting all copies, and cancelling any active
+     Unlimited Plan.
+14.3 The Provider may terminate this Agreement with immediate effect
+     if You materially breach any of its terms, including Sections
+     4.4, 6, 7 or 11. Upon termination for breach, no refund is due
+     and the license granted in Section 2 ends immediately.
+14.4 Sections 7, 8, 12 and 13 survive termination.
+
+15. GOVERNING LAW AND DISPUTES
+-------------------------------
+15.1 This Agreement shall be governed by and construed in accordance
+     with the generally applicable laws, without regard to conflict
+     of law principles, and with full respect to mandatory consumer
+     protection rules of Your country of residence.
+15.2 The parties shall first attempt to resolve any dispute arising
+     out of or in connection with this Agreement amicably. If no
+     amicable resolution is reached within thirty (30) days, either
+     party may seek relief before the competent courts.
+
+16. GENERAL PROVISIONS
+-----------------------
+16.1 Entire agreement. This Agreement constitutes the entire
+     agreement between You and the Provider concerning the Software
+     and supersedes all prior understandings on the subject matter.
+16.2 Amendments. The Provider may amend this Agreement for future
+     versions of the Software. Continued use after an update
+     constitutes acceptance of the amended terms.
+16.3 Severability. If any provision of this Agreement is held
+     invalid or unenforceable, the remaining provisions remain in
+     full force and the invalid provision is replaced by a valid
+     one closest to the original intent.
+16.4 No waiver. Failure to enforce any provision does not constitute
+     a waiver of the right to enforce it later.
+16.5 Assignment. You may not assign this Agreement without prior
+     written consent of the Provider. The Provider may assign it
+     in connection with a merger, acquisition or sale of assets.
+16.6 Contact. For questions regarding this Agreement, billing or
+     cancellation, contact the Provider through the official
+     NolimitCoder website and support channels.
+
+BY CLICKING "I AGREE" / "SOUHLASIM", OR BY INSTALLING OR USING THE
+SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT,
+UNDERSTAND IT, AND AGREE TO BE BOUND BY ALL OF ITS TERMS.
+
+(c) 2026 NolimitCode. All rights reserved.

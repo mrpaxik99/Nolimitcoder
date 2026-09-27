@@ -1,0 +1,248 @@
+﻿<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NolimitCoder V2 — AI chat od NolimitCode</title>
+<link rel="icon" type="image/png" href="./assets/logo.png">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div class="scroll-progress" id="scrollProgress"></div>
+<div class="bg-grid" id="bgGrid"></div>
+<div class="bg-orbs" id="bgOrbs" aria-hidden="true">
+  <span class="orb orb-1"></span>
+  <span class="orb orb-2"></span>
+  <span class="orb orb-3"></span>
+  <span class="orb orb-4"></span>
+</div>
+<div class="bg-glow"></div>
+<canvas id="stars"></canvas>
+<div class="cursor-glow" id="cursorGlow"></div>
+
+<header class="nav" id="nav">
+  <div class="nav-inner">
+    <div class="brand">
+      <img src="./assets/logo.png" alt="Nolimit" class="brand-logo">
+      <span class="brand-text">NolimitCoder<span class="v2">V2</span></span>
+      <span class="brand-pill">FREE</span>
+    </div>
+    <nav class="nav-links">
+      <a href="#modely">Modely</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#funkce">Funkce</a>
+      <a href="#rezimy">Režimy</a>
+      <a href="#jak">Jak začít</a>
+    </nav>
+    <a href="../NolimitCoder/dist/NolimitCoder%20V2-Setup-2.0.0.exe" class="btn btn-primary btn-sm nav-cta">⬇ Stáhnout FREE</a>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <div class="live-pill reveal"><span class="live-dot"></span> V2 je venku — 100% FREE · bez klíče</div>
+        <h1 class="reveal">NolimitCoder <span class="grad">V2</span></h1>
+        <p class="subtitle reveal">AI chat s modely <b>NolimitCoderV2</b> a <b>NolimitCoderV3</b> od <b>NolimitCode</b>.<br>Žádný API klíč. Není nic potřeba — jen vyber složku a piš.</p>
+        <div class="hero-actions reveal">
+          <a href="../NolimitCoder/dist/NolimitCoder%20V2-Setup-2.0.0.exe" class="btn btn-primary">⬇ Stáhnout aplikaci</a>
+          <a href="#jak" class="btn btn-ghost">Jak to funguje</a>
+        </div>
+        <div class="hero-badges reveal">
+          <span>🎁 100% FREE</span>
+          <span>🔑 Bez klíče</span>
+          <span>⚡ Streaming</span>
+          <span>🖥️ Windows app</span>
+        </div>
+        <div class="hero-stats reveal">
+          <div class="stat"><b>2</b><small>AI modely</small></div>
+          <div class="stat"><b>0 Kč</b><small>napořád free</small></div>
+          <div class="stat"><b>3 kroky</b><small>a kóduješ</small></div>
+        </div>
+      </div>
+
+      <!-- Dvě živé ukázky aplikace vedle sebe -->
+      <div class="hero-shots" id="heroShots">
+        <div class="hero-shot shot-main reveal">
+          <div class="app-shot" id="appShot">
+            <div class="app-shot-bar"><span class="d"></span><span class="d"></span><span class="t">NolimitCoder V2 — Můj projekt</span><span class="live-mini"><i></i>live</span></div>
+            <div class="app-shot-body">
+              <div class="as-side">
+                <div class="as-new">+ Create chat</div>
+                <div class="as-label">Chaty</div>
+                <div class="as-item on">Web pro kavárnu</div>
+                <div class="as-item">Oprava přihlášení</div>
+                <div class="as-item">Python skript</div>
+                <div class="as-foot">NolimitCode cloud ●</div>
+              </div>
+              <div class="as-main">
+                <div class="as-msg user">Vytvoř jednoduchou stránku pro kavárnu</div>
+                <div class="as-tool"><span class="as-dot"></span>write_file · index.html <b>✓</b></div>
+                <div class="as-msg ai">Hotovo — stránka je v <b>index.html</b>, preview běží vpravo.<span class="caret"></span></div>
+                <div class="as-composer">
+                  <div class="as-input" id="demoInput"></div>
+                  <div class="as-row">
+                    <span class="as-seg"><b>Build</b><i>Plan</i></span>
+                    <span class="as-model">NolimitCoderV3 ▾</span>
+                    <span class="as-free">FREE</span>
+                    <span class="as-send">↑</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="float-chip chip-a">⚡ streaming odpovědi</div>
+          <div class="float-chip chip-b">📁 pracuje se soubory</div>
+        </div>
+        <div class="hero-shot shot-back reveal">
+          <div class="app-shot" id="appShotBack">
+            <div class="app-shot-bar"><span class="d"></span><span class="d"></span><span class="t">NolimitCoder V2 — Terminál</span><span class="live-mini plan"><i></i>plan</span></div>
+            <div class="app-shot-body">
+              <div class="as-side">
+                <div class="as-new">+ New task</div>
+                <div class="as-label">Nástroje</div>
+                <div class="as-item on">›_ Terminál</div>
+                <div class="as-item">🔍 Hledání v projektu</div>
+                <div class="as-item">🌐 Web preview</div>
+                <div class="as-foot">Build režim ●</div>
+              </div>
+              <div class="as-main">
+                <div class="term">
+                  <div><span class="tp">$</span> npm run build</div>
+                  <div class="tok">✓ compiled successfully in 1.8s</div>
+                  <div><span class="tp">$</span> <span id="demoInput2"></span><span class="caret"></span></div>
+                </div>
+                <div class="as-tool"><span class="as-dot"></span>run_command · npm run build <b>✓</b></div>
+                <div class="as-msg ai">Plán hotový — <b>3 soubory</b>, 0 změn bez schválení.</div>
+                <div class="as-composer">
+                  <div class="as-row">
+                    <span class="as-seg"><i>Build</i><b>Plan</b></span>
+                    <span class="as-model">NolimitCoderV2 ▾</span>
+                    <span class="as-free">FREE</span>
+                    <span class="as-send">↑</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="float-chip chip-c">📋 plan režim</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+      <span class="hl">AI without limits for $14.02</span><i>✦</i><span>NOLIMITCODER V3</span><i>✦</i><span>NOLIMITCODER V2</span><i>✦</i><span>BUILD &amp; PLAN</span><i>✦</i><span>STREAMING</span><i>✦</i><span>WINDOWS APP</span><i>✦</i>
+      <span class="hl">AI without limits for $14.02</span><i>✦</i><span>NOLIMITCODER V3</span><i>✦</i><span>NOLIMITCODER V2</span><i>✦</i><span>BUILD &amp; PLAN</span><i>✦</i><span>STREAMING</span><i>✦</i><span>WINDOWS APP</span><i>✦</i>
+    </div>
+  </div>
+
+  <section class="section" id="modely">
+    <div class="section-inner">
+      <div class="kicker reveal">☁ Cloud NolimitCode</div>
+      <h2 class="reveal">2 modely <span class="grad">od NolimitCode</span></h2>
+      <p class="section-sub reveal">Oba běží na cloudu NolimitCode. Žádný klíč, nic se nenastavuje.</p>
+      <div class="model-grid reveal" id="modelGrid"></div>
+    </div>
+  </section>
+
+  <section class="section" id="pricing">
+    <div class="section-inner price-inner">
+      <div class="kicker reveal">💳 Jednoduché ceny</div>
+      <h2 class="reveal">Pricing</h2>
+      <p class="section-sub reveal">Začni zdarma. Až budeš chtít víc, odemkni si AI without limits.</p>
+      <div class="price-grid">
+        <div class="price-card reveal">
+          <b>FREE</b>
+          <div class="price">0 Kč<small> napořád</small></div>
+          <ul>
+            <li>✓ Model NolimitCoderV2</li>
+            <li>✓ Režimy Build i Plan</li>
+            <li>✓ Windows aplikace</li>
+            <li>✓ Bez API klíče</li>
+          </ul>
+          <a href="../NolimitCoder/dist/NolimitCoder%20V2-Setup-2.0.0.exe" class="btn btn-ghost">Stáhnout FREE</a>
+        </div>
+        <div class="price-card featured reveal">
+          <span class="price-badge">NEJOBLÍBENĚJŠÍ</span>
+          <b>Unlimited</b>
+          <div class="price">$14.02</div>
+          <ul>
+            <li>✓ Vše z plánu FREE</li>
+            <li>✓ Model NolimitCoderV3 naplno</li>
+            <li>✓ AI without limits</li>
+            <li>✓ Prioritní zpracování</li>
+          </ul>
+          <a href="../NolimitCoder/dist/NolimitCoder%20V2-Setup-2.0.0.exe" class="btn btn-primary">Stáhnout aplikaci</a>
+        </div>
+      </div>
+      <p class="price-note reveal">Stáhni aplikaci zdarma — Unlimited odemkneš v aplikaci.</p>
+    </div>
+  </section>
+
+  <section class="section band" id="funkce">
+    <div class="section-inner">
+      <div class="kicker reveal">⚒ Co dostaneš</div>
+      <h2 class="reveal">Co aplikace <span class="grad">umí</span></h2>
+      <p class="section-sub reveal">Plnohodnotný AI agent od NolimitCoder — v okně Windows.</p>
+      <div class="feat-grid">
+        <div class="feat reveal"><div class="f-ico">📁</div><b>Projekty a chaty</b><p>Ke každé složce více konverzací. Universal i Website projekty.</p></div>
+        <div class="feat reveal"><div class="f-ico">⚒️</div><b>Práce se soubory</b><p>Čtení, zápis, přesná editace s diffem, hledání, přesuny.</p></div>
+        <div class="feat reveal"><div class="f-ico">›_</div><b>Terminál + nástroje</b><p>Spouštění příkazů se schválením v chatu, terminál v panelu.</p></div>
+        <div class="feat reveal"><div class="f-ico">🌐</div><b>Web a preview</b><p>Vyhledávání na internetu, stahování souborů, živé preview webu.</p></div>
+        <div class="feat reveal"><div class="f-ico">⚙️</div><b>Kompilátory</b><p>Detekce Node, Python, Git a dalších + doinstalování jedním klikem.</p></div>
+        <div class="feat reveal"><div class="f-ico">💾</div><b>Vše lokálně</b><p>Konverzace, projekty i nastavení zůstávají ve tvém PC.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="rezimy">
+    <div class="section-inner rezimy-inner">
+      <div>
+        <div class="kicker reveal">🔨 Vyber si tempo</div>
+        <h2 class="reveal">Dva režimy <span class="grad">práce</span></h2>
+        <p class="section-sub reveal">Přepínej za běhu podle toho, jestli chceš kód, nebo jen plán.</p>
+        <div class="tech-box reveal">
+          <b>Tip:</b> v chatu piš <code>/plan</code> a <code>/build</code> pro přepnutí, <code>@cesta/soubor</code> přiloží soubor jako kontext, <code>/env</code> zkontroluje kompilátory.
+        </div>
+      </div>
+      <div class="mode-grid">
+        <div class="mode-card build reveal"><b>🔨 Build</b><p>Plný výkon — generuje i kód, zapisuje do souborů, spouští terminál. Příkazy schvaluješ tlačítky <code>Pokračovat</code>.</p><span class="mode-tag">doporučeno</span></div>
+        <div class="mode-card plan reveal"><b>📋 Plan</b><p>Jen plánování — prozkoumá projekt a napíše stručný plán (soubor:řádek + ověření). Nic nemění.</p><span class="mode-tag ghost">bez změn</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" id="jak">
+    <div class="section-inner">
+      <div class="kicker reveal">🚀 Za minutu hotovo</div>
+      <h2 class="reveal">Jak to funguje</h2>
+      <div class="steps">
+        <div class="step reveal"><div class="step-n">1</div><h3>Stáhni a nainstaluj</h3><p>EXE instalátor pro Windows 64-bit. Žádná registrace, žádné klíče.</p></div>
+        <div class="step reveal"><div class="step-n">2</div><h3>Vyber složku projektu</h3><p>Vytvoř, přejmenuj nebo vyber projekt. Ke každé složce můžeš mít více chatů.</p></div>
+        <div class="step reveal"><div class="step-n">3</div><h3>Chatuj dole</h3><p>Zpráva odejde na cloud NolimitCode a odpověď streamuje zpět. Build rovnou kóduje, Plan jen navrhne.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="foot-inner">
+    <div class="brand">
+      <img src="./assets/logo.png" alt="Nolimit" class="brand-logo sm">
+      <span class="brand-text">NolimitCoder<span class="v2">V2</span></span>
+    </div>
+    <div class="foot-links">
+      <a href="./podminky.html">Podmínky použití</a>
+      <a href="./soukromi.html">Ochrana soukromí</a>
+      <a href="#">↑ Nahoru</a>
+    </div>
+    <span class="foot-muted">Modely od NolimitCode • 2026</span>
+  </div>
+</footer>
+
+<script src="./app.js"></script>
+</body>
+</html>
