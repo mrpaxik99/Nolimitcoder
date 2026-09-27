@@ -1,10 +1,13 @@
-# NolimitCoderV2 auto-push — pri kazde zmene automaticky commit + push na GitHub.
-# Bezi skryte na pozadi (naplanovana uloha "NolimitCoderV2-AutoPush" pri prihlaseni).
+# NolimitCoderV2 auto-push + auto-build — pri kazde zmene automaticky commit + push
+# na GitHub, a pokud se zmenil kod, i novy build do dist + web Downloads (max 1x za 15 min).
+# Bezi skryte na pozadi (spoustec po prihlaseni: Startup\NolimitCoderV2-AutoPush.bat).
 # Log: $env:TEMP\nolimit-autopush.log
 $ErrorActionPreference = 'Continue'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Git = 'C:\Users\PAXI\Tools\Git\cmd\git.exe'
 $Log = Join-Path $env:TEMP 'nolimit-autopush.log'
+$BuildMarker = Join-Path $env:TEMP 'nolimit-lastbuild.txt'  # "commit-hash|cas" posledniho buildnuteho stavu
+$BuildCooldownMin = 15
 $Branch = 'main'
 $QuietSeconds = 30   # push az 30 s po posledni zmene (pocka se na dozneni ukladani)
 
@@ -26,10 +29,50 @@ function Try-Push {
     $msg = 'auto: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     & $Git -C $Root commit -m $msg 2>&1 | Out-Null
     & $Git -C $Root push origin $Branch 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) { Log ('push OK: ' + $msg) }
+    if ($LASTEXITCODE -eq 0) { Log ('push OK: ' + $msg); Try-Build }
     else { Log 'push FAIL (napr. chybi remote/prihlaseni) — zkusim znovu pri dalsi zmene' }
   } catch {
     Log ('push FAIL: ' + $_.Exception.Message)
+  }
+}
+
+function Try-Build {
+  # Po uspesnem pushi: kdyz se od posledniho buildu zmenil kod, zkompiluj znovu (s cooldownem).
+  try {
+    $head = ((& $Git -C $Root rev-parse HEAD 2>$null | Out-String) + '').Trim()
+    if (!$head) { return }
+    $marked = ''
+    if (Test-Path -LiteralPath $BuildMarker) { $marked = ((Get-Content -LiteralPath $BuildMarker -Raw) + '').Trim() }
+    $parts = $marked -split '\|'
+    if ($parts[0] -eq $head) { return }  # tento stav uz je zbuildeny
+    if ($parts.Count -ge 2) {
+      try { $lastT = [datetime]$parts[1] } catch { $lastT = [datetime]::MinValue }
+      if (((Get-Date) - $lastT).TotalMinutes -lt $BuildCooldownMin) { return }
+    }
+    $since = if ($parts[0]) { $parts[0] } else { 'HEAD~5' }
+    $files = ((& $Git -C $Root diff --name-only "$since..HEAD" 2>$null) -join "`n") + ''
+    if ($files -notmatch 'NolimitCoder/(src|package\.json|proxies/)|NolimitWebsite/') {
+      Set-Content -LiteralPath $BuildMarker -Value "$head|$(Get-Date -Format o)"  # jen texty/logy — build netreba
+      return
+    }
+    $npm = $null
+    try { $npm = (Get-Command npm -ErrorAction SilentlyContinue).Source } catch {}
+    if (!$npm) { Log 'auto-build SKIP (npm nenalezen)'; return }
+    Log 'auto-build start...'
+    $appDir = Join-Path $Root 'NolimitCoder'
+    $proc = Start-Process -FilePath $npm -ArgumentList @('run', 'build:win') -WorkingDirectory $appDir -WindowStyle Hidden -Wait -PassThru
+    if (!$proc -or $proc.ExitCode -ne 0) { Log ('auto-build FAIL, exit=' + ($proc.ExitCode)); return }
+    $exe = Join-Path $appDir 'dist\NolimitCoder V4 Setup.exe'
+    $dst = Join-Path $Root 'NolimitWebsite\Downloads\NolimitCoder-V4-Setup.exe'
+    if (!(Test-Path -LiteralPath $exe)) { Log 'auto-build FAIL (exe nevzniklo)'; return }
+    Copy-Item -LiteralPath $exe -Destination $dst -Force
+    & $Git -C $Root add -A 2>&1 | Out-Null
+    & $Git -C $Root commit -m ('auto-build: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) 2>&1 | Out-Null
+    & $Git -C $Root push origin $Branch 2>&1 | Out-Null
+    Set-Content -LiteralPath $BuildMarker -Value "$head|$(Get-Date -Format o)"
+    if ($LASTEXITCODE -eq 0) { Log 'auto-build OK + push' } else { Log 'auto-build OK, push FAIL' }
+  } catch {
+    Log ('auto-build ERROR: ' + $_.Exception.Message)
   }
 }
 
