@@ -1733,7 +1733,48 @@ async function refreshVideoEmpty() {
     fitVideoFrame();
   }
 }
-function setVideoProgress(t) { const p = $('#videoProgress'); if (p) p.textContent = t || ''; }
+/* Z největšího ```html bloku v textu vytáhni hotové HTML (aspoň 200 znaků, musí vypadat jako stránka). */
+function extractHtmlBlock(text) {
+  const t = String(text || '');
+  const re = /```(?:html|HTML)\s*\n([\s\S]*?)```/g;
+  let m, best = '';
+  while ((m = re.exec(t))) { if (m[1].length > best.length) best = m[1]; }
+  best = String(best || '').trim();
+  if (best.length < 200) return '';
+  if (!/<(html|!doctype|div|body|head|style)\b/i.test(best)) return '';
+  return best;
+}
+/* Video pojistka: index.html musí ve složce VŽDY být, jak bývalo zvykem.
+   Když ho AI jen vypsala do chatu a nezapsala nástrojem, vytáhni ho a zapiš sám. */
+async function ensureVideoHtml(convo) {
+  try {
+    if (activeProjectType() !== 'video' || !prefs.activeProject) return false;
+    let has = false;
+    try {
+      const r = await window.api.projectFiles(prefs.activeProject, false);
+      if (r && r.ok) {
+        const paths = (r.tree || []).map(x => String(x.path || '').toLowerCase());
+        has = paths.includes('index.html') || paths.includes('dist/index.html');
+      }
+    } catch {}
+    if (has) return true;
+    const msgs = (convo.messages || []).slice(currentReqStart(convo));
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (!m || m.role !== 'assistant' || !m.content) continue;
+      const html = extractHtmlBlock(m.content);
+      if (!html) continue;
+      const res = await window.api.toolsExec({ tool: 'write_file', args: { path: 'index.html', content: html }, root: prefs.activeProject, fullAccess: true });
+      if (res && res.ok) {
+        convo.messages.push({ role: 'tool', tool: 'write_file', args: { path: 'index.html' }, result: 'HTML z chatu uloženo jako index.html (' + html.length + ' znaků).', ok: true });
+        renderToolCard('write_file', { path: 'index.html' }, 'HTML z chatu uloženo jako index.html.', true);
+        return true;
+      }
+      return false;
+    }
+    return false;
+  } catch { return false; }
+} { const p = $('#videoProgress'); if (p) p.textContent = t || ''; }
 async function videoExportRun() {
   if (videoExporting) return;
   if (!prefs.activeProject) { setVideoProgress('No project selected'); return; }
