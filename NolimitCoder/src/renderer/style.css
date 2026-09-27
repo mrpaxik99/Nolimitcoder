@@ -447,7 +447,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .preview-pane.video .preview-url{display:none}
 /* Video mode: exact-size frame scaled to fit, with a visible frame around it.
    Size changes glide ultra-smooth + a little bubble pop on resolution switch. */
-.preview-pane.video .preview-frame{flex:none;align-self:center;transform-origin:center center;border:1px solid #ffffff2e;border-radius:6px;box-shadow:0 0 0 1px #000,0 20px 80px #000000cc,0 0 60px #ffffff10;
+.preview-pane.video .preview-frame{flex:none;align-self:center;transform-origin:center center;background:#0a0a0d;border:1px solid #ffffff66;border-radius:6px;box-shadow:0 0 0 1px #000,0 0 55px #ffffff2a,0 20px 80px #000000cc,0 0 60px #ffffff10;
   transition:width .45s cubic-bezier(.22,1,.36,1),height .45s cubic-bezier(.22,1,.36,1),transform .45s cubic-bezier(.22,1,.36,1)}
 .preview-frame.res-pop{animation:res-bubble .55s ease}
 @keyframes res-bubble{0%{transform:scale(calc(var(--s,1)*0.9));filter:brightness(1.7)}55%{transform:scale(calc(var(--s,1)*1.025));filter:brightness(1.1)}100%{transform:scale(var(--s,1));filter:brightness(1)}}

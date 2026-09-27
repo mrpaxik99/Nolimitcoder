@@ -250,6 +250,34 @@ ipcMain.handle('proxy:refresh', async () => {
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
+// ===== INSTRUCTIONS — AI instructions by project type (INSTRUCTIONS/<type>/INSTRUCTIONS.md) =====
+// Sections are split on "## NAME" headers (build/chat/plan/video/tools/forbidden).
+// Missing files = built-in defaults in the renderer (nothing breaks).
+function instructionsDir() {
+  return path.join(__dirname, '..', '..', 'INSTRUCTIONS');
+}
+function loadInstructions() {
+  const out = {};
+  for (const t of ['commercial', 'website', 'universal']) {
+    try {
+      const f = path.join(instructionsDir(), t, 'INSTRUCTIONS.md');
+      if (!fs.existsSync(f)) continue;
+      const txt = fs.readFileSync(f, 'utf-8');
+      const secs = {};
+      const parts = txt.split(/^##\s+(.+)$/m);
+      for (let i = 1; i < parts.length; i += 2) {
+        secs[String(parts[i]).trim().toLowerCase()] = String(parts[i + 1] || '').trim();
+      }
+      if (Object.keys(secs).length) out[t] = { sections: secs };
+    } catch {}
+  }
+  return out;
+}
+ipcMain.handle('instructions:get', () => {
+  try { return { ok: true, data: loadInstructions() }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
 function fetchLocalModels(urlStr) {
   return new Promise((resolve) => {
     const u = new URL(urlStr);
