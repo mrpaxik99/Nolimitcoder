@@ -11,6 +11,9 @@
                     "dev":  "electron .",
                     "build":  "electron-builder",
                     "build:win":  "electron-builder --win",
+                    "build:app":  "electron-builder --dir",
+                    "build:installer":  "node build/makensis-run.js",
+                    "dist:custom":  "npm run build:app && npm run build:installer",
                     "postinstall":  "electron-builder install-app-deps"
                 },
     "devDependencies":  {
