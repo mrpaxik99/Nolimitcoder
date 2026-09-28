@@ -1,6 +1,6 @@
 {
     "name":  "nolimit-coder-v2",
-    "version":  "3.0.13",
+    "version":  "5.0.0",
     "description":  "Ultra modern Electron chat with NolimitCoder models - everything local, offline after download",
     "main":  "src/main/main.js",
     "type":  "commonjs",
@@ -40,7 +40,7 @@
                                 "uninstallerIcon":  "src/renderer/assets/icon.ico",
                                 "deleteAppDataOnUninstall":  false,
                                 "createDesktopShortcut":  true,
-                                "artifactName":  "NolimitCoder V4 Setup.${ext}",
+                                 "artifactName":  "NolimitCoder V5 Setup.${ext}",
                                 "shortcutName":  "NolimitCoder",
                                 "perMachine":  false,
                                  "license":  "build/license.txt",
