@@ -178,6 +178,45 @@ ipcMain.handle('store:set', (_, data) => {
   return next;
 });
 
+// ===== Google account (desktop OAuth, PKCE — no secret in the app) =====
+const GA = require('./google-auth');
+const authFile = () => GA.authPath(app.getPath('userData'));
+let loginBusy = false;
+function broadcastAuth(session) {
+  const pub = GA.publicProfile(session);
+  try { for (const w of BrowserWindow.getAllWindows()) { try { w.webContents.send('auth:changed', pub); } catch {} } } catch {}
+}
+ipcMain.handle('auth:status', async () => {
+  const s = GA.loadSession(authFile());
+  if (!s) return { loggedIn: false };
+  const token = await GA.getValidAccessToken(s);
+  if (!token) { GA.clearSession(authFile()); return { loggedIn: false }; }
+  GA.saveSession(authFile(), s); // persist refreshed expiry
+  return { loggedIn: true, profile: GA.publicProfile(s) };
+});
+ipcMain.handle('auth:login', async () => {
+  if (loginBusy) return { loggedIn: false, error: 'Login already in progress.' };
+  loginBusy = true;
+  try {
+    const res = await GA.startLogin({ openUrl: (url) => shell.openExternal(url) });
+    const session = { profile: res.profile, tokens: res.tokens, at: Date.now() };
+    GA.saveSession(authFile(), session);
+    broadcastAuth(session);
+    return { loggedIn: true, profile: GA.publicProfile(session) };
+  } catch (e) {
+    return { loggedIn: false, error: (e && e.message) || 'Login failed.' };
+  } finally {
+    loginBusy = false;
+  }
+});
+ipcMain.handle('auth:logout', async () => {
+  const s = GA.loadSession(authFile());
+  if (s && s.tokens && s.tokens.access_token) await GA.revokeToken(s.tokens.access_token);
+  GA.clearSession(authFile());
+  broadcastAuth(null);
+  return { loggedIn: false };
+});
+
 ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:paths', () => ({
   userData: app.getPath('userData'),

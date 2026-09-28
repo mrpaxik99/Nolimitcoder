@@ -78,7 +78,7 @@ Var BgBmp
 ; Full-bleed flat dark bitmap as page background (created FIRST = bottom z-order)
 ; + green accent bar. Deterministic on any DPI: oversized bitmap gets clipped.
 !macro PageChrome
-  nsDialogs::CreateControl STATIC 0x5000000E 0 0 0 302 202 ""
+  nsDialogs::CreateControl STATIC 0x5400000E 0 0 0 302 202 ""
   Pop $0
   SendMessage $0 0x0172 0 $BgBmp
   ${NSD_CreateLabel} 0 0 302 4 ""

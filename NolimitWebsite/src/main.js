@@ -1,3 +1,5 @@
+import '../style.css';
+
 const MODELS = [
   { icon: '🚀', name: 'NolimitCoderV3', desc: 'The latest flagship NolimitCode model — code, reasoning, and text. The smartest choice for complex tasks.', ep: 'flagship model', foot: 'Code • reasoning • text' },
   { icon: '⚡', name: 'NolimitCoderV2', desc: 'A proven NolimitCode model — fast answers and code. Ideal for everyday work.', ep: 'proven model', foot: 'Speed • stability • code' },
@@ -128,11 +130,10 @@ typeLoop('demoInput2', [
   if (!user) return;
   const chip = document.createElement('span');
   chip.className = 'nav-user';
-  const first = (user.name || 'U').trim().charAt(0).toUpperCase();
   chip.innerHTML = (user.picture
     ? '<img src="' + user.picture + '" alt="">'
     : '<img src="./assets/logo.png" alt="">') +
-    '<span>' + first + ' · ' + (user.name || 'User').split(' ')[0] + '</span>';
+    '<span>' + (user.name || 'User').split(' ')[0] + '</span>';
   const out = document.createElement('button');
   out.textContent = 'Log out';
   out.title = 'Log out';

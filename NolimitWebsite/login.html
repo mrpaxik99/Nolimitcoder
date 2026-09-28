@@ -27,22 +27,8 @@
     <img class="logo" src="./assets/logo.png" alt="NolimitCoder">
     <h1>Log in</h1>
     <p class="sub">Continue with your Google account to unlock NolimitCoder.</p>
-    <div id="g_id_onload"
-      data-client_id="YOUR_GOOGLE_CLIENT_ID"
-      data-callback="onGoogleLogin"
-      data-auto_prompt="false">
-    </div>
-    <div class="g-btn-wrap">
-      <div class="g_id_signin"
-        data-type="standard"
-        data-shape="pill"
-        data-theme="filled_black"
-        data-size="large"
-        data-text="continue_with"
-        data-logo_alignment="left">
-      </div>
-    </div>
-    <p class="login-note" id="loginNote">Demo mode — paste your Google Client ID into <code>login.html</code> (<code>data-client_id</code>) to activate real login.</p>
+    <div class="g-btn-wrap" id="googleBtn"></div>
+    <p class="login-note" id="loginNote" style="display:none">Login is not configured yet — the <code>VITE_GOOGLE_CLIENT_ID</code> variable is missing.</p>
     <a class="login-back" href="./index.html">← Back to web</a>
   </div>
 </main>
@@ -54,37 +40,14 @@
       <span class="brand-text">NolimitCoder</span>
     </div>
     <div class="foot-links">
-      <a href="./podminky.html">Podmínky použití</a>
-      <a href="./soukromi.html">Ochrana soukromí</a>
+      <a href="./podminky.html">Terms of Use</a>
+      <a href="./soukromi.html">Privacy Policy</a>
       <a href="./index.html">← Back to web</a>
     </div>
-    <span class="foot-muted">Modely od NolimitCode • 2026</span>
+    <span class="foot-muted">Models by NolimitCode • 2026</span>
   </div>
 </footer>
 
-<script>
-function parseJwt(token) {
-  try {
-    return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-  } catch (e) { return null; }
-}
-function onGoogleLogin(resp) {
-  var profile = parseJwt(resp.credential) || {};
-  try {
-    localStorage.setItem('nolimit_user', JSON.stringify({
-      name: profile.name || 'User',
-      email: profile.email || '',
-      picture: profile.picture || ''
-    }));
-  } catch (e) {}
-  location.href = './index.html';
-}
-(function () {
-  var el = document.querySelector('#g_id_onload');
-  if (el && el.getAttribute('data-client_id').indexOf('YOUR_GOOGLE') !== 0) {
-    document.getElementById('loginNote').style.display = 'none';
-  }
-})();
-</script>
+<script type="module" src="/src/login.js"></script>
 </body>
 </html>

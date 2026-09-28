@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   getStore: () => ipcRenderer.invoke('store:get'),
   setStore: (data) => ipcRenderer.invoke('store:set', data),
+  authStatus: () => ipcRenderer.invoke('auth:status'),
+  authLogin: () => ipcRenderer.invoke('auth:login'),
+  authLogout: () => ipcRenderer.invoke('auth:logout'),
+  onAuthChanged: (cb) => ipcRenderer.on('auth:changed', (_, p) => cb(p)),
   getVersion: () => ipcRenderer.invoke('app:version'),
   getPaths: () => ipcRenderer.invoke('app:paths'),
   fetchZenModels: (apiKey) => ipcRenderer.invoke('net:fetch-zen-models', apiKey),
@@ -49,5 +53,6 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.removeAllListeners('chat:stream-end');
     ipcRenderer.removeAllListeners('chat:stream-error');
     ipcRenderer.removeAllListeners('nlc-download');
+    ipcRenderer.removeAllListeners('auth:changed');
   }
 });

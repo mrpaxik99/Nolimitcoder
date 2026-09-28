@@ -2154,8 +2154,64 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#closeModal').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
   $('#modalBackdrop').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
   $('#saveSettings').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
+  initAccount();
   autoGrow();
 });
+
+// ---------- Google account (desktop OAuth, main process does the flow) ----------
+function renderAccount(profile) {
+  const label = $('#accountLabel'), ico = $('#accountIco');
+  const name = $('#acctName'), mail = $('#acctMail'), ava = $('#acctAva');
+  const gBtn = $('#acctGoogleBtn'), outBtn = $('#acctLogout'), err = $('#acctErr');
+  if (err) err.style.display = 'none';
+  if (profile) {
+    const first = (profile.name || profile.email || 'U').split(' ')[0];
+    if (label) label.textContent = first;
+    if (ico) ico.innerHTML = profile.picture ? `<img src="${profile.picture}" alt="" style="width:18px;height:18px;border-radius:50%">` : '👤';
+    if (name) name.textContent = profile.name || profile.email || 'Logged in';
+    if (mail) mail.textContent = profile.email || '';
+    if (ava) ava.innerHTML = profile.picture ? `<img src="${profile.picture}" alt="">` : '👤';
+    if (gBtn) gBtn.style.display = 'none';
+    if (outBtn) outBtn.style.display = '';
+  } else {
+    if (label) label.textContent = 'Log in';
+    if (ico) ico.textContent = '👤';
+    if (name) name.textContent = 'Not logged in';
+    if (mail) mail.textContent = 'Log in with Google to link your account.';
+    if (ava) ava.textContent = '👤';
+    if (gBtn) { gBtn.style.display = ''; gBtn.disabled = false; gBtn.querySelector('span').textContent = 'Continue with Google'; }
+    if (outBtn) outBtn.style.display = 'none';
+  }
+}
+function initAccount() {
+  const open = () => $('#accountModal').classList.add('open');
+  const close = () => $('#accountModal').classList.remove('open');
+  $('#accountBtn').addEventListener('click', open);
+  $('#accountClose').addEventListener('click', close);
+  $('#accountBackdrop').addEventListener('click', close);
+  const showErr = (m) => { const e = $('#acctErr'); if (e) { e.textContent = m; e.style.display = m ? '' : 'none'; } };
+  $('#acctGoogleBtn').addEventListener('click', async () => {
+    const btn = $('#acctGoogleBtn');
+    showErr('');
+    btn.disabled = true;
+    btn.querySelector('span').textContent = 'Waiting for browser…';
+    try {
+      const r = await window.api.authLogin();
+      if (r && r.loggedIn) { renderAccount(r.profile); close(); }
+      else showErr((r && r.error) || 'Login failed.');
+    } catch (e) {
+      showErr('Login failed: ' + (e && e.message || e));
+    }
+    btn.disabled = false;
+    btn.querySelector('span').textContent = 'Continue with Google';
+  });
+  $('#acctLogout').addEventListener('click', async () => {
+    try { await window.api.authLogout(); } catch {}
+    renderAccount(null);
+  });
+  try { window.api.onAuthChanged((p) => renderAccount(p || null)); } catch {}
+  window.api.authStatus().then((s) => renderAccount(s && s.loggedIn ? s.profile : null)).catch(() => renderAccount(null));
+}
 
 /* ---------- proxy pool UI odstraněno ----------
    Rotace proxy při přetížení běží potichu v main procesu. Uživatel nikdy
