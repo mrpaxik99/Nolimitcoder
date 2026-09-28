@@ -81,6 +81,7 @@ Var BgBmp
   nsDialogs::CreateControl STATIC 0x5400000E 0 0 0 302 202 ""
   Pop $0
   SendMessage $0 0x0172 0 $BgBmp
+  System::Call 'user32::SetWindowPos(i $0, i 1, i 0, i 0, i 0, i 0, i 0x13)'
   ${NSD_CreateLabel} 0 0 302 4 ""
   Pop $0
   SetCtlColors $0 ${C_BG} ${C_GREEN}
