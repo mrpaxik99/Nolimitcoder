@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log in — NolimitCoder</title>
+<link rel="icon" type="image/png" href="./assets/logo.png">
+<link rel="stylesheet" href="./style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div class="bg-glow"></div>
+<div class="bg-noise"></div>
+
+<header class="nav">
+  <div class="nav-inner">
+    <div class="brand">
+      <img src="./assets/logo.png" alt="Nolimit" class="brand-logo">
+      <span class="brand-text">NolimitCoder</span>
+      <span class="brand-pill">PAID&nbsp;UNLIMITED</span>
+    </div>
+  </div>
+</header>
+
+<main class="login-wrap">
+  <div class="login-card">
+    <img class="logo" src="./assets/logo.png" alt="NolimitCoder">
+    <h1>Log in</h1>
+    <p class="sub">Continue with your Google account to unlock NolimitCoder.</p>
+    <div class="g-btn-wrap" id="googleBtn"></div>
+    <p class="login-note" id="loginNote" style="display:none">Login is not configured yet — the <code>VITE_GOOGLE_CLIENT_ID</code> variable is missing.</p>
+    <a class="login-back" href="./index.html">← Back to web</a>
+  </div>
+</main>
+
+<footer>
+  <div class="foot-inner">
+    <div class="brand">
+      <img src="./assets/logo.png" alt="Nolimit" class="brand-logo sm">
+      <span class="brand-text">NolimitCoder</span>
+    </div>
+    <div class="foot-links">
+      <a href="./podminky.html">Terms of Use</a>
+      <a href="./soukromi.html">Privacy Policy</a>
+      <a href="./index.html">← Back to web</a>
+    </div>
+    <span class="foot-muted">Models by NolimitCode • 2026</span>
+  </div>
+</footer>
+
+<script type="module" src="/src/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Profile — NolimitCoder</title>
+<link rel="icon" type="image/png" href="./assets/logo.png">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div class="bg-glow"></div>
+<div class="bg-noise"></div>
+
+<header class="nav">
+  <div class="nav-inner">
+    <div class="brand">
+      <img src="./assets/logo.png" alt="Nolimit" class="brand-logo">
+      <span class="brand-text">NolimitCoder</span>
+      <span class="brand-pill">PAID&nbsp;UNLIMITED</span>
+    </div>
+    <nav class="nav-links">
+      <a href="./index.html#modely">Models</a>
+      <a href="./index.html#pricing">Pricing</a>
+    </nav>
+    <div class="nav-actions">
+      <a href="./index.html" class="btn btn-ghost btn-sm">← Back to web</a>
+    </div>
+  </div>
+</header>
+
+<main class="profile-wrap">
+  <div class="profile-grid">
+    <aside class="pf-side">
+      <div class="pf-user">
+        <div class="pf-ava" id="pfAva"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></div>
+        <div class="pf-name" id="pfName">…</div>
+        <div class="pf-mail" id="pfMail">…</div>
+      </div>
+      <nav class="pf-nav">
+        <button data-sec="overview" class="active"><span class="pi">○</span> Overview</button>
+        <button data-sec="billing"><span class="pi">◇</span> Subscription</button>
+        <button data-sec="invoices"><span class="pi">≡</span> Invoices</button>
+      </nav>
+      <button class="pf-logout" id="pfLogout"><span>⏻</span> Log out</button>
+    </aside>
+
+    <div class="pf-content">
+      <section class="pf-sec" data-spage="overview">
+        <h1>Overview</h1>
+        <div class="pf-cards">
+          <div class="pf-card"><small>Current plan</small><b id="ovPlan">FREE trial</b><span id="ovPlanSub">1-day trial, then upgrade needed</span></div>
+          <div class="pf-card"><small>Total paid</small><b id="ovTotal">$0.00</b><span>across all invoices</span></div>
+          <div class="pf-card"><small>Status</small><b id="ovStatus">No subscription</b><span id="ovStatusSub">Monthly Unlimited not active</span></div>
+        </div>
+      </section>
+
+      <section class="pf-sec" data-spage="billing" style="display:none">
+        <h1>Subscription</h1>
+        <div class="pf-trial" id="trialBox">
+          <div>
+            <b id="trialTitle">FREE trial — 1 day</b>
+            <p id="trialSub">Checking trial status…</p>
+          </div>
+          <div class="trial-right">
+            <div class="trial-count" id="trialCount" style="display:none">--:--:--</div>
+            <button class="pf-mini-btn" id="trialSync" style="display:none">I've claimed it in the app</button>
+          </div>
+        </div>
+        <div class="pf-plan" id="subBox">
+          <div>
+            <b>Monthly Unlimited — $14.02/mo</b>
+            <p>NolimitCoderV3 at full power, AI without limits, priority processing.</p>
+          </div>
+          <a href="./payment.html?plan=unlimited" class="btn btn-primary btn-sm" id="subCta">Buy Monthly Unlimited</a>
+        </div>
+        <p class="pf-hint">Managing or cancelling your subscription will be available here once our own payment goes live.</p>
+      </section>
+
+      <section class="pf-sec" data-spage="invoices" style="display:none">
+        <h1>Invoices</h1>
+        <div class="pf-total">Total paid: <b id="invTotal">$0.00</b></div>
+        <div id="invList"></div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="foot-inner">
+    <div class="brand">
+      <img src="./assets/logo.png" alt="Nolimit" class="brand-logo sm">
+      <span class="brand-text">NolimitCoder</span>
+    </div>
+    <div class="foot-links">
+      <a href="./podminky.html">Terms of Use</a>
+      <a href="./soukromi.html">Privacy Policy</a>
+      <a href="./index.html">← Back to web</a>
+    </div>
+    <span class="foot-muted">Models by NolimitCode • 2026</span>
+  </div>
+</footer>
+
+<script type="module" src="/src/profile.js"></script>
+</body>
+</html>
