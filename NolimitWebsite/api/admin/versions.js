@@ -3,7 +3,7 @@ import { requireAdmin } from '../_auth.js';
 import { del } from '@vercel/blob';
 
 async function listVersions(sql) {
-  return sql`SELECT version, download_url, notes, blocked, is_latest, released_at
+  return sql`SELECT version, download_url, notes, blocked, is_latest, released_at, size_bytes
     FROM app_versions ORDER BY released_at DESC`;
 }
 
@@ -35,11 +35,12 @@ export default async function handler(req, res) {
     if (b.action === 'upsert') {
       if (!v) return res.status(400).json({ ok: false, error: 'Zadej verzi.' });
       const url = String(b.download_url || '').slice(0, 1000);
-      if (!url) return res.status(400).json({ ok: false, error: 'Nejdřív nahraj .exe z počítače.' });
+      if (!url) return res.status(400).json({ ok: false, error: 'Nejdřív nahoře nahraj .exe z počítače.' });
       const notes = String(b.notes || '').slice(0, 2000);
-      await sql`INSERT INTO app_versions (version, download_url, notes, released_at)
-        VALUES (${v}, ${url}, ${notes}, NOW())
-        ON CONFLICT (version) DO UPDATE SET download_url = EXCLUDED.download_url, notes = EXCLUDED.notes`;
+      const sizeBytes = Math.max(0, parseInt(b.size_bytes, 10) || 0);
+      await sql`INSERT INTO app_versions (version, download_url, notes, size_bytes, released_at)
+        VALUES (${v}, ${url}, ${notes}, ${sizeBytes}, NOW())
+        ON CONFLICT (version) DO UPDATE SET download_url = EXCLUDED.download_url, notes = EXCLUDED.notes, size_bytes = EXCLUDED.size_bytes`;
       // Nová verze = automaticky Latest (stará tím pádem přestává platit)
       await sql`UPDATE app_versions SET is_latest = (version = ${v})`;
       // Rolling okno max 2 — nejstarší (kromě právě nahrané) se smaže i se souborem

@@ -55,6 +55,7 @@ export async function ensureSchema() {
     is_latest BOOLEAN DEFAULT FALSE,
     released_at TIMESTAMPTZ DEFAULT NOW()
   )`;
+  await sql`ALTER TABLE app_versions ADD COLUMN IF NOT EXISTS size_bytes BIGINT DEFAULT 0`;
   await sql`CREATE TABLE IF NOT EXISTS app_flags (
     key TEXT PRIMARY KEY,
     value JSONB DEFAULT '{}'::jsonb

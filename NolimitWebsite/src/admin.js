@@ -119,6 +119,7 @@ document.getElementById('killSave').addEventListener('click', async () => {
 
 // ---------- Updates: upload .exe z počítače + verze ----------
 let uploadedUrl = '';
+let uploadedSize = 0;
 function upSetStatus(m) {
   document.getElementById('upStatus').textContent = m || '';
 }
@@ -159,6 +160,7 @@ document.getElementById('upUpload').addEventListener('click', async () => {
       handleUploadUrl: '/api/admin/blob-token?token=' + encodeURIComponent(token)
     });
     uploadedUrl = blob.url;
+    uploadedSize = blob.size || f.size || 0;
     upSetStatus('Hotovo: ' + f.name + ' — teď dole potvrď verzi.');
     showOk('Soubor nahrán. Zbývá potvrdit verzi.');
   } catch (e) {
@@ -172,12 +174,13 @@ async function loadVersions() {
   const j = await api('/api/admin/versions');
   const tb = document.getElementById('upList');
   const vs = j.versions || [];
-  if (!vs.length) { tb.innerHTML = '<tr><td colspan="5" class="muted">Zatím žádná verze.</td></tr>'; return; }
+  if (!vs.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">Zatím žádná verze.</td></tr>'; return; }
   tb.innerHTML = vs.map((v) =>
     '<tr><td class="mono"><b>' + esc(v.version) + '</b></td>' +
     '<td>' + (v.is_latest ? '<span class="badge green">LATEST</span> ' : '') +
       (v.blocked ? '<span class="badge red">BLOCKED</span>' : '<span class="badge">live</span>') + '</td>' +
     '<td>' + (v.download_url ? '<a href="' + esc(v.download_url) + '">stáhnout</a>' : '<span class="muted">—</span>') + '</td>' +
+    '<td class="mono">' + (v.size_bytes ? (Math.round(v.size_bytes / 1048576) + ' MB') : '<span class="muted">—</span>') + '</td>' +
     '<td>' + esc(v.notes || '') + '</td>' +
     '<td style="white-space:nowrap">' +
       (v.is_latest ? '' : '<button class="ad-btn ad-btn-ghost sm" data-act="latest" data-v="' + esc(v.version) + '">Latest</button> ') +
@@ -209,11 +212,13 @@ document.getElementById('upAdd').addEventListener('click', async () => {
     await api('/api/admin/versions', { method: 'POST', body: JSON.stringify({ action: 'upsert',
       version,
       download_url: uploadedUrl,
+      size_bytes: uploadedSize,
       notes: document.getElementById('upNotes').value.trim() }) });
     document.getElementById('upVer').value = '';
     document.getElementById('upNotes').value = '';
     document.getElementById('upFile').value = '';
     uploadedUrl = '';
+    uploadedSize = 0;
     upSetStatus('');
     await loadVersions();
     showOk('Verze ' + version + ' nahrána a je teď Latest.');
