@@ -2155,8 +2155,37 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#modalBackdrop').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
   $('#saveSettings').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
   initAccount();
+  initLoginGate();
   autoGrow();
 });
+
+// ---------- Login gate: app starts only after Google login ----------
+function setGate(show) {
+  const g = $('#loginGate');
+  if (g) g.style.display = show ? 'flex' : 'none';
+}
+function initLoginGate() {
+  const btn = $('#gateGoogleBtn');
+  const errBox = $('#gateErr');
+  const showErr = (m) => { if (errBox) { errBox.textContent = m; errBox.style.display = m ? '' : 'none'; } };
+  if (btn) btn.addEventListener('click', async () => {
+    showErr('');
+    btn.disabled = true;
+    btn.querySelector('span').textContent = 'Waiting for browser…';
+    try {
+      const r = await window.api.authLogin();
+      if (r && r.loggedIn) setGate(false);
+      else showErr((r && r.error) || 'Login failed.');
+    } catch (e) {
+      showErr('Login failed: ' + (e && e.message || e));
+    }
+    btn.disabled = false;
+    btn.querySelector('span').textContent = 'Continue with Google';
+  });
+  // first start (no session) → gate stays up; returning users skip it
+  window.api.authStatus().then((s) => setGate(!(s && s.loggedIn))).catch(() => setGate(true));
+  try { window.api.onAuthChanged((p) => setGate(!p)); } catch {}
+}
 
 // ---------- Google account (desktop OAuth, main process does the flow) ----------
 function renderAccount(profile) {
