@@ -128,19 +128,13 @@ typeLoop('demoInput2', [
   let user = null;
   try { user = JSON.parse(localStorage.getItem('nolimit_user')); } catch (e) {}
   if (!user) return;
-  const chip = document.createElement('span');
+  const chip = document.createElement('a');
   chip.className = 'nav-user';
+  chip.href = './profile.html';
+  chip.title = 'My profile';
   chip.innerHTML = (user.picture
     ? '<img src="' + user.picture + '" alt="">'
     : '<img src="./assets/logo.png" alt="">') +
-    '<span>' + (user.name || 'User').split(' ')[0] + '</span>';
-  const out = document.createElement('button');
-  out.textContent = 'Log out';
-  out.title = 'Log out';
-  out.addEventListener('click', () => {
-    try { localStorage.removeItem('nolimit_user'); } catch (e) {}
-    location.reload();
-  });
-  chip.appendChild(out);
+    '<span>' + (user.name || 'User').split(' ')[0] + ' · Profile</span>';
   btn.replaceWith(chip);
 })();

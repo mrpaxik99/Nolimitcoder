@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: resolve(root, 'index.html'),
         login: resolve(root, 'login.html'),
+        profile: resolve(root, 'profile.html'),
         payment: resolve(root, 'payment.html'),
         podminky: resolve(root, 'podminky.html'),
         soukromi: resolve(root, 'soukromi.html')
