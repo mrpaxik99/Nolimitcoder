@@ -133,6 +133,12 @@ document.getElementById('upFile').addEventListener('change', () => {
     showErr('Vyber soubor s příponou .exe (instalátor aplikace).');
     return;
   }
+  // Verze se předvyplní z názvu (NolimitCoder V5 Setup.exe → 5.0.0), nic psát nemusíš
+  try {
+    const m = f.name.match(/V(\d+)/i);
+    const vin = document.getElementById('upVer');
+    if (m && vin && !vin.value) vin.value = m[1] + '.0.0';
+  } catch {}
   upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — klikni „Nahrát .exe".');
 });
 document.getElementById('upUpload').addEventListener('click', async () => {
@@ -295,8 +301,20 @@ async function loadChecks() {
     document.getElementById('ckList').innerHTML = rows.length ? rows.map((c) =>
       '<tr><td class="mono"><b>' + esc(c.version || '(none)') + '</b></td>' +
       '<td>' + (c.blocked ? '<span class="badge red">blocked</span>' : '<span class="badge green">allowed</span>') + '</td>' +
-      '<td class="muted">' + fmtTs(c.ts) + '</td></tr>'
-    ).join('') : '<tr><td colspan="3" class="muted">Zatím se nehlásila žádná aplikace.</td></tr>';
+      '<td class="muted">' + fmtTs(c.ts) + '</td>' +
+      '<td>' + (c.blocked || !c.version || c.version === '(none)' ? '' :
+        '<button class="ad-btn ad-btn-ghost sm" data-stopver="' + esc(c.version) + '">Zastavit tuto verzi</button>') + '</td></tr>'
+    ).join('') : '<tr><td colspan="4" class="muted">Zatím se nehlásila žádná aplikace.</td></tr>';
+    document.querySelectorAll('#ckList [data-stopver]').forEach((b) => b.addEventListener('click', async () => {
+      showErr(''); showOk('');
+      try {
+        await api('/api/admin/versions', { method: 'POST',
+          body: JSON.stringify({ action: 'block', version: b.getAttribute('data-stopver') }) });
+        await loadVersions();
+        await loadChecks();
+        showOk('Verze ' + b.getAttribute('data-stopver') + ' zastavena.');
+      } catch (e) { showErr(e.message); }
+    }));
   } catch (e) { /* ticho — sekce není kritická */ }
 }
 

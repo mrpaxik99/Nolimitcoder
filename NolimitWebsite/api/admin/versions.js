@@ -59,8 +59,12 @@ export default async function handler(req, res) {
         if (cur[0] && cur[0].is_latest) {
           return res.status(400).json({ ok: false, error: 'Nejnovější verzi nelze zastavit — zastavit jde jen starší.' });
         }
+        // Blokace verze, co ještě nemá řádek (např. z Hlášení aplikací) → řádek se vytvoří
+        await sql`INSERT INTO app_versions (version, blocked) VALUES (${v}, TRUE)
+          ON CONFLICT (version) DO UPDATE SET blocked = TRUE`;
+      } else {
+        await sql`UPDATE app_versions SET blocked = FALSE WHERE version = ${v}`;
       }
-      await sql`UPDATE app_versions SET blocked = ${b.action === 'block'} WHERE version = ${v}`;
     } else if (b.action === 'setLatest') {
       if (!v) return res.status(400).json({ ok: false, error: 'Missing version.' });
       await sql`UPDATE app_versions SET is_latest = (version = ${v})`;
