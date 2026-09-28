@@ -2221,7 +2221,9 @@ function initBlockGate() {
             if (dl) dl.disabled = false;
           } else if (p.done) {
             if (fill) fill.style.width = '100%';
-            if (st) st.textContent = 'Instaluji… aplikace se za chvíli sama restartuje.';
+            if (st) st.textContent = p.replacing
+              ? 'Mažu starou verzi a instaluji novou… aplikace se za chvíli sama restartuje.'
+              : 'Instaluji… aplikace se za chvíli sama restartuje.';
           } else if (p.pct >= 0) {
             if (fill) fill.style.width = p.pct + '%';
             if (st) st.textContent = 'Stahuji novou verzi… ' + p.pct + '% (' + (p.mb || 0) + ' z ' + (p.totalMb || '?') + ' MB)';

@@ -23,7 +23,23 @@ if (T.setProgressHook) T.setProgressHook((p) => {
 let mainWindow;
 let abortFlag = false;
 
-// Stažení souboru s progressem a sledováním redirectů (max 3)
+// Najde odinstalátor staré verze (pokud je aplikace nainstalovaná přes NSIS)
+function findOldUninstaller() {
+  try {
+    const exeDir = path.dirname(app.getPath('exe'));
+    const files = fs.readdirSync(exeDir);
+    const hit = files.find((f) => /^uninstall.*\.exe$/i.test(f));
+    if (hit) {
+      const full = path.join(exeDir, hit);
+      if (fs.existsSync(full)) return full;
+    }
+  } catch {}
+  try {
+    const probe = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'NolimitCoder V3', 'Uninstall NolimitCoder V3.exe');
+    if (fs.existsSync(probe)) return probe;
+  } catch {}
+  return null;
+}
 function downloadFile(url, dest, onProg) {
   return new Promise((resolve, reject) => {
     const go = (u, depth) => {
@@ -295,12 +311,16 @@ ipcMain.handle('app:update', async (event, url) => {
       mb: Math.round(recvd / 1048576),
       totalMb: total > 0 ? Math.round(total / 1048576) : 0
     }));
-    send({ done: true });
-    // Instalátor se spustí s 2s zpožděním (aplikace se mezitím ukončí, aby nebyly zamčené soubory),
-    // /S = tichá instalace, po ní se app sama spustí (runAfterFinish).
+    send({ done: true, replacing: true });
+    // Nejprv TIŠE odinstalovat starou verzi, pak nainstalovat novou.
+    // Běží v odděleném cmd (s 3s zpožděním, aby se aplikace stihla ukončit a nezamkla soubory).
     try {
       const { spawn } = require('child_process');
-      spawn('cmd.exe', ['/d', '/s', '/c', 'timeout /t 2 /nobreak >nul & "' + dest + '" /S'],
+      const oldUn = findOldUninstaller();
+      let chain = 'timeout /t 3 /nobreak >nul';
+      if (oldUn) chain += ' & "' + oldUn + '" /S';
+      chain += ' & "' + dest + '" /S';
+      spawn('cmd.exe', ['/d', '/s', '/c', chain],
         { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     } catch {}
     setTimeout(() => { try { app.quit(); } catch {} }, 500);
