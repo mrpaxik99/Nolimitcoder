@@ -1753,10 +1753,10 @@ async function startPreview(root, type) {
     }
   } catch {}
 }
-/* Empty video project → the frame shows gray with thick dots (never white),
+/* Empty video project → the frame is transparent (website glow shines through),
    plus the waiting text on top. As soon as index.html exists, the real ad shows. */
 const VIDEO_EMPTY_PAGE = 'data:text/html;charset=utf-8,' + encodeURIComponent(
-  '<body style="margin:0;background:#26262c">');
+  '<body style="margin:0;background:transparent">');
 /* Tvrdý reload náhledu — po vygenerování se video ukáže INSTANTNĚ, nečeká se na nic. */
 function reloadPreviewFrame() {
   const frame = $('#previewFrame');
