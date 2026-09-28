@@ -3,10 +3,10 @@
 // Security notes:
 // - The desktop client_id below is PUBLIC by design (installed apps cannot
 //   keep secrets). It is safe to ship in the app.
-// - The client_secret is NEVER used here on purpose: the flow uses PKCE
-//   (RFC 7636), so no secret is needed and none is shipped with the .exe.
+// - The client_secret lives ONLY in src/main/google-secret.json, which is
+//   gitignored (never lands on GitHub) but IS packaged inside the .exe —
+//   that is normal for desktop apps, Google does not treat it as confidential.
 // - NEVER commit any *secret*.json / client_secret*.json file to git.
-//   The JSON from Google Console is only needed once to read the client_id.
 
 const http = require('http');
 const crypto = require('crypto');
@@ -20,6 +20,17 @@ const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const SCOPES = ['openid', 'email', 'profile'];
 const AUTH_FILE = 'auth.json';
+
+// client_secret for the token exchange. Loaded from the gitignored
+// src/main/google-secret.json (shipped inside the .exe, never in git).
+// Newer Google Desktop clients reject the code exchange without it.
+let CLIENT_SECRET = null;
+try {
+  const raw = fs.readFileSync(path.join(__dirname, 'google-secret.json'), 'utf-8');
+  CLIENT_SECRET = (JSON.parse(raw) || {}).client_secret || null;
+} catch {
+  CLIENT_SECRET = null;
+}
 
 function base64url(buf) {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -118,6 +129,7 @@ async function startLogin({ openUrl, timeoutMs } = {}) {
   const code = await cb.code;
   const tok = await postForm(TOKEN_URL, {
     client_id: GOOGLE_CLIENT_ID,
+    ...(CLIENT_SECRET ? { client_secret: CLIENT_SECRET } : {}),
     code,
     code_verifier: verifier,
     grant_type: 'authorization_code',
@@ -147,6 +159,7 @@ async function fetchUserinfo(accessToken) {
 async function refreshAccessToken(refreshToken) {
   const tok = await postForm(TOKEN_URL, {
     client_id: GOOGLE_CLIENT_ID,
+    ...(CLIENT_SECRET ? { client_secret: CLIENT_SECRET } : {}),
     refresh_token: refreshToken,
     grant_type: 'refresh_token'
   });

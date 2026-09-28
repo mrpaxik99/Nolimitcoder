@@ -9,3 +9,4 @@ Thumbs.db
 client_secret*.json
 *secret*.json
 google-*.json
+src/main/google-secret.json
