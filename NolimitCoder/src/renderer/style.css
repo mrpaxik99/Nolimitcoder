@@ -301,7 +301,14 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 @media(max-width:760px){.sidebar{display:none}.messages,.composer,.composer-foot{max-width:100%}}
 
 /* ===== My Projects (landing) ===== */
-.projects-view{flex:1;display:flex;overflow-y:auto;background:var(--bg-base)}
+.projects-view{flex:1;display:flex;overflow-y:auto;background:var(--bg-base);position:relative}
+.pv-account{position:absolute;top:16px;right:18px;display:flex;align-items:center;gap:8px;
+  background:var(--surface-float);border:1px solid var(--border-weak);color:var(--text-strong);
+  border-radius:999px;padding:5px 14px 5px 5px;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer;z-index:5}
+.pv-account:hover{border-color:var(--border-strong);background:var(--surface-hover)}
+.pv-ava{width:26px;height:26px;border-radius:50%;background:var(--surface);border:1px solid var(--border-weak);
+  display:grid;place-items:center;font-size:14px;overflow:hidden;flex-shrink:0}
+.pv-ava img{width:100%;height:100%;object-fit:cover}
 .pv-inner{max-width:860px;width:100%;margin:0 auto;padding:64px 24px;display:flex;flex-direction:column;gap:26px}
 .pv-head{text-align:center}
 .pv-title{font-size:26px;color:var(--text-strong);font-weight:600;letter-spacing:-.01em}

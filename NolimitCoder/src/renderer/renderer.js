@@ -2193,8 +2193,11 @@ function renderAccount(profile) {
   const name = $('#acctName'), mail = $('#acctMail'), ava = $('#acctAva');
   const gBtn = $('#acctGoogleBtn'), outBtn = $('#acctLogout'), err = $('#acctErr');
   if (err) err.style.display = 'none';
+  const pvAva = $('#pvAva'), pvName = $('#pvName');
   if (profile) {
     const first = (profile.name || profile.email || 'U').split(' ')[0];
+    if (pvName) pvName.textContent = first;
+    if (pvAva) pvAva.innerHTML = profile.picture ? `<img src="${profile.picture}" alt="">` : '👤';
     if (label) label.textContent = first;
     if (ico) ico.innerHTML = profile.picture ? `<img src="${profile.picture}" alt="" style="width:18px;height:18px;border-radius:50%">` : '👤';
     if (name) name.textContent = profile.name || profile.email || 'Logged in';
@@ -2203,6 +2206,8 @@ function renderAccount(profile) {
     if (gBtn) gBtn.style.display = 'none';
     if (outBtn) outBtn.style.display = '';
   } else {
+    if (pvName) pvName.textContent = 'Log in';
+    if (pvAva) pvAva.textContent = '👤';
     if (label) label.textContent = 'Log in';
     if (ico) ico.textContent = '👤';
     if (name) name.textContent = 'Not logged in';
@@ -2216,6 +2221,8 @@ function initAccount() {
   const open = () => $('#accountModal').classList.add('open');
   const close = () => $('#accountModal').classList.remove('open');
   $('#accountBtn').addEventListener('click', open);
+  const pvBtn = $('#pvAccount');
+  if (pvBtn) pvBtn.addEventListener('click', open);
   $('#accountClose').addEventListener('click', close);
   $('#accountBackdrop').addEventListener('click', close);
   const showErr = (m) => { const e = $('#acctErr'); if (e) { e.textContent = m; e.style.display = m ? '' : 'none'; } };
