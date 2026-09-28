@@ -11,9 +11,6 @@
                     "dev":  "electron .",
                     "build":  "electron-builder",
                     "build:win":  "electron-builder --win",
-                    "build:app":  "electron-builder --dir",
-                    "build:installer":  "node build/makensis-run.js",
-                    "dist:custom":  "npm run build:app && npm run build:installer",
                     "postinstall":  "electron-builder install-app-deps"
                 },
     "devDependencies":  {
@@ -36,22 +33,22 @@
                               "icon":  "src/renderer/assets/icon.ico",
                               "target":  ["nsis", "dir"]
                           },
-                  "nsis":  {
-                               "installerIcon":  "src/renderer/assets/icon.ico",
-                               "oneClick":  false,
-                               "uninstallerIcon":  "src/renderer/assets/icon.ico",
-                               "deleteAppDataOnUninstall":  false,
-                               "createDesktopShortcut":  true,
-                               "artifactName":  "NolimitCoder V4 Setup.${ext}",
-                               "shortcutName":  "NolimitCoder",
-                               "perMachine":  false,
-                                "license":  "build/license.txt",
-                                "installerSidebar":  "build/installerSidebar.bmp",
-                                "uninstallerSidebar":  "build/installerSidebar.bmp",
-                                "installerHeader":  "build/installerHeader.bmp",
-                                "include":  "build/installer.nsh",
-                                "allowToChangeInstallationDirectory":  true,
-                               "createStartMenuShortcut":  true
-                           }
+                           "nsis":  {
+                                "installerIcon":  "src/renderer/assets/icon.ico",
+                                "oneClick":  true,
+                                "runAfterFinish":  true,
+                                "uninstallerIcon":  "src/renderer/assets/icon.ico",
+                                "deleteAppDataOnUninstall":  false,
+                                "createDesktopShortcut":  true,
+                                "artifactName":  "NolimitCoder V4 Setup.${ext}",
+                                "shortcutName":  "NolimitCoder",
+                                "perMachine":  false,
+                                 "license":  "build/license.txt",
+                                 "installerSidebar":  "build/installerSidebar.bmp",
+                                 "uninstallerSidebar":  "build/installerSidebar.bmp",
+                                 "installerHeader":  "build/installerHeader.bmp",
+                                 "allowToChangeInstallationDirectory":  false,
+                                "createStartMenuShortcut":  true
+                            }
               }
 }
