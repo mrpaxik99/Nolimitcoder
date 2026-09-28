@@ -59,6 +59,13 @@ export async function ensureSchema() {
     key TEXT PRIMARY KEY,
     value JSONB DEFAULT '{}'::jsonb
   )`;
+  await sql`CREATE TABLE IF NOT EXISTS app_checks (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT NOW(),
+    version TEXT DEFAULT '',
+    blocked BOOLEAN DEFAULT FALSE
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS app_checks_ts_idx ON app_checks (ts DESC)`;
   schemaReady = true;
 }
 

@@ -1,6 +1,8 @@
 import { db, ensureSchema } from './_db.js';
 
-function cmpVer(a, b) {
+function normVer(s) {
+  return String(s || '').trim().toLowerCase().replace(/^[v=\s]+/, '');
+}
   const pa = String(a || '').split('.').map((x) => parseInt(x, 10) || 0);
   const pb = String(b || '').split('.').map((x) => parseInt(x, 10) || 0);
   const n = Math.max(pa.length, pb.length);
