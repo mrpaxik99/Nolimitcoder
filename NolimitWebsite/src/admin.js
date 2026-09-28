@@ -125,7 +125,15 @@ function upSetStatus(m) {
 document.getElementById('upFile').addEventListener('change', () => {
   const f = document.getElementById('upFile').files[0];
   uploadedUrl = '';
-  upSetStatus(f ? 'Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — klikni „Nahrát .exe".' : '');
+  if (!f) { upSetStatus(''); return; }
+  // Dialog už soubory nefiltruje (to právě schovávalo .exe) — kontrola je tady:
+  if (!/\.exe$/i.test(f.name)) {
+    document.getElementById('upFile').value = '';
+    upSetStatus('');
+    showErr('Vyber soubor s příponou .exe (instalátor aplikace).');
+    return;
+  }
+  upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — klikni „Nahrát .exe".');
 });
 document.getElementById('upUpload').addEventListener('click', async () => {
   showErr(''); showOk('');
