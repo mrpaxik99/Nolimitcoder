@@ -56,11 +56,16 @@ function Try-Build {
       return
     }
     $npm = $null
-    try { $npm = (Get-Command npm -ErrorAction SilentlyContinue).Source } catch {}
-    if (!$npm) { Log 'auto-build SKIP (npm nenalezen)'; return }
+    try { $npm = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source } catch {}
+    if (!$npm -or $npm -like '*.ps1') {
+      $pf = Join-Path ${env:ProgramFiles} 'nodejs\npm.cmd'
+      if (Test-Path -LiteralPath $pf) { $npm = $pf }
+    }
+    if (!$npm) { Log 'auto-build SKIP (npm.cmd nenalezen)'; return }
     Log 'auto-build start...'
     $appDir = Join-Path $Root 'NolimitCoder'
-    $proc = Start-Process -FilePath $npm -ArgumentList @('run', 'build:win') -WorkingDirectory $appDir -WindowStyle Hidden -Wait -PassThru
+    # .cmd se spousti pres cmd.exe — Start-Process primo na npm.ps1 by Windows otevrel v Poznamkovem bloku
+    $proc = Start-Process -FilePath "$env:ComSpec" -ArgumentList @('/c', 'npm', 'run', 'build:win') -WorkingDirectory $appDir -WindowStyle Hidden -Wait -PassThru
     if (!$proc -or $proc.ExitCode -ne 0) { Log ('auto-build FAIL, exit=' + ($proc.ExitCode)); return }
     $exe = Join-Path $appDir 'dist\NolimitCoder V4 Setup.exe'
     $dst = Join-Path $Root 'NolimitWebsite\Downloads\NolimitCoder-V4-Setup.exe'
@@ -95,5 +100,8 @@ while ($true) {
   }
   $p = $r.Name
   if ($p -match '(^|\\)\.git(\\|$)') { continue }  # vlastni .git ignorovat (jinak smycka)
+  if ($p -match '(^|\\)(node_modules|dist|dist2|build)(\\|$)') { continue }  # vystupy buildu nesmi spoustet dalsi build
+  if ($p -match 'NolimitWebsite[\\/]Downloads(\\|$)') { continue }  # kopie instalatoru pro web
+  if ($p -match '\.(log|blockmap|exe)$') { continue }  # logy a binarky
   $lastChange = Get-Date
 }

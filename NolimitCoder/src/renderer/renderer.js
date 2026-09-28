@@ -2166,6 +2166,12 @@ function setGate(show) {
   const g = $('#loginGate');
   if (g) g.style.display = show ? 'flex' : 'none';
 }
+function hideVeil() {
+  const v = $('#bootVeil');
+  if (!v || v.classList.contains('hide')) return;
+  v.classList.add('hide');
+  setTimeout(() => { try { v.remove(); } catch {} }, 300);
+}
 function initLoginGate() {
   const btn = $('#gateGoogleBtn');
   const errBox = $('#gateErr');
@@ -2184,9 +2190,15 @@ function initLoginGate() {
     btn.disabled = false;
     btn.querySelector('span').textContent = 'Continue with Google';
   });
-  // first start (no session) → gate stays up; returning users skip it
-  window.api.authStatus().then((s) => setGate(!(s && s.loggedIn))).catch(() => setGate(true));
-  try { window.api.onAuthChanged((p) => setGate(!p)); } catch {}
+  // Boot: veil covers the app until auth is decided (never a flash of app before the gate).
+  // Fail-safe timeout — if the check hangs, show the gate rather than spinning forever.
+  let veiled = false;
+  const settle = (loggedIn) => { setGate(!loggedIn); if (!veiled) { veiled = true; hideVeil(); } };
+  try {
+    window.api.authStatus().then((s) => settle(!!(s && s.loggedIn))).catch(() => settle(false));
+  } catch { settle(false); }
+  setTimeout(() => settle(false), 10000);
+  try { window.api.onAuthChanged((p) => settle(!!p)); } catch {}
 }
 
 // ---------- Google account (desktop OAuth, main process does the flow) ----------
