@@ -1914,6 +1914,8 @@ function hidePreview() {
 /* ---------- init ---------- */
 document.addEventListener('DOMContentLoaded', async () => {
   bindEls();
+  // Windows: systémová tlačítka (min/max/close) zabírají pravý horní roh → posun login tlačítka mimo ně
+  try { if (navigator.userAgent && /Windows/i.test(navigator.userAgent)) document.body.classList.add('win'); } catch {}
   try { const s = await window.api.getStore(); prefs = Object.assign(prefs, s || {}); } catch {}
   // po startu: uložený aktivní chat mohl patřit jinému projektu — srovnat
   if (!activeConvo() || !projectMatch(activeConvo())) {
