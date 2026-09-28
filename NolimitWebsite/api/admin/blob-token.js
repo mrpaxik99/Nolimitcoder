@@ -18,7 +18,13 @@ export default async function handler(req, res) {
       body: body || {},
       request: req,
       onBeforeGenerateToken: async () => ({
-        allowedContentTypes: ['application/x-msdownload', 'application/octet-stream', 'application/x-msdos-program'],
+        allowedContentTypes: [
+          'application/x-msdownload',
+          'application/x-dosexec',
+          'application/octet-stream',
+          'binary/octet-stream',
+          'application/x-msdos-program'
+        ],
         maximumSizeInBytes: 300 * 1024 * 1024, // 300 MB rezerva (exe má ~82 MB)
         addRandomSuffix: true,
         tokenPayload: JSON.stringify({ by: a.email })

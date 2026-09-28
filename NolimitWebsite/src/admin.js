@@ -122,6 +122,11 @@ let uploadedUrl = '';
 function upSetStatus(m) {
   document.getElementById('upStatus').textContent = m || '';
 }
+document.getElementById('upFile').addEventListener('change', () => {
+  const f = document.getElementById('upFile').files[0];
+  uploadedUrl = '';
+  upSetStatus(f ? 'Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — klikni „Nahrát .exe".' : '');
+});
 document.getElementById('upUpload').addEventListener('click', async () => {
   showErr(''); showOk('');
   const f = document.getElementById('upFile').files[0];
@@ -132,8 +137,11 @@ document.getElementById('upUpload').addEventListener('click', async () => {
   prog.classList.add('on');
   upSetStatus('Nahrávám ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB)… chvíli to trvá, nezavírej stránku.');
   try {
+    // contentType natvrdo — prohlížeče hlásí .exe různě (x-msdownload / x-dosexec / prázdné),
+    // explicitní typ vždy projde přes allowedContentTypes na serveru.
     const blob = await upload(f.name, f, {
       access: 'public',
+      contentType: 'application/x-msdownload',
       handleUploadUrl: '/api/admin/blob-token?token=' + encodeURIComponent(token)
     });
     uploadedUrl = blob.url;
