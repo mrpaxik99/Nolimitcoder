@@ -68,14 +68,10 @@ function Try-Build {
     $proc = Start-Process -FilePath "$env:ComSpec" -ArgumentList @('/c', 'npm', 'run', 'build:win') -WorkingDirectory $appDir -WindowStyle Hidden -Wait -PassThru
     if (!$proc -or $proc.ExitCode -ne 0) { Log ('auto-build FAIL, exit=' + ($proc.ExitCode)); return }
     $exe = Join-Path $appDir 'dist\NolimitCoder V4 Setup.exe'
-    $dst = Join-Path $Root 'NolimitWebsite\Downloads\NolimitCoder-V4-Setup.exe'
     if (!(Test-Path -LiteralPath $exe)) { Log 'auto-build FAIL (exe nevzniklo)'; return }
-    Copy-Item -LiteralPath $exe -Destination $dst -Force
-    & $Git -C $Root add -A 2>&1 | Out-Null
-    & $Git -C $Root commit -m ('auto-build: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) 2>&1 | Out-Null
-    & $Git -C $Root push origin $Branch 2>&1 | Out-Null
+    # Instalator se distribuuje pres Updates v adminu (Vercel Blob) — do repa se nekopiruje.
     Set-Content -LiteralPath $BuildMarker -Value "$head|$(Get-Date -Format o)"
-    if ($LASTEXITCODE -eq 0) { Log 'auto-build OK + push' } else { Log 'auto-build OK, push FAIL' }
+    Log 'auto-build OK'
   } catch {
     Log ('auto-build ERROR: ' + $_.Exception.Message)
   }

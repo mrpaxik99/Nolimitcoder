@@ -1,5 +1,6 @@
 import '../style.css';
 import './track.js';
+import { upload } from '@vercel/blob/client';
 
 // Admin panel. Klient jen zobrazuje — skutečná kontrola práv je na serveru
 // (každý /api/admin/* ověřuje Google ID token + e-mail).
@@ -116,7 +117,35 @@ document.getElementById('killSave').addEventListener('click', async () => {
   } catch (e) { showErr(e.message); }
 });
 
-// ---------- Updates: verze ----------
+// ---------- Updates: upload .exe z počítače + verze ----------
+let uploadedUrl = '';
+function upSetStatus(m) {
+  document.getElementById('upStatus').textContent = m || '';
+}
+document.getElementById('upUpload').addEventListener('click', async () => {
+  showErr(''); showOk('');
+  const f = document.getElementById('upFile').files[0];
+  if (!f) { showErr('Nejdřív vyber .exe soubor z počítače.'); return; }
+  const btn = document.getElementById('upUpload');
+  const prog = document.getElementById('upProg');
+  btn.disabled = true;
+  prog.classList.add('on');
+  upSetStatus('Nahrávám ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB)… chvíli to trvá, nezavírej stránku.');
+  try {
+    const blob = await upload(f.name, f, {
+      access: 'public',
+      handleUploadUrl: '/api/admin/blob-token?token=' + encodeURIComponent(token)
+    });
+    uploadedUrl = blob.url;
+    upSetStatus('Hotovo: ' + f.name + ' — teď dole potvrď verzi.');
+    showOk('Soubor nahrán. Zbývá potvrdit verzi.');
+  } catch (e) {
+    upSetStatus('');
+    showErr('Upload selhal: ' + (e.message || e));
+  }
+  btn.disabled = false;
+  prog.classList.remove('on');
+});
 async function loadVersions() {
   const j = await api('/api/admin/versions');
   const tb = document.getElementById('upList');
@@ -129,10 +158,12 @@ async function loadVersions() {
     '<td>' + (v.download_url ? '<a href="' + esc(v.download_url) + '">stáhnout</a>' : '<span class="muted">—</span>') + '</td>' +
     '<td>' + esc(v.notes || '') + '</td>' +
     '<td style="white-space:nowrap">' +
-      (v.is_latest ? '' : '<button class="mini-btn" data-act="latest" data-v="' + esc(v.version) + '">Latest</button> ') +
-      '<button class="mini-btn" data-act="' + (v.blocked ? 'unblock' : 'block') + '" data-v="' + esc(v.version) + '">' +
-        (v.blocked ? 'Odblokovat' : 'Zastavit') + '</button> ' +
-      '<button class="mini-btn" data-act="remove" data-v="' + esc(v.version) + '">Smazat</button>' +
+      (v.is_latest ? '' : '<button class="ad-btn ad-btn-ghost sm" data-act="latest" data-v="' + esc(v.version) + '">Latest</button> ') +
+      (v.is_latest
+        ? '<span class="badge blue" title="Nejnovější verze jede vždy a zastavit jde jen starší">🔒 latest</span> '
+        : '<button class="ad-btn ad-btn-ghost sm" data-act="' + (v.blocked ? 'unblock' : 'block') + '" data-v="' + esc(v.version) + '">' +
+          (v.blocked ? 'Odblokovat' : 'Zastavit') + '</button> ') +
+      '<button class="ad-btn ad-btn-ghost sm" data-act="remove" data-v="' + esc(v.version) + '">Smazat</button>' +
     '</td></tr>'
   ).join('');
   tb.querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
@@ -151,16 +182,19 @@ document.getElementById('upAdd').addEventListener('click', async () => {
   showErr(''); showOk('');
   const version = document.getElementById('upVer').value.trim();
   if (!version) { showErr('Zadej verzi.'); return; }
+  if (!uploadedUrl) { showErr('Nejdřív nahoře nahraj .exe z počítače.'); return; }
   try {
     await api('/api/admin/versions', { method: 'POST', body: JSON.stringify({ action: 'upsert',
       version,
-      download_url: document.getElementById('upUrl').value.trim(),
+      download_url: uploadedUrl,
       notes: document.getElementById('upNotes').value.trim() }) });
     document.getElementById('upVer').value = '';
-    document.getElementById('upUrl').value = '';
     document.getElementById('upNotes').value = '';
+    document.getElementById('upFile').value = '';
+    uploadedUrl = '';
+    upSetStatus('');
     await loadVersions();
-    showOk('Verze ' + version + ' nahrána.');
+    showOk('Verze ' + version + ' nahrána a je teď Latest.');
   } catch (e) { showErr(e.message); }
 });
 

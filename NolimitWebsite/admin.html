@@ -32,6 +32,33 @@
 .switch-big.stopped .dot{background:#fc543a;box-shadow:0 0 12px #fc543a88}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 .muted{color:var(--text-weaker);font-size:12.5px}
+/* Moderní tlačítka */
+.ad-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 22px;border-radius:10px;
+  border:1px solid #fff;background:#ededed;color:#101010;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;
+  transition:transform .18s,box-shadow .18s,background .18s;white-space:nowrap}
+.ad-btn:hover{background:#fff;transform:translateY(-2px);box-shadow:0 14px 40px #ffffff2a}
+.ad-btn:disabled{opacity:.55;cursor:wait;transform:none}
+.ad-btn-danger{background:linear-gradient(135deg,#ff6b5e,#d63a2f);border-color:#ff8a80;color:#fff;box-shadow:0 8px 26px #ff5f5733}
+.ad-btn-danger:hover{background:linear-gradient(135deg,#ff7d70,#e04436);box-shadow:0 14px 40px #ff5f5744}
+.ad-btn-ghost{background:#ffffff08;border-color:var(--border-weak);color:var(--text);font-weight:600}
+.ad-btn-ghost:hover{background:var(--surface-hover);border-color:var(--border-strong);color:var(--text-strong)}
+.ad-btn.sm{padding:5px 12px;font-size:12px;border-radius:8px}
+.ad-btn.sm:hover{transform:translateY(-1px);box-shadow:0 8px 22px #ffffff22}
+/* Upload exe */
+.up-card{border:1px dashed var(--border-strong);border-radius:12px;padding:18px;margin-top:12px;background:#ffffff04}
+.up-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.up-file{flex:1;min-width:200px;font-size:13px;color:var(--text-weak)}
+.up-file::file-selector-button{background:#ffffff10;border:1px solid var(--border-strong);color:var(--text-strong);
+  border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;margin-right:12px;
+  transition:background .18s}
+.up-file::file-selector-button:hover{background:#ffffff1c}
+.up-prog{display:none;height:8px;border-radius:99px;background:#ffffff14;overflow:hidden;margin-top:12px}
+.up-prog.on{display:block}
+.up-prog > div{height:100%;width:40%;border-radius:99px;background:linear-gradient(90deg,#fff,#8ec2fc);
+  animation:up-slide 1.1s ease-in-out infinite}
+@keyframes up-slide{0%{margin-left:-40%}100%{margin-left:100%}}
+.up-status{font-size:12.5px;color:var(--text-weak);margin-top:8px;min-height:18px}
+.pf-nav .pi svg{width:14px;height:14px;vertical-align:-2px}
 </style>
 </head>
 <body>
@@ -66,7 +93,7 @@
       <nav class="pf-nav" id="adNav">
         <button data-sec="developer" class="active"><span class="pi">⚙</span> Developer</button>
         <button data-sec="updates"><span class="pi">⇪</span> Updates</button>
-        <button data-sec="customers"><span class="pi">○</span> Customers</button>
+        <button data-sec="customers"><span class="pi"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6" fill="none" stroke="currentColor" stroke-width="2"/></svg></span> Customers</button>
         <button data-sec="analytics"><span class="pi">▤</span> Analytics</button>
       </nav>
       <button class="pf-logout" id="adLogout"><span>⏻</span> Log out</button>
@@ -85,7 +112,7 @@
             <b id="killTitle">App is running</b>
             <div class="muted" id="killSub">Kill-switch je vypnutý.</div>
           </div>
-          <button class="danger-btn" id="killToggle">Zastavit starou aplikaci</button>
+          <button class="ad-btn ad-btn-danger" id="killToggle">Zastavit starou aplikaci</button>
         </div>
         <div class="ad-form">
           <label class="muted">Zpráva pro zablokované uživatele
@@ -95,22 +122,31 @@
             <input class="ad-input" id="minVer" style="width:100%;margin-top:6px" placeholder="např. 3.0.13">
           </label>
           <div class="ad-row">
-            <button class="mini-btn" id="killSave" style="flex:none;padding:8px 20px">Uložit zprávu a limit</button>
+            <button class="ad-btn" id="killSave">Uložit zprávu a limit</button>
           </div>
         </div>
       </section>
 
       <section class="pf-sec" data-spage="updates" style="display:none">
         <h1>Updates</h1>
-        <p class="muted">Verze aplikace. <b>Latest</b> se nabízí ke stažení, <b>Blocked</b> se na startu zastaví a musí aktualizovat.</p>
+        <p class="muted">Verze aplikace — drží se <b>max 2</b>. Nově nahraná je vždy <b>Latest</b> (jede), zastavit jde jen starší. Nejstarší se při nahrání smaže i se souborem.</p>
+        <div class="up-card">
+          <b>1 · Vyber .exe z počítače</b>
+          <div class="up-row" style="margin-top:10px">
+            <input type="file" class="up-file" id="upFile" accept=".exe,application/x-msdownload,application/octet-stream">
+            <button class="ad-btn" id="upUpload">Nahrát .exe</button>
+          </div>
+          <div class="up-prog" id="upProg"><div></div></div>
+          <div class="up-status" id="upStatus"></div>
+        </div>
         <div class="ad-form">
+          <b style="margin-top:6px">2 · Potvrď verzi</b>
           <div class="ad-row" style="margin-top:0">
             <input class="ad-input" id="upVer" placeholder="Verze, např. 3.0.14" style="width:170px">
-            <input class="ad-input" id="upUrl" placeholder="Download URL (https://…exe)" style="flex:1;min-width:200px">
+            <input class="ad-input" id="upNotes" placeholder="Poznámky k verzi (co je nového)" style="flex:1;min-width:200px">
           </div>
-          <input class="ad-input" id="upNotes" placeholder="Poznámky k verzi (co je nového)">
           <div class="ad-row">
-            <button class="primary-btn" id="upAdd">Nahrát verzi</button>
+            <button class="ad-btn" id="upAdd">Nahrát verzi</button>
           </div>
         </div>
         <table class="ad-table">
