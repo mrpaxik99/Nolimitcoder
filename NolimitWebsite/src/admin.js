@@ -154,7 +154,7 @@ async function readExeVersion(file) {
     const resOff = rva2off(resRVA);
     if (!resOff) return '';
     // Průchod resource stromem: typ 16 (RT_VERSION) → první potomek → datový záznam
-    const walk = (dirOff, level, want) => {
+    const walk = (dirOff, level) => {
       if (dirOff + 16 > buf.byteLength) return 0;
       const n = u16(dirOff + 12) + u16(dirOff + 14);
       if (n > 256) return 0;
@@ -164,16 +164,21 @@ async function readExeVersion(file) {
         const childRaw = u32(e + 4);
         const isDir = (childRaw & 0x80000000) !== 0;
         const child = resOff + (childRaw & 0x7FFFFFFF);
-        if (level === 0 && (id !== 16 || !isDir)) continue;
-        if (level === 1 && isDir && (want === -1 || id === want)) {
-          const r = walk(child, 2, -1);
+        if (level === 0) {
+          if (id !== 16 || !isDir) continue;
+          const r = walk(child, 1);
           if (r) return r;
+        } else if (level === 1) {
+          if (!isDir) continue;
+          const r = walk(child, 2);
+          if (r) return r;
+        } else if (!isDir) {
+          return child;
         }
-        if (level === 2 && !isDir) return child;
       }
       return 0;
     };
-    const dataEnt = walk(resOff, 0, -1);
+    const dataEnt = walk(resOff, 0);
     if (!dataEnt) return '';
     const dataOff = rva2off(u32(dataEnt));
     if (!dataOff) return '';
