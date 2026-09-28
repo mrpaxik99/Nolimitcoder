@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('api', {
   onChunk: (cb) => ipcRenderer.on('chat:stream-chunk', (_, d) => cb(d)),
   onEnd: (cb) => ipcRenderer.on('chat:stream-end', () => cb()),
   onError: (cb) => ipcRenderer.on('chat:stream-error', (_, e) => cb(e)),
+  onAppBlocked: (cb) => ipcRenderer.on('app:blocked', (_, d) => cb(d)),
   onDownload: (cb) => ipcRenderer.on('nlc-download', (_, p) => cb(p)),
   removeListeners: () => {
     ipcRenderer.removeAllListeners('chat:stream-chunk');

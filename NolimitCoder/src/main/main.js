@@ -23,6 +23,37 @@ if (T.setProgressHook) T.setProgressHook((p) => {
 let mainWindow;
 let abortFlag = false;
 
+// ===== Vzdálené řízení verzí (admin kill-switch z webu) =====
+// ZMĚŇ NA SVOU DOMÉNU po deployi webu na Vercel. Aplikace se při startu zeptá
+// /api/app-status?version=X — admin tam může starou verzi zastavit.
+// Fail-open: při výpadku sítě se aplikace nezastaví, blokuje jen explicitní příkaz.
+const APP_STATUS_URL = process.env.NLC_STATUS_URL || 'https://nolimitcoder.vercel.app/api/app-status';
+async function checkAppBlocked() {
+  try {
+    const u = new URL(APP_STATUS_URL);
+    u.searchParams.set('version', app.getVersion());
+    const mod = u.protocol === 'https:' ? https : http;
+    const data = await new Promise((resolve) => {
+      const req = mod.get(u.toString(), { timeout: 8000 }, (res) => {
+        let d = '';
+        res.on('data', (c) => { d += c; });
+        res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { try { req.destroy(); } catch {} resolve(null); });
+    });
+    if (data && data.blocked) {
+      const payload = {
+        reason: data.reason || 'This version has been stopped. Please download the latest version.',
+        latest: data.latest || null
+      };
+      for (const w of BrowserWindow.getAllWindows()) {
+        try { w.webContents.send('app:blocked', payload); } catch {}
+      }
+    }
+  } catch {}
+}
+
 try { app.setPath('userData', path.join(app.getPath('appData'), 'NolimitCoder V2')); } catch {} // data stays in the old folder even after renaming the exe
 const STORE_PATH = path.join(app.getPath('userData'), 'config.json');
 
@@ -75,6 +106,8 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     mainWindow.focus();
+    try { checkAppBlocked(); } catch {}
+    setInterval(() => { try { checkAppBlocked(); } catch {} }, 30 * 60 * 1000);
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

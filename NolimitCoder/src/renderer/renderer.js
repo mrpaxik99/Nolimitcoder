@@ -2158,6 +2158,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#saveSettings').addEventListener('click', () => $('#settingsModal').classList.remove('open'));
   initAccount();
   initLoginGate();
+  initBlockGate();
   autoGrow();
 });
 
@@ -2199,6 +2200,30 @@ function initLoginGate() {
   } catch { settle(false); }
   setTimeout(() => settle(false), 10000);
   try { window.api.onAuthChanged((p) => settle(!!p)); } catch {}
+}
+
+// ---------- Vzdálené zastavení staré verze (admin kill-switch z webu) ----------
+function initBlockGate() {
+  try {
+    if (!window.api || !window.api.onAppBlocked) return;
+    window.api.onAppBlocked((d) => {
+      try {
+        const g = $('#blockGate');
+        if (!g) return;
+        if (d && d.reason) {
+          const r = $('#blockReason');
+          if (r) r.textContent = String(d.reason);
+        }
+        const btn = $('#blockDownload');
+        if (btn) {
+          const url = d && d.latest && d.latest.download_url;
+          btn.style.display = url ? '' : 'none';
+          btn.onclick = () => { try { window.api.openExternal(url); } catch {} };
+        }
+        g.style.display = 'flex';
+      } catch {}
+    });
+  } catch {}
 }
 
 // ---------- Google account (desktop OAuth, main process does the flow) ----------
