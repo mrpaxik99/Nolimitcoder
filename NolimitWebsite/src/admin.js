@@ -123,6 +123,79 @@ let uploadedSize = 0;
 function upSetStatus(m) {
   document.getElementById('upStatus').textContent = m || '';
 }
+// Verze přímo zevnitř .exe (PE version resource — to samé číslo, co aplikace hlásí serveru).
+// Čte VS_FIXEDFILEINFO z RT_VERSION, fallback je odhad z názvu souboru.
+async function readExeVersion(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    const dv = new DataView(buf);
+    const u16 = (o) => dv.getUint16(o, true);
+    const u32 = (o) => dv.getUint32(o, true);
+    if (u16(0) !== 0x5A4D) return '';
+    const peOff = u32(0x3C);
+    if (peOff > buf.byteLength - 64 || u32(peOff) !== 0x4550) return '';
+    const numSec = u16(peOff + 6);
+    const optSize = u16(peOff + 20);
+    const optOff = peOff + 24;
+    const isPlus = u16(optOff) === 0x20B;
+    const ddOff = optOff + (isPlus ? 112 : 96);
+    const resRVA = u32(ddOff + 16);
+    if (!resRVA || numSec <= 0 || numSec > 64) return '';
+    const secOff = optOff + optSize;
+    const rva2off = (rva) => {
+      for (let i = 0; i < numSec; i++) {
+        const s = secOff + i * 40;
+        if (s + 40 > buf.byteLength) return 0;
+        const vAddr = u32(s + 12), vSize = Math.max(u32(s + 8), u32(s + 16)), rawPtr = u32(s + 20);
+        if (rva >= vAddr && rva < vAddr + vSize && rawPtr) return rawPtr + (rva - vAddr);
+      }
+      return 0;
+    };
+    const resOff = rva2off(resRVA);
+    if (!resOff) return '';
+    // Průchod resource stromem: typ 16 (RT_VERSION) → první potomek → datový záznam
+    const walk = (dirOff, level, want) => {
+      if (dirOff + 16 > buf.byteLength) return 0;
+      const n = u16(dirOff + 12) + u16(dirOff + 14);
+      if (n > 256) return 0;
+      for (let i = 0; i < n; i++) {
+        const e = dirOff + 16 + i * 8;
+        const id = u32(e);
+        const childRaw = u32(e + 4);
+        const isDir = (childRaw & 0x80000000) !== 0;
+        const child = resOff + (childRaw & 0x7FFFFFFF);
+        if (level === 0 && (id !== 16 || !isDir)) continue;
+        if (level === 1 && isDir && (want === -1 || id === want)) {
+          const r = walk(child, 2, -1);
+          if (r) return r;
+        }
+        if (level === 2 && !isDir) return child;
+      }
+      return 0;
+    };
+    const dataEnt = walk(resOff, 0, -1);
+    if (!dataEnt) return '';
+    const dataOff = rva2off(u32(dataEnt));
+    if (!dataOff) return '';
+    let p = dataOff + 6;
+    let key = '';
+    for (let i = 0; i < 32; i++) {
+      const c = u16(p + i * 2);
+      if (!c) break;
+      key += String.fromCharCode(c);
+    }
+    if (key !== 'VS_VERSION_INFO') return '';
+    p += (key.length + 1) * 2;
+    p = (p + 3) & ~3;
+    if (p + 16 > buf.byteLength || u32(p) !== 0xFEEF04BD) return '';
+    const ms = u32(p + 8), ls = u32(p + 12);
+    const q = [(ms >>> 16) & 0xFFFF, ms & 0xFFFF, (ls >>> 16) & 0xFFFF, ls & 0xFFFF];
+    while (q.length > 3 && q[q.length - 1] === 0) q.pop();
+    while (q.length < 3) q.push(0);
+    return q.join('.');
+  } catch (e) { return ''; }
+}
+
 document.getElementById('upFile').addEventListener('change', () => {
   const f = document.getElementById('upFile').files[0];
   uploadedUrl = '';
@@ -140,7 +213,19 @@ document.getElementById('upFile').addEventListener('change', () => {
     const vin = document.getElementById('upVer');
     if (m && vin && !vin.value) vin.value = m[1] + '.0.0';
   } catch {}
-  upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — klikni „Nahrát .exe".');
+  upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — čtu verzi ze souboru…');
+  // Přesná verze zevnitř .exe přepíše odhad z názvu (tohle číslo pak aplikace hlásí serveru)
+  readExeVersion(f).then((v) => {
+    try {
+      if (v) {
+        const vin = document.getElementById('upVer');
+        if (vin) vin.value = v;
+        upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — verze ze souboru: ' + v + '. Klikni „Nahrát .exe".');
+      } else {
+        upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — klikni „Nahrát .exe".');
+      }
+    } catch {}
+  });
 });
 document.getElementById('upUpload').addEventListener('click', async () => {
   showErr(''); showOk('');
