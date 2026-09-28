@@ -107,7 +107,7 @@ function createWindow() {
     mainWindow.show();
     mainWindow.focus();
     try { checkAppBlocked(); } catch {}
-    setInterval(() => { try { checkAppBlocked(); } catch {} }, 30 * 60 * 1000);
+    setInterval(() => { try { checkAppBlocked(); } catch {} }, 5 * 60 * 1000);
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

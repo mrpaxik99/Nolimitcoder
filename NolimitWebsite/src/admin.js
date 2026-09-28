@@ -287,10 +287,24 @@ async function loadAnalytics() {
   ).join('') : '<tr><td colspan="3" class="muted">Zatím žádné prodeje.</td></tr>';
 }
 
+// ---------- Developer: hlášení aplikací ----------
+async function loadChecks() {
+  try {
+    const j = await api('/api/admin/checks');
+    const rows = j.checks || [];
+    document.getElementById('ckList').innerHTML = rows.length ? rows.map((c) =>
+      '<tr><td class="mono"><b>' + esc(c.version || '(none)') + '</b></td>' +
+      '<td>' + (c.blocked ? '<span class="badge red">blocked</span>' : '<span class="badge green">allowed</span>') + '</td>' +
+      '<td class="muted">' + fmtTs(c.ts) + '</td></tr>'
+    ).join('') : '<tr><td colspan="3" class="muted">Zatím se nehlásila žádná aplikace.</td></tr>';
+  } catch (e) { /* ticho — sekce není kritická */ }
+}
+
 // Start — server je zdroj pravdy (403 = nejsi admin)
 (async function init() {
   try {
     await loadFlags();
+    await loadChecks();
     await loadVersions();
     await loadCustomers();
     await loadAnalytics();

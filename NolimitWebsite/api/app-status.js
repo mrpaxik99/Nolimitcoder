@@ -3,7 +3,9 @@ import { db, ensureSchema } from './_db.js';
 function normVer(s) {
   return String(s || '').trim().toLowerCase().replace(/^[v=\s]+/, '');
 }
-  const pa = String(a || '').split('.').map((x) => parseInt(x, 10) || 0);
+
+function cmpVer(a, b) {
+  const pa = normVer(a).split('.').map((x) => parseInt(x, 10) || 0);
   const pb = String(b || '').split('.').map((x) => parseInt(x, 10) || 0);
   const n = Math.max(pa.length, pb.length);
   for (let i = 0; i < n; i++) {
@@ -15,8 +17,10 @@ function normVer(s) {
 
 // Veřejný endpoint pro desktopovou aplikaci: GET /api/app-status?version=3.0.13
 // Fail-open: při výpadku se aplikace nezastaví, blokuje jen explicitní příkaz z adminu.
+// Každé hlášení se zapíše do app_checks — admin v Developer vidí, jaké verze se reálně hlásí.
 export default async function handler(req, res) {
   const version = String((req.query && req.query.version) || '').slice(0, 32);
+  const nv = normVer(version);
   try {
     await ensureSchema();
     const sql = db();
@@ -27,7 +31,7 @@ export default async function handler(req, res) {
     const rows = await sql`SELECT version, download_url, notes, blocked, is_latest, released_at
       FROM app_versions ORDER BY released_at DESC`;
     const latest = rows.find((r) => r.is_latest) || rows[0] || null;
-    const mine = version ? rows.find((r) => r.version === version) : null;
+    const mine = nv ? rows.find((r) => normVer(r.version) === nv) : null;
 
     let blocked = false;
     let reason = '';
@@ -37,11 +41,15 @@ export default async function handler(req, res) {
     } else if (mine && mine.blocked) {
       blocked = true;
       reason = 'This version is no longer supported. Please download the latest version.';
-    } else if (minV && version && cmpVer(version, minV) < 0) {
+    } else if (minV && nv && cmpVer(nv, minV) < 0) {
       blocked = true;
       reason = 'A newer version is required (minimum ' + minV + '). Please download the latest version.';
     }
-    return res.status(200).json({ ok: true, blocked, reason, minVersion: minV, latest });
+    try {
+      await sql`INSERT INTO app_checks (version, blocked) VALUES (${version || '(none)'}, ${blocked})`;
+      await sql`DELETE FROM app_checks WHERE ts < NOW() - INTERVAL '7 days'`;
+    } catch {}
+    return res.status(200).json({ ok: true, blocked, reason, minVersion: minV, latest, checkedVersion: version });
   } catch (e) {
     return res.status(200).json({ ok: false, blocked: false });
   }
