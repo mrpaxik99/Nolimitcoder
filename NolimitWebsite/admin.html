@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — NolimitCoder</title>
+<link rel="icon" type="image/png" href="./assets/logo.png">
+<link rel="stylesheet" href="./style.css">
+<style>
+.ad-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin:14px 0 22px}
+.ad-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+.ad-table th{text-align:left;font-size:11px;color:var(--text-weaker);text-transform:uppercase;letter-spacing:.06em;padding:8px 10px;border-bottom:1px solid var(--border-weak)}
+.ad-table td{padding:9px 10px;border-bottom:1px solid var(--border-weaker);color:var(--text);vertical-align:middle}
+.ad-table tr:hover td{background:#ffffff06}
+.badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 10px;border-radius:999px;border:1px solid var(--border-strong);color:var(--text-weak)}
+.badge.green{color:#30d158;border-color:#30d15866;background:#30d1580d}
+.badge.red{color:#fc543a;border-color:#fc543a66;background:#fc543a0d}
+.badge.blue{color:#8ec2fc;border-color:#8ec2fc66;background:#8ec2fc0d}
+.ad-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.ad-input{background:#0d0d0d;border:1px solid var(--border-weak);border-radius:8px;color:var(--text-strong);
+  padding:8px 12px;font-size:13px;font-family:inherit;min-width:0}
+.ad-input:focus{outline:none;border-color:#8ec2fc}
+.ad-form{display:grid;gap:10px;max-width:560px;margin-top:12px}
+.ad-err{display:none;background:#ff5f5714;border:1px solid #ff5f5744;color:#ff8a80;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px}
+.ad-ok{display:none;background:#30d15814;border:1px solid #30d15844;color:#30d158;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px}
+.chart{display:flex;align-items:flex-end;gap:4px;height:150px;margin-top:14px;padding:10px;border:1px solid var(--border-weaker);border-radius:12px;background:#ffffff03}
+.chart .bar{flex:1;min-width:6px;border-radius:4px 4px 0 0;background:linear-gradient(180deg,#ededed,#777);opacity:.85}
+.chart .bar:hover{opacity:1}
+.kill-on{border-color:#fc543a88 !important;background:#fc543a0d !important}
+.switch-big{display:flex;align-items:center;gap:14px;padding:16px;border:1px solid var(--border-weak);border-radius:12px;margin-top:12px}
+.switch-big .dot{width:14px;height:14px;border-radius:50%;background:#30d158;box-shadow:0 0 12px #30d15888;flex-shrink:0}
+.switch-big.stopped .dot{background:#fc543a;box-shadow:0 0 12px #fc543a88}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+.muted{color:var(--text-weaker);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="bg-glow"></div>
+<div class="bg-noise"></div>
+
+<header class="nav">
+  <div class="nav-inner">
+    <div class="brand">
+      <img src="./assets/logo.png" alt="Nolimit" class="brand-logo">
+      <span class="brand-text">NolimitCoder</span>
+      <span class="brand-pill">ADMIN</span>
+    </div>
+    <nav class="nav-links">
+      <a href="./index.html#modely">Models</a>
+      <a href="./index.html#pricing">Pricing</a>
+    </nav>
+    <div class="nav-actions">
+      <a href="./index.html" class="btn btn-ghost btn-sm">← Back to web</a>
+    </div>
+  </div>
+</header>
+
+<main class="profile-wrap">
+  <div class="profile-grid">
+    <aside class="pf-side">
+      <div class="pf-user">
+        <div class="pf-ava" id="adAva"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></div>
+        <div class="pf-name" id="adName">…</div>
+        <div class="pf-mail" id="adMail">…</div>
+      </div>
+      <nav class="pf-nav" id="adNav">
+        <button data-sec="developer" class="active"><span class="pi">⚙</span> Developer</button>
+        <button data-sec="updates"><span class="pi">⇪</span> Updates</button>
+        <button data-sec="customers"><span class="pi">○</span> Customers</button>
+        <button data-sec="analytics"><span class="pi">▤</span> Analytics</button>
+      </nav>
+      <button class="pf-logout" id="adLogout"><span>⏻</span> Log out</button>
+    </aside>
+
+    <div class="pf-content">
+      <div class="ad-err" id="adErr"></div>
+      <div class="ad-ok" id="adOk"></div>
+
+      <section class="pf-sec" data-spage="developer">
+        <h1>Developer</h1>
+        <p class="muted">Kill-switch — okamžitě zastaví <b>všechny</b> staré aplikace. Uživatelům se ukáže zpráva + tlačítko ke stažení nové verze.</p>
+        <div class="switch-big" id="killBox">
+          <span class="dot"></span>
+          <div style="flex:1;min-width:0">
+            <b id="killTitle">App is running</b>
+            <div class="muted" id="killSub">Kill-switch je vypnutý.</div>
+          </div>
+          <button class="danger-btn" id="killToggle">Zastavit starou aplikaci</button>
+        </div>
+        <div class="ad-form">
+          <label class="muted">Zpráva pro zablokované uživatele
+            <input class="ad-input" id="killMsg" style="width:100%;margin-top:6px" placeholder="This version has been stopped. Download the latest version.">
+          </label>
+          <label class="muted">Minimální povolená verze (prázdné = bez limitu)
+            <input class="ad-input" id="minVer" style="width:100%;margin-top:6px" placeholder="např. 3.0.13">
+          </label>
+          <div class="ad-row">
+            <button class="mini-btn" id="killSave" style="flex:none;padding:8px 20px">Uložit zprávu a limit</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="pf-sec" data-spage="updates" style="display:none">
+        <h1>Updates</h1>
+        <p class="muted">Verze aplikace. <b>Latest</b> se nabízí ke stažení, <b>Blocked</b> se na startu zastaví a musí aktualizovat.</p>
+        <div class="ad-form">
+          <div class="ad-row" style="margin-top:0">
+            <input class="ad-input" id="upVer" placeholder="Verze, např. 3.0.14" style="width:170px">
+            <input class="ad-input" id="upUrl" placeholder="Download URL (https://…exe)" style="flex:1;min-width:200px">
+          </div>
+          <input class="ad-input" id="upNotes" placeholder="Poznámky k verzi (co je nového)">
+          <div class="ad-row">
+            <button class="primary-btn" id="upAdd">Nahrát verzi</button>
+          </div>
+        </div>
+        <table class="ad-table">
+          <thead><tr><th>Verze</th><th>Stav</th><th>Download</th><th>Poznámky</th><th></th></tr></thead>
+          <tbody id="upList"><tr><td colspan="5" class="muted">Načítám…</td></tr></tbody>
+        </table>
+      </section>
+
+      <section class="pf-sec" data-spage="customers" style="display:none">
+        <h1>Customers</h1>
+        <div class="ad-grid" id="cuCards"></div>
+        <h3 style="margin:6px 0 0">Všichni uživatelé</h3>
+        <div style="overflow-x:auto">
+        <table class="ad-table">
+          <thead><tr><th>E-mail</th><th>Jméno</th><th>Plán</th><th>Stav</th><th>Zaplaceno</th><th>Poprvé</th><th>Naposledy</th></tr></thead>
+          <tbody id="cuList"><tr><td colspan="7" class="muted">Načítám…</td></tr></tbody>
+        </table>
+        </div>
+        <h3 style="margin:18px 0 0">Platby</h3>
+        <table class="ad-table">
+          <thead><tr><th>ID</th><th>E-mail</th><th>Částka</th><th>Stav</th><th>Poznámka</th><th>Kdy</th></tr></thead>
+          <tbody id="cuOrders"><tr><td colspan="6" class="muted">Načítám…</td></tr></tbody>
+        </table>
+      </section>
+
+      <section class="pf-sec" data-spage="analytics" style="display:none">
+        <h1>Analytics</h1>
+        <div class="ad-grid" id="anCards"></div>
+        <h3 style="margin:6px 0 0">Návštěvy — posledních 30 dní</h3>
+        <div class="chart" id="anChart"></div>
+        <div class="ad-grid" style="margin-top:14px" id="anAvgs"></div>
+        <h3 style="margin:6px 0 0">Právě online (<span id="anOnlineN">0</span>)</h3>
+        <table class="ad-table">
+          <thead><tr><th>E-mail</th><th>Jméno</th><th>Naposledy aktivní</th></tr></thead>
+          <tbody id="anOnline"><tr><td colspan="3" class="muted">Nikdo online.</td></tr></tbody>
+        </table>
+        <h3 style="margin:18px 0 0">Prodeje</h3>
+        <table class="ad-table">
+          <thead><tr><th>Měsíc</th><th>Prodejů</th><th>Tržba</th></tr></thead>
+          <tbody id="anSales"><tr><td colspan="3" class="muted">Zatím žádné prodeje.</td></tr></tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="foot-inner">
+    <div class="brand">
+      <img src="./assets/logo.png" alt="Nolimit" class="brand-logo sm">
+      <span class="brand-text">NolimitCoder</span>
+    </div>
+    <div class="foot-links">
+      <a href="./podminky.html">Terms of Use</a>
+      <a href="./soukromi.html">Privacy Policy</a>
+      <a href="./index.html">← Back to web</a>
+    </div>
+    <span class="foot-muted">Models by NolimitCode • 2026</span>
+  </div>
+</footer>
+
+<script type="module" src="/src/admin.js"></script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import '../style.css';
+import './track.js';
 
 // Google Client ID comes from the VITE_GOOGLE_CLIENT_ID env variable
 // (.env locally, Vercel → Project Settings → Environment Variables).
@@ -13,6 +14,8 @@ function parseJwt(token) {
 function onGoogleLogin(resp) {
   const profile = parseJwt(resp.credential) || {};
   try {
+    // ID token pro admin API (sessionStorage — po zavření záložky zmizí)
+    try { sessionStorage.setItem('nolimit_cred', resp.credential); } catch (e) {}
     localStorage.setItem('nolimit_user', JSON.stringify({
       name: profile.name || 'User',
       email: profile.email || '',

@@ -1,4 +1,5 @@
 import '../style.css';
+import './track.js';
 
 const MODELS = [
   { icon: '<svg class="ic" viewBox="0 0 24 24"><path d="M14 4c3-2 7-2 7-2s0 4-2 7l-7 7-5-5 7-7z"/><circle cx="15" cy="9" r="1.5"/><path d="M5 15c-1 4-1 6-1 6s2 0 6-1"/></svg>', name: 'NolimitCoderV3', desc: 'The latest flagship NolimitCode model — code, reasoning, and text. The smartest choice for complex tasks.', ep: 'flagship model', foot: 'Code • reasoning • text' },
@@ -137,4 +138,14 @@ typeLoop('demoInput2', [
     : '<img src="./assets/logo.png" alt="">') +
     '<span>' + (user.name || 'User').split(' ')[0] + ' · Profile</span>';
   btn.replaceWith(chip);
+  // Admin tlačítko vedle profilu — jen UX, skutečná kontrola je na serveru (/api/admin/*)
+  try {
+    if (String(user.email || '').toLowerCase() === 'tomaskonarik1977@gmail.com') {
+      const ab = document.createElement('a');
+      ab.className = 'btn btn-primary btn-sm';
+      ab.href = './admin.html';
+      ab.textContent = 'Admin';
+      chip.after(ab);
+    }
+  } catch (e) {}
 })();
