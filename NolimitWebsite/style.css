@@ -325,6 +325,15 @@ body:hover .cursor-glow{opacity:1}
 .feat:hover{transform:translateY(-5px);border-color:var(--border-strong);box-shadow:0 24px 60px #00000077}
 .f-ico{font-size:24px;margin-bottom:12px;display:inline-grid;place-items:center;width:46px;height:46px;border-radius:12px;
   background:#ffffff09;border:1px solid var(--border-weak)}
+/* vlastní bílé ikonky místo emoji */
+.ic{width:1.15em;height:1.15em;vertical-align:-0.22em;color:#fff;flex:none;
+  fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;
+  filter:drop-shadow(0 0 6px #ffffff33)}
+.f-ico .ic{width:24px;height:24px}
+.m-icon .ic{width:22px;height:22px}
+.mode-card .ic,.kicker .ic{width:15px;height:15px}
+.float-chip .ic{width:14px;height:14px}
+.pf-ava .ic{width:34px;height:34px;filter:none}
 .feat b{font-size:15px;color:var(--text-strong)}
 .feat p{margin:8px 0 0;font-size:13.5px;line-height:1.65;color:var(--text-weak)}
 .rezimy-inner{display:grid;grid-template-columns:minmax(300px,420px) 1fr;gap:48px;align-items:start}

@@ -1,8 +1,8 @@
 import '../style.css';
 
 const MODELS = [
-  { icon: '🚀', name: 'NolimitCoderV3', desc: 'The latest flagship NolimitCode model — code, reasoning, and text. The smartest choice for complex tasks.', ep: 'flagship model', foot: 'Code • reasoning • text' },
-  { icon: '⚡', name: 'NolimitCoderV2', desc: 'A proven NolimitCode model — fast answers and code. Ideal for everyday work.', ep: 'proven model', foot: 'Speed • stability • code' },
+  { icon: '<svg class="ic" viewBox="0 0 24 24"><path d="M14 4c3-2 7-2 7-2s0 4-2 7l-7 7-5-5 7-7z"/><circle cx="15" cy="9" r="1.5"/><path d="M5 15c-1 4-1 6-1 6s2 0 6-1"/></svg>', name: 'NolimitCoderV3', desc: 'The latest flagship NolimitCode model — code, reasoning, and text. The smartest choice for complex tasks.', ep: 'flagship model', foot: 'Code • reasoning • text' },
+  { icon: '<svg class="ic" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg>', name: 'NolimitCoderV2', desc: 'A proven NolimitCode model — fast answers and code. Ideal for everyday work.', ep: 'proven model', foot: 'Speed • stability • code' },
 ];
 
 const grid = document.getElementById('modelGrid');
