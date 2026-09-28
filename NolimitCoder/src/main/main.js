@@ -23,6 +23,34 @@ if (T.setProgressHook) T.setProgressHook((p) => {
 let mainWindow;
 let abortFlag = false;
 
+// Stažení souboru s progressem a sledováním redirectů (max 3)
+function downloadFile(url, dest, onProg) {
+  return new Promise((resolve, reject) => {
+    const go = (u, depth) => {
+      if (depth > 3) return reject(new Error('Too many redirects'));
+      const mod = String(u).startsWith('https:') ? https : http;
+      const req = mod.get(u, { timeout: 30000 }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          return go(new URL(res.headers.location, u).toString(), depth + 1);
+        }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
+        const total = parseInt(res.headers['content-length'] || '0', 10) || 0;
+        let recvd = 0;
+        const ws = fs.createWriteStream(dest);
+        res.on('data', (c) => { recvd += c.length; try { onProg && onProg(recvd, total); } catch {} });
+        res.on('error', (e) => { try { ws.destroy(); } catch {} reject(e); });
+        ws.on('error', reject);
+        ws.on('finish', () => resolve());
+        res.pipe(ws);
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { try { req.destroy(); } catch {} reject(new Error('timeout')); });
+    };
+    go(url, 0);
+  });
+}
+
 // ===== Vzdálené řízení verzí (admin kill-switch z webu) =====
 // ZMĚŇ NA SVOU DOMÉNU po deployi webu na Vercel. Aplikace se při startu zeptá
 // /api/app-status?version=X — admin tam může starou verzi zastavit.
@@ -251,6 +279,38 @@ ipcMain.handle('auth:logout', async () => {
 });
 
 ipcMain.handle('app:version', () => app.getVersion());
+// ===== Samo-aktualizace: stáhne nový instalátor a tiše přeinstaluje =====
+ipcMain.handle('app:update', async (event, url) => {
+  const sender = event.sender;
+  const send = (d) => { try { sender.send('app:update-progress', d); } catch {} };
+  try {
+    const u = String(url || '');
+    if (!/^https?:\/\//i.test(u)) return { ok: false, error: 'Bad URL' };
+    const dir = path.join(os.tmpdir(), 'nolimitcoder');
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    const dest = path.join(dir, 'NolimitCoder-Update.exe');
+    try { fs.unlinkSync(dest); } catch {}
+    await downloadFile(u, dest, (recvd, total) => send({
+      pct: total > 0 ? Math.round((recvd / total) * 100) : -1,
+      mb: Math.round(recvd / 1048576),
+      totalMb: total > 0 ? Math.round(total / 1048576) : 0
+    }));
+    send({ done: true });
+    // Instalátor se spustí s 2s zpožděním (aplikace se mezitím ukončí, aby nebyly zamčené soubory),
+    // /S = tichá instalace, po ní se app sama spustí (runAfterFinish).
+    try {
+      const { spawn } = require('child_process');
+      spawn('cmd.exe', ['/d', '/s', '/c', 'timeout /t 2 /nobreak >nul & "' + dest + '" /S'],
+        { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    } catch {}
+    setTimeout(() => { try { app.quit(); } catch {} }, 500);
+    return { ok: true };
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    send({ error: msg });
+    return { ok: false, error: msg };
+  }
+});
 ipcMain.handle('app:paths', () => ({
   userData: app.getPath('userData'),
   storePath: STORE_PATH

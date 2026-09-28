@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld('api', {
   onEnd: (cb) => ipcRenderer.on('chat:stream-end', () => cb()),
   onError: (cb) => ipcRenderer.on('chat:stream-error', (_, e) => cb(e)),
   onAppBlocked: (cb) => ipcRenderer.on('app:blocked', (_, d) => cb(d)),
+  startUpdate: (url) => ipcRenderer.invoke('app:update', url),
+  onUpdateProgress: (cb) => ipcRenderer.on('app:update-progress', (_, d) => cb(d)),
   onDownload: (cb) => ipcRenderer.on('nlc-download', (_, p) => cb(p)),
   removeListeners: () => {
     ipcRenderer.removeAllListeners('chat:stream-chunk');

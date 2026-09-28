@@ -659,6 +659,12 @@ body.win .pv-topbar{padding-right:152px}
 .boot-spin{width:22px;height:22px;border-radius:50%;border:2px solid #ffffff22;border-top-color:#ffffffaa;
   animation:spin .8s linear infinite}
 
+/* ===== Blokace staré verze: progress samo-aktualizace ===== */
+.blk-prog{display:none;height:8px;border-radius:99px;background:#ffffff14;overflow:hidden;margin-top:14px}
+.blk-prog.on{display:block}
+.blk-prog > div{height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#fff,#8ec2fc);transition:width .2s}
+.blk-status{font-size:12.5px;color:var(--text-weak);margin-top:8px;min-height:18px}
+
 /* ===== Login gate (required Google login on startup) ===== */
 .login-gate{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
   background:#080808f2;backdrop-filter:blur(10px);-webkit-app-region:drag}

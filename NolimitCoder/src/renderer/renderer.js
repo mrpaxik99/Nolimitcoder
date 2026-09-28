@@ -2206,6 +2206,31 @@ function initLoginGate() {
 function initBlockGate() {
   try {
     if (!window.api || !window.api.onAppBlocked) return;
+    // Progress samo-aktualizace (váže se jen jednou)
+    if (window.api.onUpdateProgress && !window.__blkProgBound) {
+      window.__blkProgBound = true;
+      window.api.onUpdateProgress((p) => {
+        try {
+          if (!p) return;
+          const fill = $('#blockFill'), st = $('#blockStatus'), prog = $('#blockProg');
+          const up = $('#blockUpdate'), dl = $('#blockDownload');
+          if (p.error) {
+            if (st) st.textContent = 'Aktualizace selhala: ' + p.error + ' — zkus ruční stažení níže.';
+            if (prog) prog.classList.remove('on');
+            if (up) up.disabled = false;
+            if (dl) dl.disabled = false;
+          } else if (p.done) {
+            if (fill) fill.style.width = '100%';
+            if (st) st.textContent = 'Instaluji… aplikace se za chvíli sama restartuje.';
+          } else if (p.pct >= 0) {
+            if (fill) fill.style.width = p.pct + '%';
+            if (st) st.textContent = 'Stahuji novou verzi… ' + p.pct + '% (' + (p.mb || 0) + ' z ' + (p.totalMb || '?') + ' MB)';
+          } else {
+            if (st) st.textContent = 'Stahuji novou verzi… ' + (p.mb || 0) + ' MB';
+          }
+        } catch {}
+      });
+    }
     window.api.onAppBlocked((d) => {
       try {
         const g = $('#blockGate');
@@ -2214,11 +2239,34 @@ function initBlockGate() {
           const r = $('#blockReason');
           if (r) r.textContent = String(d.reason);
         }
-        const btn = $('#blockDownload');
-        if (btn) {
-          const url = d && d.latest && d.latest.download_url;
-          btn.style.display = url ? '' : 'none';
-          btn.onclick = () => { try { window.api.openExternal(url); } catch {} };
+        const url = d && d.latest && d.latest.download_url;
+        const dl = $('#blockDownload');
+        if (dl) {
+          dl.style.display = url ? '' : 'none';
+          dl.disabled = false;
+          dl.onclick = () => { try { window.api.openExternal(url); } catch {} };
+        }
+        const up = $('#blockUpdate');
+        const prog = $('#blockProg'), fill = $('#blockFill'), st = $('#blockStatus');
+        if (up) {
+          up.style.display = url ? '' : 'none';
+          up.disabled = false;
+          up.querySelector('span').textContent = 'Aktualizovat software';
+          if (prog) prog.classList.remove('on');
+          if (fill) fill.style.width = '0%';
+          if (st) st.textContent = '';
+          up.onclick = async () => {
+            if (!url) return;
+            try { up.disabled = true; if (dl) dl.disabled = true; } catch {}
+            if (prog) prog.classList.add('on');
+            if (fill) fill.style.width = '0%';
+            if (st) st.textContent = 'Stahuji novou verzi…';
+            try { await window.api.startUpdate(url); }
+            catch (e) {
+              if (st) st.textContent = 'Aktualizace selhala: ' + (e && e.message || e);
+              try { up.disabled = false; if (dl) dl.disabled = false; } catch {}
+            }
+          };
         }
         g.style.display = 'flex';
       } catch {}
