@@ -37,9 +37,9 @@
         <div class="pf-mail" id="pfMail">…</div>
       </div>
       <nav class="pf-nav">
-        <button data-sec="overview" class="active">👤 Overview</button>
-        <button data-sec="billing">💎 Subscription</button>
-        <button data-sec="invoices">🧾 Invoices</button>
+        <button data-sec="overview" class="active"><span class="pi">○</span> Overview</button>
+        <button data-sec="billing"><span class="pi">◇</span> Subscription</button>
+        <button data-sec="invoices"><span class="pi">≡</span> Invoices</button>
       </nav>
       <button class="pf-logout" id="pfLogout"><span>⏻</span> Log out</button>
     </aside>
@@ -56,6 +56,16 @@
 
       <section class="pf-sec" data-spage="billing" style="display:none">
         <h1>Subscription</h1>
+        <div class="pf-trial" id="trialBox">
+          <div>
+            <b id="trialTitle">FREE trial — 1 day</b>
+            <p id="trialSub">Checking trial status…</p>
+          </div>
+          <div class="trial-right">
+            <div class="trial-count" id="trialCount" style="display:none">--:--:--</div>
+            <button class="pf-mini-btn" id="trialSync" style="display:none">I've claimed it in the app</button>
+          </div>
+        </div>
         <div class="pf-plan" id="subBox">
           <div>
             <b>Monthly Unlimited — $14.02/mo</b>
