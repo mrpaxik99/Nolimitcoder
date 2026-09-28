@@ -26,7 +26,9 @@ export default async function handler(req, res) {
           'application/x-msdos-program'
         ],
         maximumSizeInBytes: 300 * 1024 * 1024, // 300 MB rezerva (exe má ~82 MB)
-        addRandomSuffix: true,
+        // ŽÁDNÁ náhodná přípona: NSIS instalátor musí mít čisté jméno
+        // (NolimitCoder V5 Setup.exe), jinak padá "NSIS Error: integrity check".
+        addRandomSuffix: false,
         tokenPayload: JSON.stringify({ by: a.email })
       }),
       onUploadCompleted: async () => {}
