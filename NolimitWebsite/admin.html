@@ -59,6 +59,25 @@
 @keyframes up-slide{0%{margin-left:-40%}100%{margin-left:100%}}
 .up-status{font-size:12.5px;color:var(--text-weak);margin-top:8px;min-height:18px}
 .pf-nav .pi svg{width:14px;height:14px;vertical-align:-2px}
+/* Modal — seznam uživatelů */
+.modal-overlay{display:none;position:fixed;inset:0;background:#000000b8;backdrop-filter:blur(6px);
+  z-index:200;align-items:center;justify-content:center;padding:18px}
+.modal-overlay.on{display:flex}
+.modal-box{background:#111;border:1px solid var(--border-strong);border-radius:16px;max-width:900px;width:100%;
+  max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px #000000aa}
+.modal-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--border-weak)}
+.modal-head h2{margin:0;font-size:17px;flex:1}
+.modal-x{background:#ffffff10;border:1px solid var(--border-strong);color:var(--text-strong);border-radius:8px;
+  width:32px;height:32px;font-size:16px;cursor:pointer;line-height:1}
+.modal-x:hover{background:#ffffff22}
+.modal-filters{display:flex;gap:10px;flex-wrap:wrap;padding:14px 18px 4px}
+.filter-btn{padding:8px 18px;border-radius:999px;border:1px solid var(--border-strong);background:#ffffff08;
+  color:var(--text);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .18s}
+.filter-btn:hover{background:#ffffff16}
+.filter-btn.active{background:#ededed;color:#101010;border-color:#fff;box-shadow:0 8px 26px #ffffff22}
+.filter-btn .n{opacity:.7;font-weight:600;margin-left:6px}
+.modal-body{overflow:auto;padding:6px 18px 18px}
+.modal-search{width:100%;margin:10px 0 0}
 </style>
 </head>
 <body>
@@ -164,11 +183,9 @@
         <h1>Customers</h1>
         <div class="ad-grid" id="cuCards"></div>
         <h3 style="margin:6px 0 0">Všichni uživatelé</h3>
-        <div style="overflow-x:auto">
-        <table class="ad-table">
-          <thead><tr><th>E-mail</th><th>Jméno</th><th>Plán</th><th>Stav</th><th>Zaplaceno</th><th>Poprvé</th><th>Naposledy</th></tr></thead>
-          <tbody id="cuList"><tr><td colspan="7" class="muted">Načítám…</td></tr></tbody>
-        </table>
+        <p class="muted">Seznam uživatelů je skrytý — klikni pro zobrazení a filtrování podle plánu.</p>
+        <div class="ad-row">
+          <button class="ad-btn" id="cuOpen">Zobrazit uživatele</button>
         </div>
         <h3 style="margin:18px 0 0">Platby</h3>
         <table class="ad-table">
@@ -197,6 +214,30 @@
     </div>
   </div>
 </main>
+
+<!-- Modal: seznam uživatelů s filtrem Free / Placené -->
+<div class="modal-overlay" id="cuModal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Uživatelé (<span id="cuModalCount">0</span>)</h2>
+      <button class="modal-x" id="cuClose" title="Zavřít">✕</button>
+    </div>
+    <div class="modal-filters">
+      <button class="filter-btn active" data-f="all">Všichni <span class="n" id="cuNAll"></span></button>
+      <button class="filter-btn" data-f="free">Free <span class="n" id="cuNFree"></span></button>
+      <button class="filter-btn" data-f="paid">Placené <span class="n" id="cuNPaid"></span></button>
+    </div>
+    <div class="modal-body">
+      <input class="ad-input modal-search" id="cuSearch" placeholder="Hledat podle e-mailu nebo jména…">
+      <div style="overflow-x:auto">
+      <table class="ad-table">
+        <thead><tr><th>E-mail</th><th>Jméno</th><th>Plán</th><th>Stav</th><th>Zaplaceno</th><th>Poprvé</th><th>Naposledy</th></tr></thead>
+        <tbody id="cuList"><tr><td colspan="7" class="muted">Načítám…</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+</div>
 
 <footer>
   <div class="foot-inner">

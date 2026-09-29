@@ -25,7 +25,7 @@
     <button class="google-btn lg-btn" id="blockDownload" style="margin-top:10px"><span>Download the latest version</span></button>
   </div>
 </div>
-<div class="login-gate" id="loginGate" style="display:none">
+<div class="login-gate" id="loginGate" style="display:flex">
   <div class="lg-card">
     <div class="lg-logos">
       <img class="lg-app" src="./assets/logo.png" alt="NolimitCoder">
@@ -275,6 +275,7 @@
     <div class="modal-body prefs-layout">
       <nav class="prefs-nav" id="prefsNav">
         <button data-pref="general" class="active">General</button>
+        <button data-pref="permissions">Permissions</button>
         <button data-pref="terminal">Terminal</button>
         <button data-pref="env">Environment</button>
         <button data-pref="search">Search</button>
@@ -285,11 +286,30 @@
         <section class="pref-page" data-ppage="general">
           <div class="pref-group">
             <div class="pref-title">Mode</div>
-            <div class="settings-info" style="margin:0">The AI automatically has <b>full access</b> — files and installs run on their own. You approve the terminal in chat with the <b>Continue</b> / <b>Always continue</b> buttons (valid until the app is closed). Everything runs with no Windows popups.</div>
+            <div class="settings-info" style="margin:0">The AI has <b>full access</b> by default — files, terminal and installs run on their own, no questions, no Windows popups. You can narrow it down in <b>Permissions</b>, and every error lands in the <b>Error Log</b>.</div>
           </div>
           <div class="pref-group">
             <div class="pref-title">Sound</div>
             <label class="switch-row"><input type="checkbox" id="soundCheck" checked><span class="switch"><span class="switch-dot"></span></span><span><b>Sound on completion</b><small>A short chime when the AI finishes generating an answer.</small></span></label>
+          </div>
+        </section>
+        <section class="pref-page" data-ppage="permissions" style="display:none">
+          <div class="pref-group">
+            <div class="pref-title">Permissions</div>
+            <div class="settings-info" style="margin:0 0 10px">The AI has <b>unlimited access</b> — this cannot be switched off. Files, folders, the terminal, installs, network and deletion are all allowed, and nothing is ever asked or confirmed.</div>
+            <label class="switch-row"><input type="checkbox" id="permAll" checked disabled><span class="switch"><span class="switch-dot"></span></span><span><b>All permissions — always on</b><small>Writes anywhere on the disk (including C:\Windows and Program Files), runs any command, installs anything, deletes anything, with no confirmation.</small></span></label>
+          </div>
+          <div class="pref-group">
+            <div class="pref-title">Error Log</div>
+            <div class="settings-info" style="margin:0 0 10px">Every error in the app is written to <b>Error Log.txt</b> in your user profile (path below) — AI failures, failed tools, UI exceptions. Secrets are scrubbed, never plaintext. Send that file if something breaks.</div>
+            <label class="switch-row"><input type="checkbox" id="permLogErrors" checked><span class="switch"><span class="switch-dot"></span></span><span><b>Log errors</b><small>Write every error to Error Log.txt (scrubbed).</small></span></label>
+            <div class="proj-dir-row" style="margin-top:8px"><code id="errLogPath">…</code><button class="mini-btn" id="errOpenBtn">Open</button></div>
+            <div class="env-actions" style="margin-top:8px">
+              <button class="mini-btn" id="errRefreshBtn">Refresh</button>
+              <button class="mini-btn" id="errCopyBtn">Copy</button>
+              <button class="mini-btn" id="errClearBtn">Clear log</button>
+            </div>
+            <div class="env-list" id="errLogView" style="margin-top:8px;max-height:260px;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.5"></div>
           </div>
         </section>
         <section class="pref-page" data-ppage="terminal" style="display:none">

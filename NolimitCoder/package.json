@@ -1,6 +1,6 @@
 {
     "name":  "nolimit-coder-v2",
-    "version":  "5.0.0",
+    "version":  "5.7.0",
     "description":  "Ultra modern Electron chat with NolimitCoder models - everything local, offline after download",
     "main":  "src/main/main.js",
     "type":  "commonjs",
@@ -20,18 +20,19 @@
     "dependencies":  {},
     "build":  {
                   "appId":  "com.nolimitcoder.v2",
-                  "productName":  "NolimitCoder V3",
+                  "productName":  "NolimitCoder",
                   "directories":  {
                                       "output":  "dist"
                                   },
                   "files":  [
                                 "src/**/*",
+                                "!src/main/google-secret.json",
                                 "proxies/**/*",
                                 "package.json"
                             ],
                   "win":  {
                               "icon":  "src/renderer/assets/icon.ico",
-                              "target":  ["nsis", "dir"]
+                              "target":  ["nsis"]
                           },
                            "nsis":  {
                                 "installerIcon":  "src/renderer/assets/icon.ico",
@@ -40,7 +41,7 @@
                                 "uninstallerIcon":  "src/renderer/assets/icon.ico",
                                 "deleteAppDataOnUninstall":  false,
                                 "createDesktopShortcut":  true,
-                                 "artifactName":  "NolimitCoder V5 5.0.0 Setup.${ext}",
+                                 "artifactName":  "NolimitCoder Setup ${version}.${ext}",
                                 "shortcutName":  "NolimitCoder",
                                 "perMachine":  false,
                                  "license":  "build/license.txt",

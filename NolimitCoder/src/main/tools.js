@@ -15,6 +15,16 @@ let dbgFile = '';
 let dbgWrites = 0;
 function dbgFilePath() {
   if (dbgFile) return dbgFile;
+  // BEZPEČNOST: debug log do uživatelského profilu, NE vedle instalace.
+  try {
+    const e = require('electron');
+    if (e && e.app) {
+      const dir = path.join(e.app.getPath('userData'), 'logs');
+      fs.mkdirSync(dir, { recursive: true });
+      dbgFile = path.join(dir, 'ai-debug.log');
+      return dbgFile;
+    }
+  } catch {}
   const dirs = [];
   try {
     const here = String(__dirname || '');
@@ -57,8 +67,20 @@ function dbgLog(tag, data) {
       if (typeof v === 'object' && v !== null) { if (++seen.n > 200) return '[…]'; }
       return v;
     });
-    fs.appendFileSync(f, `[${new Date().toISOString()}] [${tag}] ${json}\n`);
+    fs.appendFileSync(f, scrubSecrets(`[${new Date().toISOString()}] [${tag}] ${json}\n`));
   } catch {}
+}
+// BEZPEČNOST: z logů se mažou tajemství (tokeny, hesla, klíče) — nikdy plaintext.
+function scrubSecrets(s) {
+  let t = String(s || '');
+  t = t.replace(/ya29\.[\w\-.~+/=]+/g, '[TOKEN]');
+  t = t.replace(/"?(refresh_token|access_token|client_secret|id_token)"?\s*[:=]\s*"[^"]*"/gi, '"$1":"[SECRET]"');
+  t = t.replace(/'?(refresh_token|access_token|client_secret|id_token)'?\s*[:=]\s*'[^']*'/gi, "'$1':'[SECRET]'");
+  t = t.replace(/(refresh_token|access_token|client_secret)\s*=\s*\S+/gi, '$1=[SECRET]');
+  t = t.replace(/(password|passwd|pwd|api[_-]?key|secret)\s*[:=]\s*(\S+)/gi, '$1=[SECRET]');
+  t = t.replace(/Authorization\s*:\s*Bearer\s+\S+/gi, 'Authorization: Bearer [SECRET]');
+  t = t.replace(/token=[^\s&"']+/gi, 'token=[SECRET]');
+  return t;
 }
 
 const BLOCKED_PREFIXES = ['c:\\windows', 'c:\\program files', 'c:\\program files (x86)', '/etc/', '/bin/', '/sbin/', '/usr/bin/', '/usr/sbin/'];
@@ -157,10 +179,7 @@ function resolveTarget(root, p, fullAccess) {
     const hit = segs.length ? knownFolders()[foldKey(segs[0])] : null;
     abs = hit ? path.join(hit, ...segs.slice(1)) : path.resolve(root, raw);
   }
-  const low = abs.toLowerCase();
-  if (BLOCKED_PREFIXES.some(b => low === b.replace(/\/$/, '') || low.startsWith(b))) {
-    throw new Error('System folder is forbidden: ' + abs);
-  }
+  // Žádné omezování: AI může zapisovat kamkoli na disk, i do C:\Windows a Program Files.
   if (!fullAccess) {
     const r = path.resolve(root);
     const inProj = abs === r || abs.startsWith(r + path.sep);
@@ -255,18 +274,119 @@ function decodeConsole(buf) {
   for (const byte of b) s += byte < 0x80 ? String.fromCharCode(byte) : (OEM_CZ[byte] || String.fromCharCode(byte));
   return s;
 }
+// Spuštění okenní aplikace (start "" app.exe nebo app.exe) čekáním na výstup navěky
+// visí — okno běží dál a dědí si stdout. Takový příkaz pustíme odpojeně a hned vrátíme.
+function isGuiLaunch(cmd) {
+  const c = String(cmd || '').trim();
+  if (!c) return false;
+  // start [title] "cesta\app.exe"  |  "cesta\app.exe"  |  app.exe
+  // + start BEZ uvozovek (start \ byl přesně ten systémový dialog)
+  if (/^\s*start\b/i.test(c)) return /\.exe\b/i.test(c) || !!guiTarget(c);
+  if (/^\s*"[^"]+\.exe"(\s|$)/i.test(c)) return true;
+  if (/^\s*[^\s"']+\.exe(\s|$)/i.test(c) && !/[&|<>]/.test(c)) return true;
+  return false;
+}
+// Cíl GUI spuštění (start "" "cesta\app.exe" | "cesta\app.exe" | app.exe).
+// Když cíl neexistuje, cmd/start by ukázal SYSTÉMOVÝ dialog "Windows nemůže nalézt" —
+// tomu bráníme kontrolou předem a vrátíme čistou chybu.
+function guiTarget(cmd) {
+  const c = String(cmd || '');
+  let m = c.match(/^\s*start\s+(?:"[^"]*"\s+)?"([^"]+)"/i) || c.match(/^\s*"([^"]+\.exe)"/i);
+  if (m) return m[1];
+  // start [switches] [title] target — i BEZ uvozovek (start \ = systémový dialog)
+  m = c.match(/^\s*start\s+(.*)$/i);
+  if (m) {
+    let rest = m[1].trim().replace(/^(\/[a-z]+\s+)+/i, ''); // /min /wait /b ...
+    const tq = rest.match(/^"[^"]*"\s+(\S+)/);
+    if (tq) return tq[1];
+    const tok = rest.match(/^(\S+)/);
+    if (tok && !/^"/.test(tok[1])) {
+      const t = tok[1];
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return null; // URL (https://…) → prohlížeč, bez dialogu; C:\ není URL
+      if (/[\\/]/.test(t) || /\.(exe|bat|cmd|msi|com|scr|pif)$/i.test(t)) return t;
+    }
+  }
+  m = c.match(/^\s*([^\s"']+\.exe)(?=\s|$)/i);
+  if (m) return m[1];
+  return null;
+}
+// Rozdělí složený příkaz na segmenty (…, & …, && …, || …, ;) — respektuje uvozovky.
+// DŮVOD: dialog byl ve TŘETÍM segmentu (taskkill … & timeout … & start \) a kontrola
+// viděla jen začátek příkazu. Odteď se kontroluje KAŽDÝ segment.
+function splitSegments(cmd) {
+  const segs = [];
+  let cur = '', q = null;
+  const s = String(cmd || '');
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (q) { cur += ch; if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+    if (ch === '&' || ch === ';' || ch === '|') {
+      if ((ch === '&' || ch === '|') && s[i + 1] === ch) i++;
+      segs.push(cur); cur = ''; continue;
+    }
+    cur += ch;
+  }
+  segs.push(cur);
+  return segs.map(x => x.trim()).filter(Boolean);
+}
+// Build příkazy — jejich výstupem může být exe, které v době kontroly ještě neexistuje
+// (npm run dist & start dist\app.exe je legitimní ověřovací flow a nesmí se blokovat).
+const BUILD_LIKE = /(npm\s+run\s+(dist|build)|electron-builder|msbuild|dotnet\s+(build|publish)|cargo\s+build|go\s+build|g\+\+?.*-o\b|pyinstaller|cmake\s+--build|gradlew?\s+.*(build|assemble)|ng\s+build|vite\s+build|next\s+build)/i;
+// První chybějící GUI cíl v libovolném segmentu, nebo null když je vše OK.
+// Vždy se blokuje: holé '\' a absolutní neexistující cesty. Relativní cíl projde jen
+// když mu v řetězu předchází build (jinak je to překlep → dialog).
+function findBadGuiTarget(cmd, cwd) {
+  const segs = splitSegments(cmd);
+  const builds = segs.some(s => BUILD_LIKE.test(s));
+  for (const seg of segs) {
+    if (!isGuiLaunch(seg)) continue;
+    const gt = guiTarget(seg);
+    if (!gt || guiTargetExists(gt, cwd)) continue;
+    if (/^[\\/]+$/.test(gt)) return gt;
+    if (/^(?:[a-zA-Z]:[\\/]|\\\\)/.test(gt)) return gt;
+    if (!builds) return gt;
+  }
+  return null;
+}
+function guiTargetExists(t, cwd) {
+  try {
+    if (/^[\\/]+$/.test(t)) return false; // holé '\' nebo '/' — to byl ten systémový dialog
+    if (/[\\/]/.test(t)) return fs.existsSync(t);
+    const win = process.env.SystemRoot || 'C:\\Windows';
+    const dirs = [cwd, path.join(win, 'System32'), path.join(win, 'SysWOW64'), win];
+    return dirs.some(d => d && fs.existsSync(path.join(d, t)));
+  } catch { return false; }
+}
+function runDetached(cmd, cwd) {
+  return new Promise((resolve) => {
+    try {
+      const isWin = process.platform === 'win32';
+      const { spawn } = require('child_process');
+      const c = spawn(isWin ? 'cmd.exe' : '/bin/sh', isWin ? ['/d', '/c', cmd] : ['-c', cmd], {
+        cwd, detached: true, stdio: 'ignore', windowsHide: false
+      });
+      c.unref();
+      resolve({ ok: true, output: 'Spuštěno na pozadí (okno aplikace zůstalo otevřené).\n[exit 0]' });
+    } catch (e) {
+      resolve({ ok: false, output: 'Error: ' + (e && e.message) });
+    }
+  });
+}
 function runCmd(cmd, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const isWin = process.platform === 'win32';
-    const child = execFile(isWin ? 'cmd.exe' : '/bin/sh', isWin ? ['/d', '/s', '/c', cmd] : ['-c', cmd],
-      { cwd, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true, encoding: 'buffer' }, (err, stdout, stderr) => {
+    // windowsVerbatimArguments: uvozovky uvnitř příkazu se předají cmd v původní podobě
+    // (bez toho rozbíjí filtry typu tasklist /FI "IMAGENAME eq X.exe").
+    const child = execFile(isWin ? 'cmd.exe' : '/bin/sh', isWin ? ['/d', '/c', cmd] : ['-c', cmd],
+      { cwd, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true, encoding: 'buffer', ...(isWin ? { windowsVerbatimArguments: true } : {}) }, (err, stdout, stderr) => {
         let out = decodeConsole(stdout);
         const errS = decodeConsole(stderr);
         if (errS) out += (out ? '\n[stderr]\n' : '') + errS;
         if (out.length > 20000) out = out.slice(0, 20000) + '\n… (output truncated)';
         if (err) {
           const code = typeof err.code === 'number' ? `exit ${err.code}` : String(err.code || 'error');
-          resolve({ ok: err.killed ? false : false, output: `${out}\n[${code}${err.killed ? ', timeout' : ''}]`.trim() });
+          resolve({ ok: false, output: `${out}\n[${code}${err.killed ? ', timeout' : ''}]`.trim() });
         } else {
           resolve({ ok: true, output: (out.trim() || '(no output)') + '\n[exit 0]' });
         }
@@ -300,13 +420,20 @@ function runCmdKind(kind, cmd, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const lite = kind === "powershell" || kind === "pwsh";
     const c2 = normalizeShell(cmd, lite);
+    // Okenní appka se spouští odpojeně — jinak čekání visí, dokud okno nezavřeš.
+    // Neexistující cíl = čistá chyba, nikdy SYSTÉMOVÝ dialog.
+    if (kind === 'cmd' && isGuiLaunch(c2)) {
+      const gt2 = guiTarget(c2);
+      if (gt2 && !guiTargetExists(gt2, cwd)) { resolve({ ok: false, output: 'Error: file does not exist, not launching (no system dialog): ' + gt2, launched: true, incompatible: false }); return; }
+      runDetached(c2, cwd).then(r => resolve(Object.assign(r, { launched: true, incompatible: false }))); return;
+    }
     const spec = kind === "powershell"
       ? { exe: "powershell.exe", args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", c2] }
       : kind === "pwsh"
         ? { exe: "pwsh.exe", args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", c2] }
-        : { exe: process.platform === "win32" ? "cmd.exe" : "/bin/sh", args: process.platform === "win32" ? ["/d", "/s", "/c", c2] : ["-c", c2] };
+        : { exe: process.platform === "win32" ? "cmd.exe" : "/bin/sh", args: process.platform === "win32" ? ["/d", "/c", c2] : ["-c", c2] };
     const child = execFile(spec.exe, spec.args,
-      { cwd, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true, encoding: "buffer" }, (err, stdout, stderr) => {
+      { cwd, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true, encoding: "buffer", ...(process.platform === "win32" && kind === "cmd" ? { windowsVerbatimArguments: true } : {}) }, (err, stdout, stderr) => {
         if (err && (err.code === "ENOENT" || /not found/i.test(err.message || ""))) { resolve({ ok: false, output: "", launched: false }); return; }
         let out = decodeSmart(stdout);
         const errS = decodeSmart(stderr);
@@ -335,7 +462,14 @@ function isAlwaysBlocked(cmd) {
   if (ALWAYS_BLOCKED_RE.test(String(cmd))) return true;
   return ALWAYS_BLOCKED_NAMES.has(firstToken(cmd));
 }
-const SANDBOX_BLOCKED_CMD = /\b(shutdown|restart|reg\s+(delete|add)|takeown|icacls|cacls|net\s+(user|localgroup)|sc\s+(delete|create|stop)|schtasks|wmic|runas)\b/i;
+// Příkazy, které reálně potřebují administrátora. Ty jdou do elevovaného helperu.
+function needsElevation(cmd) {
+  const c = String(cmd || '').toLowerCase();
+  return /(^|[&|]\s*)(reg\s+(add|delete|import)|sc\s+(create|delete|config|start|stop|query)|net\s+(user|localgroup|stop|start)|schtasks|takeown|icacls|cacls|bcdedit|bootrec|diskpart|net stop|net start|wevtutil|manage-bde|takeown)/.test(c)
+    || /\bc:\\(windows|program files|program files \(x86\))/i.test(String(cmd || ''))
+    || /\bschtasks\b|\bsc\s+(?:create|config|start|stop)\b|\breg(?:edit|\.exe)?\s+(?:add|delete)\b/.test(c);
+}
+// Žádný blacklist příkazů — plný přístup, bez omezení.
 function readTextFile(abs) {
   const buf = fs.readFileSync(abs);
   try {
@@ -1610,9 +1744,13 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
         cwd = w;
       }
       const tmo = Math.min(Math.max(parseInt(args.timeout) || 120000, 1000), 900000);
-      if (isAlwaysBlocked(cmd)) throw new Error('This command is always forbidden (system protection).');
-      if (!fullAccess && SANDBOX_BLOCKED_CMD.test(cmd)) throw new Error('This command is forbidden.');
       if (!fs.existsSync(cwd)) cwd = os.homedir(); // the folder may have disappeared in the meantime → do not crash
+      // DEFINITIVA: žádný segment nesmí spustit neexistující GUI cíl (systémový dialog).
+      // Kontroluje se PŘED instalacemi i backendy — nic se nespustí, vrátí se čistá chyba.
+      const badSeg = findBadGuiTarget(cmd, cwd);
+      if (badSeg) {
+        return { ok: false, output: 'Error: file does not exist, not launching (no system dialog): ' + badSeg };
+      }
       // Before running, check what the command needs and auto-install what is missing.
       let autoNotes = [];
       if (fullAccess) {
@@ -1627,6 +1765,40 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       const tried = [];
       let last = null;
       for (const kind of order) {
+        // Okenní appka: odpojeně, hned zpátky (jinak čekání visí do zavření okna).
+        // Cíl musí existovat — jinak by cmd/start ukázal SYSTÉMOVÝ dialog.
+        if (kind === 'cmd' && isGuiLaunch(cmd)) {
+          const gt = guiTarget(cmd);
+          if (gt && !guiTargetExists(gt, cwd)) {
+            return { ok: false, output: 'Error: file does not exist, not launching (no system dialog): ' + gt };
+          }
+          const gd = await runDetached(cmd, cwd);
+          gd.output += '\n[backend: cmd — spuštěno odpojeně]';
+          if (autoNotes.length) gd.output += '\n[automatically installed before running: ' + autoNotes.join(', ') + ']';
+          return gd;
+        }
+        // Stejná ochrana před SYSTÉMOVÝM dialogem i pro elevovanou cestu
+        // (helper spouští holé cmd bez kontrol).
+        if (isGuiLaunch(cmd)) {
+          const gt0 = guiTarget(cmd);
+          if (gt0 && !guiTargetExists(gt0, cwd)) {
+            return { ok: false, output: 'Error: file does not exist, not launching (no system dialog): ' + gt0 };
+          }
+        }
+        // Příkazy, co potřebují administrátora (zápis do Windows, služby, registry…)
+        // pošleme do elevovaného helperu — jedno UAC při startu, pak už bez otázek.
+        if (helperExe && needsElevation(cmd)) {
+          try {
+            if (await ensureElevatedHelper({ exe: helperExe, extraArgs: helperArgs })) {
+              const er = await elevRun(cmd, cwd, tmo);
+              if (er && !/^\[helper\]/i.test(String(er.output || ''))) {
+                er.output += '\n[run as administrator]';
+                if (autoNotes.length) er.output += '\n[automatically installed before running: ' + autoNotes.join(', ') + ']';
+                return er;
+              }
+            }
+          } catch {}
+        }
         const r = await runCmdKind(kind, cmd, cwd, tmo);
         tried.push(kind);
         if (r.launched === false) continue;
@@ -1851,7 +2023,7 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       const failed = results.filter(r => !r.ok && !r.already && !r.manual);
       return { ok: failed.length === 0, output: (args.dryRun ? 'PLAN (preview only, nothing is installed):\n' : '') + envActionReport(after, results), data: { results, tools: after.tools, missing: after.missing } };
     }
-    return { ok: false, output: `I do not have this tool. Use: shell, write_file, append_file, edit_file, read_file, list_dir, glob_file, create_dir, move_file, copy_file, delete_file, file_info, search_files, open_path, web_fetch, env_scan, env_prepare, env_install.` };
+    return { ok: false, output: `I do not have this tool. Use: shell, write_file, append_file, edit_file, read_file, list_dir, glob_file, create_dir, move_file, copy_file, delete_file, file_info, search_files, open_path, close_app, web_fetch, env_scan, env_prepare, env_install.` };
   } catch (e) {
     return { ok: false, output: `Error: ${e.message}` };
   }

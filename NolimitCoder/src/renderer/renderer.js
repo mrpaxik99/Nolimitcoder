@@ -10,7 +10,9 @@ function escapeHtml(s) {
 }
 
 /* ---------- state ---------- */
-let selectedModel = localStorage.getItem('nlc_model') || 'free/nolimitcoder-v3';
+// Staré uložené modely (longcat…) už nejsou v bráně dostupné → vždy začni aktuálním.
+const SAVED_MODEL = localStorage.getItem('nlc_model');
+let selectedModel = (SAVED_MODEL && !/longcat/i.test(SAVED_MODEL)) ? SAVED_MODEL : 'free/space-bunny-free';
 let searchQuery = '';
 let conversations = [];
 try { conversations = JSON.parse(localStorage.getItem('nlc_convos') || '[]'); if (!Array.isArray(conversations)) conversations = []; } catch { conversations = []; }
@@ -19,12 +21,15 @@ for (const c of conversations) { if (!c || c.projectPath === undefined) c.projec
 let activeConvoId = localStorage.getItem('nlc_active') || null;
 let isStreaming = false;
 let stopRequested = false;
-let prefs = { activeProject: null, mode: 'build', terminal: 'auto', shellBackend: 'auto', sound: true, googleSearch: true };
+let prefs = { activeProject: null, mode: 'build', terminal: 'auto', shellBackend: 'auto', sound: true, googleSearch: true,
+  permissions: 'all', fullAccess: true, allowShell: true, allowInstall: true, allowNetwork: true, allowDelete: true, allowHeavy: true, logErrors: true };
 let mode = localStorage.getItem('nlc_mode') || 'build';
 if (mode === 'auto') { mode = 'build'; try { localStorage.setItem('nlc_mode', 'build'); } catch {} } // Auto removed — Build tells questions apart from tasks on its own
 let projectRegistry = [];
 try { projectRegistry = JSON.parse(localStorage.getItem('nlc_projects') || '[]'); } catch { projectRegistry = []; }
-let autoShell = false; // "Continue always" lasts until the app is closed
+// Plná automatika, trvale. Žádné schvalování příkazů, nic se neptá.
+let autoShell = true;
+function shellNeedsApproval() { return false; }
 const approvedOnce = new Set(); // commands approved with the Continue button — repeats no longer ask
 const autoInstalled = new Set(); // tools auto-installed in this session
 const HEAVY_IDS = new Set(['msvc', 'docker', 'android', 'unity', 'unreal']); // GB toolchains — only with consent
@@ -42,31 +47,51 @@ const SPEEDS = [
 let speedIx = parseInt(localStorage.getItem('nlc_speed') || '1', 10);
 if (!(speedIx >= 0 && speedIx <= 2)) speedIx = 1;
 
-const IDENTITY = 'You are NolimitCoder by NolimitCode. Respond in English, briefly.';
+const IDENTITY = 'You are NolimitCoder by NolimitCode. You have full access to the computer: files, folders, terminal and installs. Always reply in the same language the user writes in.';
 const PLAN_PROMPT = 'PLAN: text only, no actions. You only have read tools. Explore the files and write a brief plan: what changes in which files (path:line) + how to verify it. No code.';
 const BUILD_SYS = 'Work through tools, not by printing into chat. Never announce an action in text without a simultaneous tool call - the first response to a request must contain a tool-call. Always call each tool-call with COMPLETE parameters in a single call - never empty {} and never in pieces (if the response gets cut off, call again COMPLETELY); only call when you have all parameters together - if you do not know a path, find it first via list_dir (never guess blindly). Independent actions: call them together in one step, dependent ones sequentially. Files: read with read_file, ALWAYS edit an existing file via edit_file with an exact small oldString copied from read_file (must match 1x, no line numbers, no own modifications), full write_file only for new files. Terminal: shell. Relative paths = active project; just name Documents, Desktop, Downloads.'
-  + ' Before compiling/running, call env_prepare with request (it auto-installs missing tools from the internet). Never tell the user to install anything manually. Large toolchains (MSVC, Docker, Android) only with heavy: true, and only after the user agreed (ask via question).'
-  + ' EXE: if no technology was specified, ask via question. Electron: scaffold_electron, write the code, shell npm install (timeout 600000), shell npm run dist (timeout 600000), verify the exe via file_info and report the path. Web: index.html in the project root. Always verify finished work by running it. Never commit without an explicit request.'
+  + ' Before compiling/running, call env_prepare with request and heavy: true (it auto-installs every missing tool from the internet, including large toolchains like MSVC, Docker and Android Studio). NEVER ask the user for permission and never tell them to install anything manually — just do it.'
+  + ' EXE: pick a sensible technology yourself and just build it — do not ask which one. Electron: scaffold_electron, write the code, shell npm install (timeout 600000), shell npm run dist (timeout 600000), verify the exe via file_info and report the path. Web: index.html in the project root. Always verify finished work by running it. Never commit without an explicit request.'
   + ' CSS in generated apps: NEVER use backdrop-filter or -webkit-backdrop-filter (slow and blurry) — only solid colors, gradients and shadows.'
   + ' RESEARCH FIRST (all projects): whenever the request mentions something you do not fully know — a brand, a platform like YouTube/TikTok, a format, dimensions, current specs or rules — FIRST look it up with web_search/web_fetch (official docs, ad/creative specs, resolutions, durations, safe zones), THEN build to the researched facts. Figure out what the user means before you act; never guess specs, dimensions or platform rules from memory.'
-  + ' Verify files ALWAYS with the file_info tool ({"path": "..."}) — never invent your own powershell/cmd check one-liners for files (they break on quotes and paths with spaces).';
+  + ' Verify files ALWAYS with the file_info tool ({"path": "..."}) — never invent your own powershell/cmd check one-liners for files (they break on quotes and paths with spaces).'
+  + ' YOU HAVE FULL ACCESS: you may create, overwrite, edit, move and delete files, create folders, run any shell command, install packages and build projects — nothing needs permission. NEVER reply that you "cannot" do something or that the user must do it themselves; if a tool exists, call it.'
+  + ' If the request is a task, DO IT NOW with tool calls instead of describing what you would do, and do not stop after one step — keep going until the work is actually finished and verified.'
+  + ' If no project is open yet, create a folder with create_dir and work in it; do not stall waiting for instructions.'
+  + ' VERIFY FOR REAL (mandatory for anything runnable): launch it and check it works — exe: run it, confirm the process runs via shell tasklist, walk through the main functions (open, click handlers exist in code, window closes); html: serve via preview and web_fetch the page, confirm key elements and handlers exist. You cannot move the mouse — verify through process state, fetched DOM and code inspection, never claim a click you did not make. If anything is broken (window does not close, a button does nothing), FIX it and re-test. What YOU opened for testing you MUST close afterwards with close_app (exe by name, preview by URL) — never leave test windows running for the user.'
+  + ' LANGUAGE: always reply in the SAME language the user wrote in (Czech in, Czech out).'
+  + ' LAUNCHING APPS: to open a program, just run it once — for example shell with command "start \\"\\" C:\\\\path\\\\app.exe". Do NOT append "timeout", "tasklist" or sleeps to check it; the tool returns immediately and waits are guaranteed to time out.'
+  + ' NEVER run a bare "start \\\\" or an unquoted/relative target you have NOT verified with file_info first — always the full quoted exe path.'
+  + ' The app runs as ADMINISTRATOR, so installs, services and system folders work without asking. If a command fails, read the exact error text and fix the syntax instead of retrying the same form.';
 const AGENT_NUDGE = '';
-const CHAT_SYS = 'Respond in English, briefly and to the point. Change nothing, write nothing, run nothing. If you need to peek into project files, you may only use read tools. Show code only when the user explicitly asks for it.';
+const CHAT_SYS = 'Answer briefly and to the point, in the SAME language the user wrote in (Czech in, Czech out). You have FULL rights: all tools including writing files and running commands. Prefer a text answer for plain questions, but if the user asks you to do something, DO IT with tool calls instead of describing it or refusing. Never claim the session is read-only or that you cannot act — you can.';
 /* ---------- Build mode: question vs. task ----------
    Build ALWAYS first recognizes what the user wants (detectIntent), and then
    either just answers with text (question/chit-chat — read tools allowed), or works
    with tools (task — writes, terminal, build). See detection rules in detectIntent below:
-   interrogative form wins over the infinitive, a direct command is always a task. Unclear = question. */
+   interrogative form wins over the infinitive, a direct command is always a task. Unclear = question.
+   DVOJJAZYČNĚ (CS + EN): uživatel píše česky, ale slovník akcí byl jen anglický —
+   české "udělej"/"vytvoř" padalo do chatu, takže model neměl ani jeden zapisovací nástroj. */
+const ACT_WORDS = /(\bmake|\bcreate|\bbuild|\bwrite|\bfix|\brepair|\badd|\bupdate|\bchange|\bremove|\bdelete|\brefactor|\bimplement|\bgenerate|\binstall|\bset up|\buninstall|\bcompile|\brebuild|\bprogram|\brewrite|\bextend|\bfinish|\bcomplete|\brun|\blaunch|\bdeploy|\brename|\bmove|\bcopy|\bdownload|\btest|\bscaffold|\bconvert|\boptimi[sz]e|\btranslate|\bformat|\brename|\bi want you to|\bi need|\bi would like|udělej|udelej|udělat|udelat|vytvoř|vytvor|vytvořit|vytvorit|naprogramuj|naprogramuj|napiš|napis|napsat|napíš|oprav|opravit|přidej|pridej|přidat|pridat|smazat|smaz|uprav|upravit|změň|zmen|změnit|zmenit|přepis|přepiš|prepis|prepiš|dodělej|dodelej|dokonči|dokonci|vygeneruj|vygeneruj|spusť|spust|spustit|nainstaluj|nainstal|stáhni|stahni|stažení|stazeni|přelož|preloz|překlop|preklop|vyhledej|vyhledat|implementuj|refaktoruj|oprav mi|udělej mi|vytvoř mi|napiš mi)/i;
+const ASK_WORDS = /^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know|can you explain|could you explain|is there|are there|should i|would you)\b/i;
+const ASK_WORDS_CS = /^(jak|co|proč|proc|kde|kdy|kdo|kolik|čí|či|jestli|vysvětli|vysvetli|řekni|rekni|popiš|popis|poradíš|poradis|jaký|jakou|jaky|jakou|smí|smi|můžeš|muzes|dokážeš|dokazes|který|ktery|kdovolákterý)\b/i;
+const ASK_MID_CS = /\b(jak|vysvětli|vysvetli|řekni|rekni|popiš|popis|poraď|porad|co znamená|co znamena|co je to|co je|jak se|jaký je|jaky je)\b/i;
 function detectIntent(raw) {
   const t = String(raw || '').trim();
   if (!t) return 'chat';
-  const noFill = t.replace(/^(hi|hello|hey|yo|good morning|good afternoon|good evening|please|well|so|ok|okay)\b[\s,]+/i, '').trim() || t;
-  if (/^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know|can you explain|could you explain)\b/i.test(noFill)) {
-    if (/\b(fix|update|edit|write|make|create|add|delete|remove|run|install|test|rewrite|refactor|rename|generate|finish|complete|prepare)\b/i.test(t)) return 'build';
+  const noFill = t.replace(/^(hi|hello|hey|yo|good morning|good afternoon|good evening|please|well|so|ok|okay|ahoj|čau|cau|zdar|dobrý den|dobry den|prosím|prosim|tak|hele)\b[\s,]+/i, '').trim() || t;
+  // Tázací začátek → otázka, ledaže je v ní i výslovný rozkaz ("jak opravit X?" = úkol).
+  if (ASK_WORDS.test(noFill) || ASK_WORDS_CS.test(noFill)) {
+    if (ACT_WORDS.test(t)) return 'build';
     return 'chat';
   }
-  if (/(make|create|build|write|fix|repair|add|update|change|remove|delete|refactor|implement|generate|install|set up|settle|uninstall|compile|rebuild|program|remove|rewrite|extend|finish|complete|run|launch|deploy|rename|move|copy|download|test|scaffold|i want you to|i need|i would like)/i.test(t)) return 'build';
+  if (ACT_WORDS.test(t)) return 'build';
   if (/```|Traceback|SyntaxError|TypeError|ReferenceError|\berror TS\d+|^\s*at\s+\S+\s*\(|\b[A-Za-z-]+\.(js|ts|tsx|py|java|cs|cpp|c|go|rs|php|rb):\d+/im.test(t) && !/\?/.test(t)) return 'build';
+  // Česká otázka uprostřed věty ("jak udělat X") bez rozkazu → otázka.
+  if (/\?/.test(t) && !ACT_WORDS.test(t) && ASK_MID_CS.test(t)) return 'chat';
+  if (/\?/.test(t) && t.length < 40) return 'chat';
+  // Delší popis bez otazníku = zadání, ne pokec.
+  if (t.length > 40) return 'build';
   return 'chat';
 }
 /* Commercial video: popis reklamy je VŽDY úkol (i bez rozkazovacích sloves) — model nesmí
@@ -91,6 +116,24 @@ function detectCommercialIntent(raw) {
   if (t.length > 40) return 'build'; // delší popis = zadání, ne pokec
   return detectIntent(t); // zbytek podle obecných pravidel
 }
+
+/* ---------- Error Log: všechny chyby jdou do dist/Error Log.txt ----------
+   Zachytí i chyby, o kterých se nikdo nedozví — nevyzchaná výjimka v UI,
+   selhaný nástroj, chyba spojení s AI. Uživatel si ji pak otevře v
+   Settings → Permissions → Error Log. */
+function errLog(tag, error, detail) {
+  try { if (window.api && window.api.logError) window.api.logError(tag, String(error || ''), detail); } catch {}
+}
+window.addEventListener('error', (e) => {
+  errLog('renderer/error', (e && e.message) || 'error', {
+    source: (e && e.filename || '') + ':' + (e && e.lineno || 0) + ':' + (e && e.colno || 0),
+    stack: (e && e.error && e.error.stack) || ''
+  });
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e && e.reason;
+  errLog('renderer/rejection', (r && (r.message || r)) || 'unhandled rejection', { stack: (r && r.stack) || '' });
+});
 
 /* ---------- helpers: markdown / highlight ---------- */
 function dlog(tag, data) { try { if (window.api && window.api.debugLog) window.api.debugLog(tag, data); } catch {} }
@@ -152,8 +195,8 @@ function getModels() {
 }
 function modelLabel(id) { const m = getModels().find(x => x.id === id); return m ? m.label : String(id || '').split('/').pop(); }
 function zenIdOf(id) { const m = getModels().find(x => x.id === id); return (m && m.zenId) || String(id || '').split('/').pop(); }
-// Pri vycerpane kvote (429) se zkusi druhy model NolimitCoder (ma vlastni kvotu). Jen mezi temito dvema.
-const MODEL_FALLBACK = { 'free/nolimitcoder-v3': 'free/nolimitcoder-v2', 'free/nolimitcoder-v2': 'free/nolimitcoder-v3' };
+// Pri vycerpane kvote (429) se zkusi druhy model. Jen mezi temito dvema.
+const MODEL_FALLBACK = { 'free/space-bunny-free': 'free/space-bunny-free' };
 function activeProject() { return prefs.activeProject || null; }
 function activeConvo() { return conversations.find(c => c.id === activeConvoId) || null; }
 // Chaty patří projektu: shoda musí platit oběma směry (projekt A nevidí chaty projektu B ani globální a naopak).
@@ -235,7 +278,8 @@ async function refreshZenLive() {
       const arr = Array.isArray(r.data) ? r.data : (r.data.data || r.data.models || []);
       const free = arr.filter(m => {
         const id = String(m.id || m.name || '');
-        return /free|pickle|bunny|mimo|ling|nemotron|muse-spark/i.test(id);
+        // Jen modely, o kterých je víme, že brána reálně obsluhuje (ostatní vrací 403/500).
+        return /space[-_]?bunny/i.test(id);
       }).slice(0, 30).map(m => ({
         id: 'live/' + (m.id || m.name), zenId: (m.id || m.name),
         label: String(m.name || m.id || '').slice(0, 40) || String(m.id),
@@ -446,10 +490,11 @@ function renderMessages() {
   for (const m of c.messages) {
     if (m.role === 'user' && m.internal) continue; // interní smyčka agenta — patří modelu, v chatu se neukazuje
     if (m.role === 'user') addMsg('user', '', m.content);
-    else if (m.role === 'assistant') addMsg('assistant', mdToHtml(sanitizeResponse(m.content || '')), null);
+    else if (m.role === 'assistant') addMsg('assistant', (m.thinking ? thinkHtml(m.thinking, false) : '') + mdToHtml(sanitizeResponse(m.content || '')), null);
     else if (m.role === 'tool') renderToolCard(m.tool, m.args, m.result, m.ok, m.diff);
   }
   bindCopyButtons();
+  bindThink(el.messages);
   scrollBottom();
 }
 function bindCopyButtons() {
@@ -496,17 +541,63 @@ function humanTool(name, args, ok) {
     case 'download_file': return 'Stahuju soubor';
     case 'scaffold_electron': return 'Stavím kostru aplikace';
     case 'open_path': return 'Otvírám ' + (baseName(args.path) || '');
+    case 'close_app': return 'Zavírám ' + (baseName(args.target) || args.target || 'aplikaci');
     default: return name;
   }
 }
+/* ---------- Thinking: viditelné přemýšlení modelu ----------
+   Model posílá delta.reasoning_content. Kreslí se živě, uživatel vidí
+   nad čím model právě přemýšlí. Sbalitelné, během streamu otevřené. */
+let thinkState = { box: null, body: null, seen: '' };
+function thinkHtml(txt, live) {
+  return '<div class="think-box' + (live ? ' live open' : '') + '" data-think>'
+    + '<div class="think-head"><img class="think-logo" src="./assets/logo.png" alt=""><span class="think-caret"></span><span>Thinking</span></div>'
+    + '<div class="think-body">' + escapeHtml(txt) + '</div></div>';
+}
+function bindThink(root) {
+  const heads = (root || document).querySelectorAll('[data-think] > .think-head');
+  heads.forEach(h => {
+    if (h.dataset.thinkBound) return;
+    h.dataset.thinkBound = '1';
+    h.addEventListener('click', () => {
+      const box = h.parentElement;
+      if (box) box.classList.toggle('open');
+    });
+  });
+}
+// Živá aktualizace během streamu (pouze přírůstky, ne celý innerHTML pokaždé)
+function updateThink(bubble, txt, live) {
+  if (!bubble) return;
+  const t = String(txt || '').trim();
+  if (!t) return;
+  if (!thinkState.box || !thinkState.box.isConnected || !bubble.contains(thinkState.box)) {
+    bubble.querySelectorAll('[data-think]').forEach(n => n.remove());
+    const box = document.createElement('div');
+    box.innerHTML = thinkHtml(t, live);
+    const el2 = box.firstElementChild;
+    bubble.insertBefore(el2, bubble.firstChild);
+    thinkState = { box: el2, body: el2.querySelector('.think-body'), seen: t };
+    return;
+  }
+  if (t.length > thinkState.seen.length) {
+    thinkState.body.textContent = t;
+    thinkState.seen = t;
+    thinkState.body.scrollTop = thinkState.body.scrollHeight;
+  }
+}
+function resetThink() { thinkState = { box: null, body: null, seen: '' }; }
+
 function renderToolCard(name, args, result, ok, diff, cached) {
   const wrap = document.createElement('div');
   wrap.className = 'msg tool';
-  const short = String((args && (args.path || args.dir || args.command || args.pattern || args.url || args.query || args.id || (args.ids && args.ids.join(', ')) || args.request)) || '').slice(0, 90);
-  let inner = '<div class="tool-card ' + (ok ? 'ok' : 'bad') + '"><div class="tool-head"><span class="tool-dot"></span>'
+  const short = String((args && (args.path || args.dir || args.target || args.command || args.pattern || args.url || args.query || args.id || (args.ids && args.ids.join(', ')) || args.request)) || '').slice(0, 90);
+  // Stejný rámeček jako Thinking: logo + bílá hlavička, sbalitelné.
+  let inner = '<div class="think-box tool open" data-think>'
+    + '<div class="think-head"><img class="think-logo" src="./assets/logo.png" alt="">'
     + '<span class="t-name">' + escapeHtml(name) + '</span>'
     + '<span class="t-path">' + escapeHtml(short) + '</span>'
-    + '<span class="t-chip">' + (ok ? '✓' : '✕') + '</span></div>';
+    + '<span class="t-chip ' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓' : '✕') + '</span></div>'
+    + '<div class="think-body">';
   if (diff && diff.length) {
     inner += '<div class="t-diff">' + diff.slice(0, 15).map(d =>
       '<div class="dl ' + (d.t === '+' ? 'add' : d.t === '-' ? 'del' : 'ctx') + '"><span>' + escapeHtml(d.t) + '</span><code>' + escapeHtml(String(d.s).slice(0, 300)) + '</code></div>'
@@ -520,10 +611,11 @@ function renderToolCard(name, args, result, ok, diff, cached) {
     const cut = out.slice(0, 400);
     body += '\n' + cut + (out.length > 400 ? '…' : '');
   }
-  if (body) inner += '<div class="t-live">' + escapeHtml(body) + '</div>';
-  inner += '</div>';
+  if (body) inner += escapeHtml(body);
+  inner += '</div></div>';
   wrap.innerHTML = inner;
   el.messages.appendChild(wrap);
+  bindThink(wrap);
   scrollBottom();
   return wrap;
 }
@@ -532,12 +624,33 @@ function prefsGo(section) {
   document.querySelectorAll('#prefsNav button').forEach(b => b.classList.toggle('active', b.getAttribute('data-pref') === section));
   document.querySelectorAll('#prefsPages .pref-page').forEach(s => s.style.display = s.getAttribute('data-ppage') === section ? '' : 'none');
 }
+/* ---------- Settings → Permissions + Error Log ---------- */
+// Plný přístup je trvalý a nic se nedá vypnout — UI jen zobrazuje stav.
+function syncPermUI() {
+  const a = $('#permAll'); if (a) a.checked = true;
+  const le = $('#permLogErrors'); if (le) le.checked = prefs.logErrors !== false;
+}
+async function savePerms(patch) {
+  prefs = Object.assign(prefs, patch);
+  try { await window.api.setStore(patch); } catch {}
+  syncPermUI();
+}
+async function refreshErrLog() {
+  const view = $('#errLogView'); if (!view) return;
+  try {
+    const r = await window.api.errRead();
+    view.textContent = (r && r.ok) ? (r.text || '(prázdný)') : ((r && r.text) || 'nelze číst');
+  } catch (e) { view.textContent = 'Chyba čtení: ' + (e && e.message); }
+}
 function openPrefs() {
   $('#prefsModal').classList.add('open');
   $('#soundCheck').checked = !!prefs.sound;
   const gc = $('#googleCheck'); if (gc) gc.checked = prefs.googleSearch !== false;
   const be = prefs.shellBackend || prefs.terminal || 'auto';
   document.querySelectorAll('input[name="shellbe"]').forEach(r => r.checked = r.value === be);
+  syncPermUI();
+  try { window.api.errPath().then(p => { const n = $('#errLogPath'); if (n && p && p.path) n.textContent = p.path; }); } catch {}
+  refreshErrLog();
   if (!envData && !envBusy) runEnvScan(false);
 }
 function envBusyState(on) {
@@ -622,14 +735,16 @@ async function envFixAll() {
   const missingAll = Object.values(data.tools || {}).filter(t => !t.ok).map(t => t.id);
   const light = missingAll.filter(id => !HEAVY_IDS.has(id));
   const heavyIds = missingAll.filter(id => HEAVY_IDS.has(id));
-  const todo = heavy ? missingAll : light;
+  // Bez omezení: všechny toolchainy včetně velkých, bez volby.
+  const wantHeavy = true;
+  const todo = missingAll;
   if (!todo.length) {
-    if (el.envSummary) el.envSummary.textContent = heavy ? 'Všechno je v PC ✓' : 'Všechny běžné nástroje jsou v PC ✓' + (heavyIds.length ? '\nVelké toolchainy (' + heavyIds.join(', ') + ') se nainstalují jen s volbou „Včetně velkých“.' : '');
+    if (el.envSummary) el.envSummary.textContent = 'Všechno je v PC ✓';
     return;
   }
   if (el.envSummary) el.envSummary.textContent = 'Fix ALL: instaluji ' + todo.join(', ') + '…\nMůže to trvat desítky minut (stahuji z internetu). Nech appku běžet.';
-  await envInstall(todo, { heavy: heavy });
-  if (heavy && !heavyIds.length && el.envSummary) el.envSummary.textContent += '\nHotovo ✓';
+  await envInstall(todo, { heavy: wantHeavy });
+  if (!heavyIds.length && el.envSummary) el.envSummary.textContent += '\nHotovo ✓';
 }
 /* Zaneprázdněnost po jednotlivých nástrojích — řádková tlačítka se šedí jen když se PRÁVĚ TEN nástroj instaluje,
    nikdy globálně (globální envBusy patří jen skenu a Fix ALL). */
@@ -640,9 +755,10 @@ async function ensureForRequest(text) {
   let data;
   try { data = await runEnvScan(false); } catch { return null; }
   if (!data) return null;
-  const needLight = (data.missing || []).filter(id => !HEAVY_IDS.has(id));
-  if (!needLight.length) return data;
-  return await envInstall(needLight, { heavy: false });
+  // Instaluje se všechno chybějící, včetně velkých toolchainů — bez dotazu.
+  const need = (data.missing || []).filter(Boolean);
+  if (!need.length) return data;
+  return await envInstall(need, { heavy: true });
 }
 
 /* ---------- Download widget: kolečko + procenta + historie staženého ---------- */
@@ -788,6 +904,7 @@ function activityFor(name, args) {
   if (name === 'env_prepare') return 'Připravuju nástroje…';
   if (name === 'env_install') return 'Instaluju ' + (args.id || (args.ids || []).join(', ') || 'nástroje') + '…';
   if (name === 'question') return 'Ptám se…';
+  if (name === 'close_app') return 'Zavírám ' + (baseName(args.target) || args.target || 'aplikaci') + '…';
   return 'Volám ' + name + '…';
 }
 
@@ -936,6 +1053,9 @@ function parseSSEBlock(b, st) {
       if (ch.finish_reason === 'length') st.truncated = true;
       const d = ch.delta || {};
       if (typeof d.content === 'string') st.text += d.content;
+      // Přemýšlení modelu — chodí v delta.reasoning_content, dřív se zahazovalo.
+      const rc = d.reasoning_content || d.reasoning;
+      if (typeof rc === 'string' && rc) { st.reasoning += rc; }
       const tcs = d.tool_calls || [];
       for (const tc of tcs) {
         const ix = String(tc.index != null ? tc.index : tc.id || st.toolCalls.size);
@@ -957,11 +1077,11 @@ function flushPending(st) {
   }
   st.pending = null;
 }
-function oneShot(messages, maxTokens, aMode) {
+function oneShot(messages, maxTokens, aMode, onThink) {
   const useMode = aMode || mode;
   return new Promise((resolve) => {
-    const st = { text: '', toolCalls: new Map(), pending: null, error: '' };
-    const onC = (d) => parseSSE(String(d), st);
+    const st = { text: '', reasoning: '', toolCalls: new Map(), pending: null, error: '' };
+    const onC = (d) => { parseSSE(String(d), st); try { if (onThink) onThink(st.reasoning); } catch {} };
     const onE = () => { cleanup(); flushPending(st); resolve(st); };
     const onX = (e) => {
       st.error = e && (e.error || e.message) ? String(e.error || e.message).slice(0, 300) : (e ? String(e).slice(0, 300) : 'neznámá chyba');
@@ -969,6 +1089,7 @@ function oneShot(messages, maxTokens, aMode) {
       st.isRegionBlocked = !!(e && e.isRegionBlocked) || /403|RegionError|not available in your country/i.test(st.error);
       const ra = parseInt(e && e.retryAfterMs, 10);
       st.retryAfterMs = !isNaN(ra) && ra > 0 ? Math.min(ra, 300000) : 0;
+      errLog('aistream', st.error, { via: (e && e.via) || '', isRateLimit: st.isRateLimit, isRegionBlocked: st.isRegionBlocked, url: (e && e.url) || '' });
       cleanup(); flushPending(st); resolve(st);
     };
     const cleanup = () => { try { window.api.removeListeners(); } catch {} };
@@ -976,7 +1097,9 @@ function oneShot(messages, maxTokens, aMode) {
     window.api.onChunk(onC); window.api.onEnd(onE); window.api.onError(onX);
     window.api.chatStreamStart({
       messages, model: zenIdOf(selectedModel), convoId: activeConvoId,
-      agent: useMode === 'build', mode: useMode, projectRoot: prefs.activeProject,
+      // Plná práva v Build módu vždy — i otázka dostane kompletní nástroje.
+      // Jen explicitní Plan mód (mode === 'plan') zůstává read-only.
+      agent: mode !== 'plan', mode: useMode, projectRoot: prefs.activeProject,
       fullAccess: true, maxTokens: maxTokens || SPEEDS[speedIx].tokens,
       websearch: prefs.googleSearch !== false
     });
@@ -985,6 +1108,8 @@ function oneShot(messages, maxTokens, aMode) {
 
 /* ---------- odeslání ---------- */
 async function sendMessage(overrideText) {
+  // Bez přihlášení se nepíše — pojistka i kdyby brána zlobila.
+  try { const lg = $('#loginGate'); if (lg && lg.style.display !== 'none') { setFooter('Nejdřív se přihlas přes Google.'); return; } } catch {}
   if (isStreaming) { pendingQueue.push(overrideText || el.promptInput.value.trim()); updateQueue(); return; }
   let text = (overrideText != null ? overrideText : el.promptInput.value.trim());
   if (!text) return;
@@ -1125,6 +1250,7 @@ async function runAgent(convo, intent) {
     }
     let rounds = 0;
     let finalText = '';
+    let lastThinking = ''; // přemýšlení modelu z posledního kola — jde do Thinking bloku
     let planBlocked = 0; // kolikrát Plan mód odmítl zapisující nástroj (pak už model jen dopíše plán textem)
     let promiseNudge = 0; // kolikrát jsme model vrátili, když pracoval bez zápisu (max 2x)
     let emptyRounds = 0; // po sobě jdoucí kola bez textu i bez volání (po 3 konec, pak záchranné kolo)
@@ -1165,7 +1291,9 @@ async function runAgent(convo, intent) {
         maxT: SPEEDS[speedIx].tokens
       });
       const roundT0 = Date.now();
-      const st = await oneShot(msgs, SPEEDS[speedIx].tokens, effMode);
+      resetThink();
+      const onThink = (r) => { updateThink(bubble, r, true); };
+      const st = await oneShot(msgs, SPEEDS[speedIx].tokens, effMode, onThink);
       if (stopRequested) break;
       // Chyba spojení se nikdy nesmí tiše spolknout — ukázat neutrální hlášku a po 3. opakování skončit.
       // Tady je poslední záchrana: 403 se neopakuje, přetížení zkusí druhý model NolimitCoder.
@@ -1209,6 +1337,7 @@ async function runAgent(convo, intent) {
         })
         .filter(t => t.name);
       const text = sanitizeResponse(st.text);
+      if (String(st.reasoning || '').trim()) lastThinking = String(st.reasoning).trim();
       dlog('roundres', {
         round: rounds, ms: Date.now() - roundT0, textLen: text.length,
         textHead: text.slice(0, 200),
@@ -1244,8 +1373,10 @@ async function runAgent(convo, intent) {
         finalText = text; break;
       }
       if (text && calls.length) {
-        // průběžné myšlení ukaž
-        bubble.innerHTML = mdToHtml(text) + '<span class="stream-caret"></span>'; bindCopyButtons();
+        // průběžné myšlení ukaž — Thinking blok musí zůstat, proto se vkládá PŘED něj
+        const th = thinkState.box && thinkState.box.isConnected ? thinkState.box.outerHTML : '';
+        bubble.innerHTML = th + mdToHtml(text) + '<span class="stream-caret"></span>';
+        bindCopyButtons(); bindThink(bubble);
       }
       if (!calls.length) {
         if (text) { finalText = text; break; }
@@ -1257,16 +1388,10 @@ async function runAgent(convo, intent) {
       emptyRounds = 0; // produktivní kolo → počítadlo znovu
       roundProductive = false;
       // proveď tool cally (každé provedení = 1 krok v liště)
+      // Žádné omezování podle režimu — AI může psát, mazat i spouštět vždy.
       for (let ci = 0; ci < calls.length; ci++) {
         const c = calls[ci];
         if (stopRequested) break;
-        if (effMode !== 'build' && !['read_file', 'list_dir', 'glob_file', 'search_files', 'file_info', 'web_fetch', 'web_search', 'question', 'env_scan'].includes(c.name)) {
-          planBlocked++;
-          const blockedMsg = isQuestion ? 'Odpovídám na otázku — nezapisuji ani nespouštím, jen čtu a odpovídám textem.' : 'Nedostupné v Plan módu (jen čtení).';
-          convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: blockedMsg, ok: false });
-          renderToolCard(c.name, c.args, isQuestion ? 'Odpovídám na otázku.' : 'Nedostupné v Plan módu.', false);
-          continue;
-        }
         if (c.name === 'question') {
           setActivity('Ptám se…');
           planTrail.push({ name: c.name, args: c.args, st: 'live' });
@@ -1279,7 +1404,7 @@ async function runAgent(convo, intent) {
           msgs.push({ role: 'assistant', content: text || '' });
           continue;
         }
-        if (c.name === 'shell' && !autoShell) {
+        if (c.name === 'shell' && (shellNeedsApproval() || !autoShell)) {
           const cmdKey = String(c.args.command || '').trim();
           if (!approvedOnce.has(cmdKey)) {
             const verdict = await askShellApproval(cmdKey);
@@ -1291,16 +1416,15 @@ async function runAgent(convo, intent) {
             approvedOnce.add(cmdKey);
           }
         }
-        // "Kam to uložit" pojistka: nejasný relativní zápis bez projektu → zeptej se
-        if (['write_file', 'append_file', 'download_file'].includes(c.name) && !prefs.activeProject && !String((c.args.path || c.args.to || '')).match(/^([a-zA-Z]:[\\/]|\\\\|\/)/)) {
-          const where = await askWhere('AI chce zapsat soubor ' + (c.args.path || c.args.to || '') + '. Kam to uložit?');
-          if (!where) {
-            convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: 'Uživatel zrušil výběr složky.', ok: false });
-            renderToolCard(c.name, c.args, 'Zrušeno.', false);
-            continue;
+        // Bez otevřeného projektu dřív viselo modální okno "Kam to uložit?" a AI stálo.
+        // Teď si samo založí pracovní složku (Plocha/NolimitCoder/<název>) a jede dál.
+        if (['write_file', 'append_file', 'download_file', 'edit_file', 'create_dir'].includes(c.name) && !prefs.activeProject && !String(c.args.path || c.args.to || '').match(/^([a-zA-Z]:[\\/]|\\\\|\/)/)) {
+          const auto = await autoWorkspace(convo);
+          if (auto) {
+            prefs.activeProject = auto;
+            try { await window.api.setStore({ activeProject: auto }); } catch {}
+            dlog('autoproj', { path: auto });
           }
-          prefs.activeProject = where;
-          try { await window.api.setStore({ activeProject: where }); } catch {}
         }
         setActivity(activityFor(c.name, c.args));
         const emptyWhy = emptyCallReason(c.name, c.args || {}, c);
@@ -1363,6 +1487,10 @@ async function runAgent(convo, intent) {
           }
         } else argFail = { key: '', count: 0 };
         convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: String((res && res.output) || ''), ok: !!(res && res.ok), diff: res && res.diff, skipped: !!(res && res.cached) });
+        // Selhaný nástroj do dist/Error Log.txt (timeout, exit code, zamítnutý příkaz…)
+        if (res && res.ok === false && !emptyWhy) {
+          errLog('tool:' + c.name, String(res.output || res.error || 'tool failed').slice(0, 2000), { args: c.args, root: prefs.activeProject });
+        }
         if (res && res.ok && ['write_file', 'append_file', 'edit_file', 'shell', 'env_install'].includes(c.name)) roundProductive = true;
         if (!emptyWhy) {
           // Stráží zachycené prázdné volání se v chatu neukazuje (nic se nestalo) — jen v logu a v kontextu modelu.
@@ -1470,7 +1598,7 @@ async function runAgent(convo, intent) {
     finalText = sanitizeResponse(finalText || '');
     if (!finalText && lastErr) finalText = 'Nedokončeno — ' + publicErr(lastErr) + ' Zkus to prosím znovu za chvíli.';
     dlog('final', { finalLen: finalText.length, finalHead: finalText.slice(0, 200), rounds });
-    convo.messages.push({ role: 'assistant', content: finalText || 'Nedostala jsem od AI žádnou odpověď (prázdný stream). Zkus to prosím poslat znovu.' });
+    convo.messages.push({ role: 'assistant', content: finalText || 'Nedostala jsem od AI žádnou odpověď (prázdný stream). Zkus to prosím poslat znovu.', thinking: lastThinking });
     saveConvos(); renderMessages(); renderChatList();
     setFooter('Hotovo'); playDone();
     // Video project: primárním výstupem je MP4 — po každém zápisu reklamy ho rovnou automaticky nahraj
@@ -1573,6 +1701,35 @@ function emptyCallReason(name, args, c) {
 function lastUserText(convo) {
   const ms = ((convo && convo.messages) || []).filter(m => m.role === 'user' && !m.internal && m.content);
   return ms.length ? String(ms[ms.length - 1].content) : '';
+}
+/* Bez otevřeného projektu nechceme AI zastavit dotazem — založíme jí vlastní
+   pracovní složku na Ploše a rovnou ji zapíšeme jako aktivní projekt. */
+function slugFor(t) {
+  const s = String(t || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  return s || 'projekt';
+}
+async function autoWorkspace(convo) {
+  try {
+    const f = await window.api.knownFolders();
+    const base = (f && f.documents) || f.desktop || f.downloads;
+    if (!base) return null;
+    let root = base.replace(/[\\/]+$/, '') + '\\NolimitCoder';
+    // číselná složka, aby se projekty navzájem nepřepsaly
+    let n = 1;
+    let name = slugFor(lastUserText(convo));
+    let path = root + '\\' + name;
+    while (projectRegistry.some(p => p && p.path === path)) {
+      n++;
+      path = root + '\\' + name + '-' + n;
+    }
+    const mk = await window.api.toolsExec({ tool: 'create_dir', args: { path }, root: root, fullAccess: true });
+    if (!mk || !mk.ok) return null;
+    const entry = { name: baseName(path) || name, path, type: 'universal', framework: 'html' };
+    projectRegistry.push(entry); saveRegistry(); renderProjects();
+    return path;
+  } catch { return null; }
 }
 /* Index, kde začíná aktuální požadavek (za poslední neinterní user zprávou) */
 function currentReqStart(convo) {
@@ -1914,6 +2071,9 @@ function hidePreview() {
 /* ---------- init ---------- */
 document.addEventListener('DOMContentLoaded', async () => {
   bindEls();
+  // Login hned jako první — dřív než jakékoliv await (store, verze, projekty),
+  // aby se bez ověření nedalo kliknout ani psát.
+  try { initLoginGate(); } catch {}
   // Windows: systémová tlačítka (min/max/close) zabírají pravý horní roh → posun login tlačítka mimo ně
   try { if (navigator.userAgent && /Windows/i.test(navigator.userAgent)) document.body.classList.add('win'); } catch {}
   try { const s = await window.api.getStore(); prefs = Object.assign(prefs, s || {}); } catch {}
@@ -2136,6 +2296,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#prefsBackdrop').addEventListener('click', () => $('#prefsModal').classList.remove('open'));
   document.querySelectorAll('#prefsNav button').forEach(b => b.addEventListener('click', () => prefsGo(b.getAttribute('data-pref'))));
   $('#soundCheck').addEventListener('change', async (e) => { prefs.sound = e.target.checked; try { await window.api.setStore({ sound: prefs.sound }); } catch {} });
+  // Permissions — plný přístup je trvalý, přepínač se už nemění
+  const ple = $('#permLogErrors');
+  if (ple) ple.addEventListener('change', async (e) => { await savePerms({ logErrors: e.target.checked }); });
+  // Error Log
+  const eob = $('#errOpenBtn'); if (eob) eob.addEventListener('click', async () => { const r = await window.api.errOpen(); if (!r || !r.ok) { const v = $('#errLogView'); if (v) v.textContent = (r && r.error) || 'Log zatím neexistuje.'; } });
+  const erb = $('#errRefreshBtn'); if (erb) erb.addEventListener('click', refreshErrLog);
+  const ecb = $('#errCopyBtn'); if (ecb) ecb.addEventListener('click', async () => {
+    try { const r = await window.api.errRead(); await navigator.clipboard.writeText((r && r.text) || ''); const v = $('#errLogView'); if (v) v.textContent = (v.textContent || '') + '\n\n[Zkopírováno do schránky.]'; } catch (e) { errLog('errlog/copy', e && e.message); }
+  });
+  const eclb = $('#errClearBtn'); if (eclb) eclb.addEventListener('click', async () => { await window.api.errClear(); await refreshErrLog(); });
   const gc0 = $('#googleCheck');
   if (gc0) gc0.addEventListener('change', async (e) => { prefs.googleSearch = e.target.checked; try { await window.api.setStore({ googleSearch: prefs.googleSearch }); } catch {} });
   document.querySelectorAll('input[name="shellbe"]').forEach(r => r.addEventListener('change', async () => {
@@ -2173,7 +2343,10 @@ function hideVeil() {
   v.classList.add('hide');
   setTimeout(() => { try { v.remove(); } catch {} }, 300);
 }
+let loginGateInit = false;
 function initLoginGate() {
+  if (loginGateInit) return;
+  loginGateInit = true;
   const btn = $('#gateGoogleBtn');
   const errBox = $('#gateErr');
   const showErr = (m) => { if (errBox) { errBox.textContent = m; errBox.style.display = m ? '' : 'none'; } };
@@ -2191,14 +2364,20 @@ function initLoginGate() {
     btn.disabled = false;
     btn.querySelector('span').textContent = 'Continue with Google';
   });
-  // Boot: veil covers the app until auth is decided (never a flash of app before the gate).
+  // Boot: brána je vidět od prvního vykreslení (HTML default display:flex).
+  // Bez ověřeného loginu se do aplikace nedostaneš — ani na 15 sekund.
   // Fail-safe timeout — if the check hangs, show the gate rather than spinning forever.
   let veiled = false;
-  const settle = (loggedIn) => { setGate(!loggedIn); if (!veiled) { veiled = true; hideVeil(); } };
-  try {
-    window.api.authStatus().then((s) => settle(!!(s && s.loggedIn))).catch(() => settle(false));
-  } catch { settle(false); }
-  setTimeout(() => settle(false), 10000);
+  let bootOk = false; // ověřený login při startu — pak už bránu nic znovu neukáže
+  const settle = (loggedIn) => { if (loggedIn) bootOk = true; setGate(!loggedIn); if (!veiled) { veiled = true; hideVeil(); } };
+  const statusP = (() => { try { return window.api.authStatus(); } catch { return Promise.resolve(null); } })();
+  // Pomalá síť: původní check běží dál — když doběhne kladně, bránu schová i zpětně.
+  statusP.then((s) => { if (s && s.loggedIn) settle(true); }).catch(() => {});
+  // Rychlá cesta (5 s): když visí, ukaž bránu prozatímně, ne navždy.
+  Promise.race([statusP, new Promise((res) => setTimeout(() => res(null), 5000))])
+    .then((s) => settle(!!(s && s.loggedIn))).catch(() => settle(false));
+  // Fail-safe JEN když se nic nedozvědělo — nikdy po ověřeném loginu.
+  setTimeout(() => { if (!bootOk) settle(false); }, 10000);
   try { window.api.onAuthChanged((p) => settle(!!p)); } catch {}
 }
 

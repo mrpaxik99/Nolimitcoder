@@ -151,6 +151,31 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .thinking-dots span:nth-child(3){animation-delay:.4s}
 @keyframes think-blink{0%,60%,100%{opacity:.2}30%{opacity:1}}
 
+/* ===== Thinking: co si model právě myslí ===== */
+.think-box{margin:0 0 10px;border:1px solid #2a2f3a;border-radius:10px;background:#ffffff08;overflow:hidden}
+.think-head{display:flex;align-items:center;gap:7px;padding:7px 11px;cursor:pointer;user-select:none;
+  font-size:12px;font-weight:600;color:var(--text-weak);text-transform:uppercase;letter-spacing:.04em}
+.think-head:hover{background:#ffffff0a;color:var(--text)}
+.think-caret{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;
+  border-top:5px solid currentColor;transition:transform .18s;flex:none}
+.think-box.open .think-caret{transform:rotate(180deg)}
+.think-body{padding:2px 12px 10px 12px;font-size:12.5px;line-height:1.6;color:#9aa4b2;
+  white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.think-box.live .think-head{color:#7aa2f7}
+.think-box.live .think-body{color:#a9b4c6}
+
+/* ===== Tool cards: stejný rámeček jako Thinking, bílý, s logem ===== */
+.think-logo{width:14px;height:14px;border-radius:4px;flex:none}
+.think-box.tool{border-color:#ffffff40}
+.think-box.tool .think-head{color:#fff}
+.think-box.tool .t-name{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:#fff;flex-shrink:0}
+.think-box.tool .t-path{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#d7dce4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.think-box.tool .t-chip{margin-left:auto;font-weight:700;flex:none}
+.think-box.tool .t-chip.ok{color:#30d158}
+.think-box.tool .t-chip.bad{color:#fc543a}
+.think-box.tool .think-body{color:#d5dbe4}
+
 /* ===== Empty state ===== */
 .chat-empty{max-width:480px;margin:0 auto;padding:64px 20px;display:flex;flex-direction:column;
   align-items:center;gap:14px;text-align:center;height:100%;justify-content:center}

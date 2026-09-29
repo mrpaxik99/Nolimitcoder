@@ -316,6 +316,67 @@ document.getElementById('upAdd').addEventListener('click', async () => {
 });
 
 // ---------- Customers ----------
+let allUsers = [];
+let userFilter = 'all';
+let userQuery = '';
+
+function isPaidUser(u) {
+  return (u && u.plan_status) === 'active';
+}
+function renderUsers() {
+  const tb = document.getElementById('cuList');
+  if (!tb) return;
+  const q = (userQuery || '').trim().toLowerCase();
+  let list = allUsers.slice();
+  if (userFilter === 'paid') list = list.filter(isPaidUser);
+  else if (userFilter === 'free') list = list.filter((u) => !isPaidUser(u));
+  if (q) list = list.filter((u) =>
+    String(u.email || '').toLowerCase().includes(q) ||
+    String(u.name || '').toLowerCase().includes(q));
+  const nPaid = allUsers.filter(isPaidUser).length;
+  const nFree = allUsers.length - nPaid;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v ? '(' + v + ')' : ''; };
+  set('cuNAll', allUsers.length);
+  set('cuNFree', nFree);
+  set('cuNPaid', nPaid);
+  const cc = document.getElementById('cuModalCount');
+  if (cc) cc.textContent = String(list.length);
+  tb.innerHTML = list.length ? list.map((u) =>
+    '<tr><td class="mono">' + esc(u.email) + '</td><td>' + esc(u.name || '') + '</td>' +
+    '<td>' + esc(u.plan || 'free') + '</td>' +
+    '<td>' + ((u.plan_status === 'active')
+      ? '<span class="badge green">paid</span>'
+      : '<span class="badge">' + esc(u.plan_status || 'none') + '</span>') + '</td>' +
+    '<td>' + money(u.total_paid_cents) + '</td>' +
+    '<td class="muted">' + fmtTs(u.first_seen) + '</td>' +
+    '<td class="muted">' + fmtTs(u.last_seen) + '</td></tr>'
+  ).join('') : '<tr><td colspan="7" class="muted">Nikdo v tomto filtru.</td></tr>';
+}
+function openUserModal() {
+  renderUsers();
+  document.getElementById('cuModal').classList.add('on');
+}
+function closeUserModal() {
+  document.getElementById('cuModal').classList.remove('on');
+}
+document.getElementById('cuOpen').addEventListener('click', openUserModal);
+document.getElementById('cuClose').addEventListener('click', closeUserModal);
+document.getElementById('cuModal').addEventListener('click', (e) => {
+  if (e.target.id === 'cuModal') closeUserModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeUserModal();
+});
+document.querySelectorAll('#cuModal .filter-btn').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('#cuModal .filter-btn').forEach((x) => x.classList.remove('active'));
+  b.classList.add('active');
+  userFilter = b.getAttribute('data-f') || 'all';
+  renderUsers();
+}));
+document.getElementById('cuSearch').addEventListener('input', (e) => {
+  userQuery = e.target.value || '';
+  renderUsers();
+});
 async function loadCustomers() {
   const j = await api('/api/admin/overview');
   const c = j.counts || {};
@@ -327,16 +388,8 @@ async function loadCustomers() {
     card('Tržby celkem', money((j.revenue || {}).revenue_cents), (j.revenue || {}).sales + ' prodejů') +
     card('Plateb', (j.orders || []).length, 'záznamů');
   const us = j.users || [];
-  document.getElementById('cuList').innerHTML = us.length ? us.map((u) =>
-    '<tr><td class="mono">' + esc(u.email) + '</td><td>' + esc(u.name || '') + '</td>' +
-    '<td>' + esc(u.plan || 'free') + '</td>' +
-    '<td>' + ((u.plan_status === 'active')
-      ? '<span class="badge green">paid</span>'
-      : '<span class="badge">' + esc(u.plan_status || 'none') + '</span>') + '</td>' +
-    '<td>' + money(u.total_paid_cents) + '</td>' +
-    '<td class="muted">' + fmtTs(u.first_seen) + '</td>' +
-    '<td class="muted">' + fmtTs(u.last_seen) + '</td></tr>'
-  ).join('') : '<tr><td colspan="7" class="muted">Zatím nikdo.</td></tr>';
+  allUsers = us;
+  renderUsers();
   const os = j.orders || [];
   document.getElementById('cuOrders').innerHTML = os.length ? os.map((o) =>
     '<tr><td class="mono">#' + o.id + '</td><td class="mono">' + esc(o.email) + '</td>' +
