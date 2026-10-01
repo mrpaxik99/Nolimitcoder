@@ -50,7 +50,9 @@ function Try-Build {
       if (((Get-Date) - $lastT).TotalMinutes -lt $BuildCooldownMin) { return }
     }
     $since = if ($parts[0]) { $parts[0] } else { 'HEAD~5' }
-    $files = ((& $Git -C $Root diff --name-only "$since..HEAD" 2>$null) -join "`n") + ''
+    # Instalátory ve složce Downloads Updates nejsou změna kódu — ty netřeba buildnout
+    $files = ((& $Git -C $Root diff --name-only "$since..HEAD" 2>$null |
+      Where-Object { $_ -notlike 'NolimitWebsite/Downloads Updates/*' }) -join "`n") + ''
     if ($files -notmatch 'NolimitCoder/(src|package\.json|proxies/)|NolimitWebsite/') {
       Set-Content -LiteralPath $BuildMarker -Value "$head|$(Get-Date -Format o)"  # jen texty/logy — build netreba
       return
@@ -67,8 +69,11 @@ function Try-Build {
     # .cmd se spousti pres cmd.exe — Start-Process primo na npm.ps1 by Windows otevrel v Poznamkovem bloku
     $proc = Start-Process -FilePath "$env:ComSpec" -ArgumentList @('/c', 'npm', 'run', 'build:win') -WorkingDirectory $appDir -WindowStyle Hidden -Wait -PassThru
     if (!$proc -or $proc.ExitCode -ne 0) { Log ('auto-build FAIL, exit=' + ($proc.ExitCode)); return }
-    $exe = Join-Path $appDir 'dist\NolimitCoder V4 Setup.exe'
-    if (!(Test-Path -LiteralPath $exe)) { Log 'auto-build FAIL (exe nevzniklo)'; return }
+    $distDir = Join-Path $appDir 'dist'
+    # Instalátor se jmenuje podle verze (NolimitCoder Clean Setup 1.0.0.exe) — beru nejnovější
+    $exe = Get-ChildItem -LiteralPath $distDir -Filter '*Setup*.exe' -ErrorAction SilentlyContinue |
+      Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (!$exe) { Log 'auto-build FAIL (exe nevzniklo)'; return }
     # Instalator se distribuuje pres Updates v adminu (Vercel Blob) — do repa se nekopiruje.
     Set-Content -LiteralPath $BuildMarker -Value "$head|$(Get-Date -Format o)"
     Log 'auto-build OK'
@@ -98,6 +103,6 @@ while ($true) {
   if ($p -match '(^|\\)\.git(\\|$)') { continue }  # vlastni .git ignorovat (jinak smycka)
   if ($p -match '(^|\\)(node_modules|dist|dist2|build)(\\|$)') { continue }  # vystupy buildu nesmi spoustet dalsi build
   if ($p -match 'NolimitWebsite[\\/]Downloads(\\|$)') { continue }  # kopie instalatoru pro web
-  if ($p -match '\.(log|blockmap|exe)$') { continue }  # logy a binarky
+  if ($p -match '\.(log|blockmap)$') { continue }  # logy a blokmapy — .exe ve složce Downloads Updates se naopak pushuje
   $lastChange = Get-Date
 }
