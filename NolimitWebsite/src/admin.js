@@ -442,25 +442,47 @@ async function loadAnalytics() {
 }
 
 // ---------- Developer: hlášení aplikací ----------
+// Každý řádek umí: Zastavit / Odblokovat (podle stavu verze) a Smazat
+// (smaže hlášení a verzi tím zároveň odblokuje → zmizí i ze sekce Updates).
 async function loadChecks() {
   try {
     const j = await api('/api/admin/checks');
     const rows = j.checks || [];
+    const hasVer = (c) => !!c.version && c.version !== '(none)';
     document.getElementById('ckList').innerHTML = rows.length ? rows.map((c) =>
       '<tr><td class="mono"><b>' + esc(c.version || '(none)') + '</b></td>' +
-      '<td>' + (c.blocked ? '<span class="badge red">blocked</span>' : '<span class="badge green">allowed</span>') + '</td>' +
+      '<td>' + (c.blocked
+        ? '<span class="badge red" title="Výsledek hlášení — blokovat může i kill-switch nebo minimální povolená verze">blocked</span>'
+        : '<span class="badge green">allowed</span>') + '</td>' +
       '<td class="muted">' + fmtTs(c.ts) + '</td>' +
-      '<td>' + (c.blocked || !c.version || c.version === '(none)' ? '' :
-        '<button class="ad-btn ad-btn-ghost sm" data-stopver="' + esc(c.version) + '">Zastavit tuto verzi</button>') + '</td></tr>'
+      '<td style="white-space:nowrap">' + (!hasVer(c) ? '' :
+        (c.versionBlocked
+          ? '<button class="ad-btn ad-btn-ghost sm" data-ck="unblock" data-v="' + esc(c.version) + '">Odblokovat</button> '
+          : '<button class="ad-btn ad-btn-ghost sm" data-ck="block" data-v="' + esc(c.version) + '">Zastavit tuto verzi</button> ') +
+        '<button class="ad-btn ad-btn-danger sm" data-ck="delete" data-v="' + esc(c.version) + '">Smazat</button>'
+      ) + '</td></tr>'
     ).join('') : '<tr><td colspan="4" class="muted">Zatím se nehlásila žádná aplikace.</td></tr>';
-    document.querySelectorAll('#ckList [data-stopver]').forEach((b) => b.addEventListener('click', async () => {
+    document.querySelectorAll('#ckList [data-ck]').forEach((b) => b.addEventListener('click', async () => {
+      const act = b.getAttribute('data-ck');
+      const ver = b.getAttribute('data-v');
       showErr(''); showOk('');
       try {
-        await api('/api/admin/versions', { method: 'POST',
-          body: JSON.stringify({ action: 'block', version: b.getAttribute('data-stopver') }) });
-        await loadVersions();
+        if (act === 'delete') {
+          if (!confirm('Smazat hlášení verze ' + ver + '? Zároveň se tato verze odblokuje.')) return;
+          await api('/api/admin/checks', { method: 'POST',
+            body: JSON.stringify({ action: 'delete', version: ver }) });
+          showOk('Hlášení verze ' + ver + ' smazáno a verze odblokována.');
+        } else if (act === 'unblock') {
+          await api('/api/admin/checks', { method: 'POST',
+            body: JSON.stringify({ action: 'unblock', version: ver }) });
+          showOk('Verze ' + ver + ' odblokována.');
+        } else {
+          await api('/api/admin/versions', { method: 'POST',
+            body: JSON.stringify({ action: 'block', version: ver }) });
+          showOk('Verze ' + ver + ' zastavena.');
+        }
         await loadChecks();
-        showOk('Verze ' + b.getAttribute('data-stopver') + ' zastavena.');
+        await loadVersions();
       } catch (e) { showErr(e.message); }
     }));
   } catch (e) { /* ticho — sekce není kritická */ }
