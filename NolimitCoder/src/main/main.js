@@ -74,10 +74,11 @@ function downloadFile(url, dest, onProg) {
   });
 }
 
-// ===== Vzdálené řízení verzí (admin kill-switch z webu) =====
-// ZMĚŇ NA SVOU DOMÉNU po deployi webu na Vercel. Aplikace se při startu zeptá
-// /api/app-status?version=X — admin tam může starou verzi zastavit.
-// Fail-open: při výpadku sítě se aplikace nezastaví, blokuje jen explicitní příkaz.
+// ===== Kontrola povolené verze =====
+// Aplikace se při startu (a každých 5 minut) zeptá /api/app-status?version=X.
+// Server povolí jen verzi, která je právě v Downloads — jinak se aplikace
+// zablokuje a nabídne tlačítko Aktualizovat (tiše přeinstaluje novou verzi).
+// Fail-open: při výpadku sítě se aplikace nezastaví, blokuje jen odpověď serveru.
 const APP_STATUS_URL = process.env.NLC_STATUS_URL || 'https://nolimitcoder.vercel.app/api/app-status';
 async function checkAppBlocked() {
   try {
@@ -95,7 +96,7 @@ async function checkAppBlocked() {
     });
     if (data && data.blocked) {
       const payload = {
-        reason: data.reason || 'This version has been stopped. Please download the latest version.',
+        reason: data.reason || 'A newer version is required. Please download the latest version.',
         latest: data.latest || null
       };
       for (const w of BrowserWindow.getAllWindows()) {

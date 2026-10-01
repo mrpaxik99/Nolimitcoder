@@ -3216,7 +3216,7 @@ function initLoginGate() {
   try { window.api.onAuthChanged((p) => settle(!!p)); } catch {}
 }
 
-// ---------- Vzdálené zastavení staré verze (admin kill-switch z webu) ----------
+// ---------- Blokace nepovolené verze (funguje jen verze z Downloads) ----------
 function initBlockGate() {
   try {
     if (!window.api || !window.api.onAppBlocked) return;
