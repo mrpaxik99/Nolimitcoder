@@ -3,7 +3,7 @@ import { requireAdmin } from '../_auth.js';
 import { del } from '@vercel/blob';
 
 async function listVersions(sql) {
-  return sql`SELECT version, download_url, notes, blocked, is_latest, released_at, size_bytes
+  return sql`SELECT version, download_url, notes, is_latest, released_at, size_bytes
     FROM app_versions ORDER BY released_at DESC`;
 }
 
@@ -13,10 +13,10 @@ async function dropBlobFile(url) {
   } catch {}
 }
 
-// Správa verzí aplikace — drží se max 2, nejnovější je vždy Latest a nejde zastavit.
+// Správa verzí aplikace (Downloads) — drží se max 2, nejnovější je vždy Latest.
+// Jen Latest verze je v provozu; starší se v aplikaci zablokují samy (viz /api/app-status).
 // GET → list. POST { action, ... }:
-//   upsert { version, download_url, notes } · block { version } · unblock { version }
-//   setLatest { version } · remove { version }
+//   upsert { version, download_url, notes } · setLatest { version } · remove { version }
 export default async function handler(req, res) {
   const a = await requireAdmin(req);
   if (!a.ok) return res.status(a.status).json({ ok: false, error: a.error });
@@ -52,19 +52,6 @@ export default async function handler(req, res) {
           await sql`DELETE FROM app_versions WHERE version = ${vic.version}`;
           await dropBlobFile(vic.download_url);
         }
-      }
-    } else if (b.action === 'block' || b.action === 'unblock') {
-      if (!v) return res.status(400).json({ ok: false, error: 'Missing version.' });
-      if (b.action === 'block') {
-        const cur = await sql`SELECT is_latest FROM app_versions WHERE version = ${v}`;
-        if (cur[0] && cur[0].is_latest) {
-          return res.status(400).json({ ok: false, error: 'Nejnovější verzi nelze zastavit — zastavit jde jen starší.' });
-        }
-        // Blokace verze, co ještě nemá řádek (např. z Hlášení aplikací) → řádek se vytvoří
-        await sql`INSERT INTO app_versions (version, blocked) VALUES (${v}, TRUE)
-          ON CONFLICT (version) DO UPDATE SET blocked = TRUE`;
-      } else {
-        await sql`UPDATE app_versions SET blocked = FALSE WHERE version = ${v}`;
       }
     } else if (b.action === 'setLatest') {
       if (!v) return res.status(400).json({ ok: false, error: 'Missing version.' });

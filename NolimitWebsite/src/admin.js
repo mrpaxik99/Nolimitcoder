@@ -70,53 +70,6 @@ document.querySelectorAll('#adNav button').forEach((b) => {
   });
 });
 
-// ---------- Developer: kill-switch ----------
-async function loadFlags() {
-  const j = await api('/api/admin/flags');
-  const kill = j.kill_switch || {};
-  const box = document.getElementById('killBox');
-  const on = !!kill.blocked;
-  box.classList.toggle('stopped', on);
-  document.getElementById('killTitle').textContent = on ? 'App is STOPPED' : 'App is running';
-  document.getElementById('killSub').textContent = on
-    ? 'Staré aplikace se zastaví a musí stáhnout novou.'
-    : 'Kill-switch je vypnutý.';
-  document.getElementById('killToggle').textContent = on ? 'Povolit aplikaci' : 'Zastavit starou aplikaci';
-  if (document.activeElement !== document.getElementById('killMsg')) {
-    document.getElementById('killMsg').value = kill.message || '';
-  }
-  document.getElementById('minVer').value = (j.min_version && j.min_version.version) || '';
-  return j;
-}
-document.getElementById('killToggle').addEventListener('click', async () => {
-  showErr(''); showOk('');
-  try {
-    const cur = await api('/api/admin/flags');
-    const on = !((cur.kill_switch || {}).blocked);
-    await api('/api/admin/flags', { method: 'POST', body: JSON.stringify({
-      key: 'kill_switch',
-      value: { blocked: on, message: document.getElementById('killMsg').value || '' }
-    }) });
-    await loadFlags();
-    showOk(on ? 'Aplikace zastavena.' : 'Aplikace povolena.');
-  } catch (e) { showErr(e.message); }
-});
-document.getElementById('killSave').addEventListener('click', async () => {
-  showErr(''); showOk('');
-  try {
-    const cur = await api('/api/admin/flags');
-    await api('/api/admin/flags', { method: 'POST', body: JSON.stringify({
-      key: 'kill_switch',
-      value: { blocked: !!((cur.kill_switch || {}).blocked), message: document.getElementById('killMsg').value || '' }
-    }) });
-    await api('/api/admin/flags', { method: 'POST', body: JSON.stringify({
-      key: 'min_version', value: { version: document.getElementById('minVer').value.trim() }
-    }) });
-    await loadFlags();
-    showOk('Uloženo.');
-  } catch (e) { showErr(e.message); }
-});
-
 // ---------- Updates: upload .exe z počítače + verze ----------
 let uploadedUrl = '';
 let uploadedSize = 0;
@@ -267,17 +220,15 @@ async function loadVersions() {
   if (!vs.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">Zatím žádná verze.</td></tr>'; return; }
   tb.innerHTML = vs.map((v) =>
     '<tr><td class="mono"><b>' + esc(v.version) + '</b></td>' +
-    '<td>' + (v.is_latest ? '<span class="badge green">LATEST</span> ' : '') +
-      (v.blocked ? '<span class="badge red">BLOCKED</span>' : '<span class="badge">live</span>') + '</td>' +
+    '<td>' + (v.is_latest ? '<span class="badge green">LATEST</span>' : '<span class="badge">starší</span>') + '</td>' +
     '<td>' + (v.download_url ? '<a href="' + esc(v.download_url) + '">stáhnout</a>' : '<span class="muted">—</span>') + '</td>' +
     '<td class="mono">' + (v.size_bytes ? (Math.round(v.size_bytes / 1048576) + ' MB') : '<span class="muted">—</span>') + '</td>' +
     '<td>' + esc(v.notes || '') + '</td>' +
     '<td style="white-space:nowrap">' +
       (v.is_latest ? '' : '<button class="ad-btn ad-btn-ghost sm" data-act="latest" data-v="' + esc(v.version) + '">Latest</button> ') +
       (v.is_latest
-        ? '<span class="badge blue" title="Nejnovější verze jede vždy a zastavit jde jen starší">🔒 latest</span> '
-        : '<button class="ad-btn ad-btn-ghost sm" data-act="' + (v.blocked ? 'unblock' : 'block') + '" data-v="' + esc(v.version) + '">' +
-          (v.blocked ? 'Odblokovat' : 'Zastavit') + '</button> ') +
+        ? '<span class="badge blue" title="Jediná verze, která je v provozu — starší se v aplikaci zablokují samy">🔒 latest</span> '
+        : '') +
       '<button class="ad-btn ad-btn-ghost sm" data-act="remove" data-v="' + esc(v.version) + '">Smazat</button>' +
     '</td></tr>'
   ).join('');
@@ -441,58 +392,9 @@ async function loadAnalytics() {
   ).join('') : '<tr><td colspan="3" class="muted">Zatím žádné prodeje.</td></tr>';
 }
 
-// ---------- Developer: hlášení aplikací ----------
-// Každý řádek umí: Zastavit / Odblokovat (podle stavu verze) a Smazat
-// (smaže hlášení a verzi tím zároveň odblokuje → zmizí i ze sekce Updates).
-async function loadChecks() {
-  try {
-    const j = await api('/api/admin/checks');
-    const rows = j.checks || [];
-    const hasVer = (c) => !!c.version && c.version !== '(none)';
-    document.getElementById('ckList').innerHTML = rows.length ? rows.map((c) =>
-      '<tr><td class="mono"><b>' + esc(c.version || '(none)') + '</b></td>' +
-      '<td>' + (c.blocked
-        ? '<span class="badge red" title="Výsledek hlášení — blokovat může i kill-switch nebo minimální povolená verze">blocked</span>'
-        : '<span class="badge green">allowed</span>') + '</td>' +
-      '<td class="muted">' + fmtTs(c.ts) + '</td>' +
-      '<td style="white-space:nowrap">' + (!hasVer(c) ? '' :
-        (c.versionBlocked
-          ? '<button class="ad-btn ad-btn-ghost sm" data-ck="unblock" data-v="' + esc(c.version) + '">Odblokovat</button> '
-          : '<button class="ad-btn ad-btn-ghost sm" data-ck="block" data-v="' + esc(c.version) + '">Zastavit tuto verzi</button> ') +
-        '<button class="ad-btn ad-btn-danger sm" data-ck="delete" data-v="' + esc(c.version) + '">Smazat</button>'
-      ) + '</td></tr>'
-    ).join('') : '<tr><td colspan="4" class="muted">Zatím se nehlásila žádná aplikace.</td></tr>';
-    document.querySelectorAll('#ckList [data-ck]').forEach((b) => b.addEventListener('click', async () => {
-      const act = b.getAttribute('data-ck');
-      const ver = b.getAttribute('data-v');
-      showErr(''); showOk('');
-      try {
-        if (act === 'delete') {
-          if (!confirm('Smazat hlášení verze ' + ver + '? Zároveň se tato verze odblokuje.')) return;
-          await api('/api/admin/checks', { method: 'POST',
-            body: JSON.stringify({ action: 'delete', version: ver }) });
-          showOk('Hlášení verze ' + ver + ' smazáno a verze odblokována.');
-        } else if (act === 'unblock') {
-          await api('/api/admin/checks', { method: 'POST',
-            body: JSON.stringify({ action: 'unblock', version: ver }) });
-          showOk('Verze ' + ver + ' odblokována.');
-        } else {
-          await api('/api/admin/versions', { method: 'POST',
-            body: JSON.stringify({ action: 'block', version: ver }) });
-          showOk('Verze ' + ver + ' zastavena.');
-        }
-        await loadChecks();
-        await loadVersions();
-      } catch (e) { showErr(e.message); }
-    }));
-  } catch (e) { /* ticho — sekce není kritická */ }
-}
-
 // Start — server je zdroj pravdy (403 = nejsi admin)
 (async function init() {
   try {
-    await loadFlags();
-    await loadChecks();
     await loadVersions();
     await loadCustomers();
     await loadAnalytics();

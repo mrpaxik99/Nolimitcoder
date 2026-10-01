@@ -51,22 +51,10 @@ export async function ensureSchema() {
     version TEXT PRIMARY KEY,
     download_url TEXT DEFAULT '',
     notes TEXT DEFAULT '',
-    blocked BOOLEAN DEFAULT FALSE,
     is_latest BOOLEAN DEFAULT FALSE,
     released_at TIMESTAMPTZ DEFAULT NOW()
   )`;
   await sql`ALTER TABLE app_versions ADD COLUMN IF NOT EXISTS size_bytes BIGINT DEFAULT 0`;
-  await sql`CREATE TABLE IF NOT EXISTS app_flags (
-    key TEXT PRIMARY KEY,
-    value JSONB DEFAULT '{}'::jsonb
-  )`;
-  await sql`CREATE TABLE IF NOT EXISTS app_checks (
-    id BIGSERIAL PRIMARY KEY,
-    ts TIMESTAMPTZ DEFAULT NOW(),
-    version TEXT DEFAULT '',
-    blocked BOOLEAN DEFAULT FALSE
-  )`;
-  await sql`CREATE INDEX IF NOT EXISTS app_checks_ts_idx ON app_checks (ts DESC)`;
   schemaReady = true;
 }
 

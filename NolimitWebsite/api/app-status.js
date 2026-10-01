@@ -4,9 +4,10 @@ function normVer(s) {
   return String(s || '').trim().toLowerCase().replace(/^[v=\s]+/, '');
 }
 
+// Číselné srovnání verzí — "1.0" se rovná "1.0.0" (odpovídá tomu, co hlásí Electron).
 function cmpVer(a, b) {
   const pa = normVer(a).split('.').map((x) => parseInt(x, 10) || 0);
-  const pb = String(b || '').split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = normVer(b).split('.').map((x) => parseInt(x, 10) || 0);
   const n = Math.max(pa.length, pb.length);
   for (let i = 0; i < n; i++) {
     const d = (pa[i] || 0) - (pb[i] || 0);
@@ -15,41 +16,37 @@ function cmpVer(a, b) {
   return 0;
 }
 
-// Veřejný endpoint pro desktopovou aplikaci: GET /api/app-status?version=3.0.13
-// Fail-open: při výpadku se aplikace nezastaví, blokuje jen explicitní příkaz z adminu.
-// Každé hlášení se zapíše do app_checks — admin v Developer vidí, jaké verze se reálně hlásí.
+// Veřejný endpoint pro desktopovou aplikaci: GET /api/app-status?version=1.0.0
+//
+// Pravidlo: funguje JEN verze, která je právě v Downloads — bere se ta samá
+// řádka, kterou posílá i /api/download. Cokoliv jiného je zablokované a
+// aplikace ukáže důvod + tlačítko Aktualizovat (stáhne a tiše přeinstaluje
+// novou verzi).
+//
+// Žádné ruční přepínače — kill-switch ani minimální povolená verze už
+// neexistují. Fail-open: když není publikovaná žádná verze, nebo vypadne
+// síť/DB, nikdo se neblokuje.
 export default async function handler(req, res) {
   const version = String((req.query && req.query.version) || '').slice(0, 32);
   const nv = normVer(version);
   try {
     await ensureSchema();
     const sql = db();
-    const flags = await sql`SELECT key, value FROM app_flags WHERE key IN ('kill_switch', 'min_version')`;
-    const map = Object.fromEntries(flags.map((f) => [f.key, f.value || {}]));
-    const kill = map.kill_switch || {};
-    const minV = String((map.min_version && map.min_version.version) || '');
-    const rows = await sql`SELECT version, download_url, notes, blocked, is_latest, released_at
-      FROM app_versions ORDER BY released_at DESC`;
-    const latest = rows.find((r) => r.is_latest) || rows[0] || null;
-    const mine = nv ? rows.find((r) => normVer(r.version) === nv) : null;
-
-    let blocked = false;
-    let reason = '';
-    if (kill.blocked) {
-      blocked = true;
-      reason = String(kill.message || 'This app version has been stopped by the developer. Please download the latest version.');
-    } else if (mine && mine.blocked) {
-      blocked = true;
-      reason = 'This version is no longer supported. Please download the latest version.';
-    } else if (minV && nv && cmpVer(nv, minV) < 0) {
-      blocked = true;
-      reason = 'A newer version is required (minimum ' + minV + '). Please download the latest version.';
-    }
-    try {
-      await sql`INSERT INTO app_checks (version, blocked) VALUES (${version || '(none)'}, ${blocked})`;
-      await sql`DELETE FROM app_checks WHERE ts < NOW() - INTERVAL '7 days'`;
-    } catch {}
-    return res.status(200).json({ ok: true, blocked, reason, minVersion: minV, latest, checkedVersion: version });
+    const rows = await sql`SELECT version, download_url, notes, is_latest, released_at
+      FROM app_versions ORDER BY is_latest DESC, released_at DESC LIMIT 1`;
+    const latest = rows && rows[0] ? rows[0] : null;
+    const blocked = !!(latest && nv && cmpVer(nv, latest.version) !== 0);
+    const reason = blocked
+      ? 'A newer version is required (minimum ' + latest.version + '). Please download the latest version.'
+      : '';
+    return res.status(200).json({
+      ok: true,
+      blocked,
+      reason,
+      minVersion: latest ? normVer(latest.version) : '',
+      latest,
+      checkedVersion: version
+    });
   } catch (e) {
     return res.status(200).json({ ok: false, blocked: false });
   }
