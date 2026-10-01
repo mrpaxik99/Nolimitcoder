@@ -11,3 +11,6 @@ client_secret*.json
 *secret*.json
 google-*.json
 src/main/google-secret.json
+# logy v Logs/ (errors-*.txt, ai-debug) — jen lokální čtení, necommitují se
+Logs/*
+!Logs/README.txt

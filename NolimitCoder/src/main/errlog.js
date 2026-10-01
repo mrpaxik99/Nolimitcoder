@@ -1,53 +1,97 @@
-// NolimitCoder — Error Log (dist/Error Log.txt)
+// NolimitCoder — Error Log (složka Logs, soubory errors-AAAA-MM-DD.txt)
 // Každá chyba v aplikaci (AI stream, nástroj, renderer, main) sem dopadne.
-// Cíl: dist/Error Log.txt vedle instalátoru, aby šel chyba poslat vývojáři.
-// Rotace na 5 MB. Vše v try/catch — logování nikdy nesmí nic rozbít.
+// Složka se volí v pořadí — první zapisovatelná vyhrává:
+//   1) config.json → logsDir          (vývojářský stroj míří na repo\NolimitCoder\Logs)
+//   2) <repo>/NolimitCoder/Logs       (dev build spuštěný přímo z repozitáře)
+//   3) %APPDATA%\…\NolimitCoder\logs  (instalace u zákazníka — výchozí)
+// Jeden textový soubor na den: errors-2026-10-01.txt (starší než 30 dní se mažou),
+// rotace 5 MB. Vše v try/catch — logování nikdy nesmí nic rozbít.
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+let errDir = '';
 let errFile = '';
+let errDay = '';
 let writes = 0;
+const DAY_RE = /^errors-\d{4}-\d{2}-\d{2}\.txt$/;
 
-function errFilePath() {
-  if (errFile) return errFile;
-  // BEZPEČNOST: logy patří do uživatelského profilu (Roaming), NE vedle instalace —
-  // instalační složku může číst každý a logy nesou i to, co uživatel psal AI.
+function writable(d) {
+  try {
+    fs.mkdirSync(d, { recursive: true });
+    const probe = path.join(d, '.etest');
+    fs.writeFileSync(probe, 'x');
+    fs.rmSync(probe, { force: true });
+    return true;
+  } catch { return false; }
+}
+
+// Složka, do které patří všechny logy (Error Log + ai-debug.log).
+function logsDir() {
+  if (errDir) return errDir;
+  const cands = [];
+  // 1) explicitní cesta z config.json (na vývojářském stroji je to repo Logs)
   try {
     const e = require('electron');
     if (e && e.app) {
-      const dir = path.join(e.app.getPath('userData'), 'logs');
-      fs.mkdirSync(dir, { recursive: true });
-      errFile = path.join(dir, 'Error Log.txt');
-      return errFile;
+      try {
+        const j = JSON.parse(fs.readFileSync(path.join(e.app.getPath('userData'), 'config.json'), 'utf8'));
+        if (j && typeof j.logsDir === 'string' && j.logsDir.trim()) cands.push(j.logsDir.trim());
+      } catch {}
     }
   } catch {}
-  const dirs = [];
-  // dev: src/main -> root/NolimitCoder, pak dist/
+  // 2) dev: src/main -> NolimitCoder/Logs (v app.asar psát nejde, tam přeskočí)
   try {
     const here = String(__dirname || '');
-    if (!/app\.asar/i.test(here)) dirs.push(path.join(here, '..', '..'));
+    if (!/app\.asar/i.test(here)) cands.push(path.resolve(here, '..', '..', 'Logs'));
   } catch {}
-  // balené bez userData: exe leží v dist/win-unpacked, takže logs o úroveň výš
+  // 3) profil uživatele — instalace u zákazníka
   try {
     const e = require('electron');
-    if (e && e.app && e.app.isPackaged) dirs.push(path.dirname(process.execPath));
+    if (e && e.app) cands.push(path.join(e.app.getPath('userData'), 'logs'));
   } catch {}
-  try { dirs.push(process.cwd()); } catch {}
-  for (const d of dirs) {
+  try { cands.push(path.join(os.tmpdir(), 'NolimitCoder logs')); } catch {}
+  for (const d of cands) { if (d && writable(d)) { errDir = d; break; } }
+  return errDir;
+}
+
+function today() { return new Date().toISOString().slice(0, 10); }
+
+// Zápis jde vždy do dnešního souboru.
+function errFilePath() {
+  const dir = logsDir();
+  if (!dir) return '';
+  const day = today();
+  if (errFile && errDay === day) return errFile;
+  errDay = day;
+  errFile = path.join(dir, 'errors-' + day + '.txt');
+  try { cleanup(dir); } catch {}
+  return errFile;
+}
+
+// Co se ukáže v Nastavení → Error Log: dnešní soubor, jinak nejnovější existující.
+function currentLogFile() {
+  const f = errFilePath();
+  try {
+    if (f && fs.existsSync(f)) return f;
+    const dir = path.dirname(f);
+    const list = fs.readdirSync(dir).filter((n) => DAY_RE.test(n)).sort();
+    if (list.length) return path.join(dir, list[list.length - 1]);
+  } catch {}
+  return f;
+}
+
+// Starší než 30 dní zahodíme — logů se za rok nastřádá hromada.
+function cleanup(dir) {
+  const limit = Date.now() - 30 * 24 * 3600 * 1000;
+  for (const n of fs.readdirSync(dir)) {
+    if (!DAY_RE.test(n)) continue;
     try {
-      const dir = path.join(d, 'dist');
-      fs.mkdirSync(dir, { recursive: true });
-      const probe = path.join(dir, '.etest');
-      fs.writeFileSync(probe, 'x');
-      fs.rmSync(probe, { force: true });
-      errFile = path.join(dir, 'Error Log.txt');
-      break;
+      const p = path.join(dir, n);
+      if (fs.statSync(p).mtimeMs < limit) fs.rmSync(p, { force: true });
     } catch {}
   }
-  if (!errFile) { try { errFile = path.join(os.tmpdir(), 'Error Log.txt'); } catch {} }
-  return errFile;
 }
 
 // BEZPEČNOST: z logů se mažou tajemství (tokeny, hesla, klíče) — nikdy plaintext.
@@ -68,6 +112,7 @@ function header() {
     + 'NolimitCoder — Error Log\r\n'
     + 'Spuštěno: ' + new Date().toLocaleString('cs-CZ') + '\r\n'
     + 'Aplikace: ' + (function () { try { return require('electron').app.getVersion(); } catch { return 'n/a'; } })() + '\r\n'
+    + 'Složka:   ' + (logsDir() || '(neznámá)') + '\r\n'
     + '='.repeat(78) + '\r\n';
 }
 
@@ -76,9 +121,9 @@ function logError(where, err, extra) {
   try {
     const f = errFilePath();
     if (!f) return;
-    if (writes === 0) {
-      try { fs.writeFileSync(f, header(), 'utf8'); } catch {}
-    }
+    try {
+      if (!fs.existsSync(f) || fs.statSync(f).size === 0) fs.writeFileSync(f, header(), 'utf8');
+    } catch {}
     if (++writes % 25 === 0) {
       try {
         if (fs.statSync(f).size > 5 * 1048576) {
@@ -108,7 +153,7 @@ function logError(where, err, extra) {
 
 function readLog(maxBytes) {
   try {
-    const f = errFilePath();
+    const f = currentLogFile();
     if (!f || !fs.existsSync(f)) return { ok: false, path: f || '', text: '(log zatím neexistuje)' };
     const st = fs.statSync(f);
     const cap = maxBytes || 200 * 1024;
@@ -128,9 +173,9 @@ function readLog(maxBytes) {
 }
 
 function clearLog() {
-  try { const f = errFilePath(); if (f && fs.existsSync(f)) fs.rmSync(f, { force: true }); } catch {}
+  try { const f = currentLogFile(); if (f && fs.existsSync(f)) fs.rmSync(f, { force: true }); } catch {}
   try { writes = 0; } catch {}
   return { ok: true };
 }
 
-module.exports = { logError, readLog, clearLog, errFilePath };
+module.exports = { logError, readLog, clearLog, errFilePath, currentLogFile, logsDir };

@@ -15,6 +15,11 @@ let dbgFile = '';
 let dbgWrites = 0;
 function dbgFilePath() {
   if (dbgFile) return dbgFile;
+  // Stejná složka jako Error Log (Logs/…) — všechny logy na jednom místě.
+  try {
+    const dir = require('./errlog').logsDir();
+    if (dir) { dbgFile = path.join(dir, 'ai-debug.log'); return dbgFile; }
+  } catch {}
   // BEZPEČNOST: debug log do uživatelského profilu, NE vedle instalace.
   try {
     const e = require('electron');
@@ -354,7 +359,12 @@ function decodeConsole(buf) {
 function destructiveShellGuard(cmd) {
   const c = String(cmd || '');
   if (!/\b(rmdir|rd|del|erase|format|takeown|icacls)\b/i.test(c)) return null;
-  if (/\bformat\b/i.test(c)) return 'ZAMITNUTO - prikaz format je zakazany. Disky se neformatuji, nikdy.';
+  // "format" JEN jako formátování disku: cmd `format C:`, `format /q c:`, PS `Format-Volume`.
+  // PowerShellský výpis `Format-List`/`Format-Table` a `--format json` nesmějeme zamítnout —
+  // AI pak jen ztrácelo kola tím, že zkoušelo jiný shell a dostalo to samé zamítnutí.
+  if (/\bformat\s*(\/[a-z]|[a-z]:)/i.test(c) || /\bformat-volume\b/i.test(c)) {
+    return 'ZAMITNUTO - prikaz format je zakazany. Disky se neformatuji, nikdy.';
+  }
   // expanduj %VAR% pro kontrolu (shell by je expandoval taky)
   let x = c;
   try { x = expandEnvVars(c); } catch {}
@@ -485,11 +495,15 @@ function findBadGuiTarget(cmd, cwd) {
 }
 function guiTargetExists(t, cwd) {
   try {
-    if (/^[\\/]+$/.test(t)) return false; // holé '\' nebo '/' — to byl ten systémový dialog
-    if (/[\\/]/.test(t)) return fs.existsSync(t);
+    // %TEMP%… / $env:… musíme expandovat — jinak existsSync vidí jen surový řetězec
+    // a chybně hlásí "soubor neexistuje" u cesty, která reálně existuje.
+    let x = String(t || '').replace(/^"|"$/g, '');
+    try { x = expandEnvVars(x); } catch {}
+    if (/^[\\/]+$/.test(x)) return false; // holé '\' nebo '/' — to byl ten systémový dialog
+    if (/[\\/]/.test(x)) return fs.existsSync(x);
     const win = process.env.SystemRoot || 'C:\\Windows';
     const dirs = [cwd, path.join(win, 'System32'), path.join(win, 'SysWOW64'), win];
-    return dirs.some(d => d && fs.existsSync(path.join(d, t)));
+    return dirs.some(d => d && fs.existsSync(path.join(d, x)));
   } catch { return false; }
 }
 function runDetached(cmd, cwd) {

@@ -150,7 +150,7 @@ function detectCommercialIntent(raw) {
   return detectIntent(t); // zbytek podle obecných pravidel
 }
 
-/* ---------- Error Log: všechny chyby jdou do dist/Error Log.txt ----------
+/* ---------- Error Log: všechny chyby jdou do Logs/errors-AAAA-MM-DD.txt ----------
    Zachytí i chyby, o kterých se nikdo nedozví — nevyzchaná výjimka v UI,
    selhaný nástroj, chyba spojení s AI. Uživatel si ji pak otevře v
    Settings → Error Log. */
@@ -2180,10 +2180,8 @@ async function runAgent(convo, intent) {
           }
         } else argFail = { key: '', count: 0 };
         convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: String((res && res.output) || ''), ok: !!(res && res.ok), diff: res && res.diff, skipped: !!(res && res.cached) });
-        // Selhaný nástroj do dist/Error Log.txt (timeout, exit code, zamítnutý příkaz…)
-        if (res && res.ok === false && !emptyWhy) {
-          errLog('tool:' + c.name, String(res.output || res.error || 'tool failed').slice(0, 2000), { args: c.args, root: prefs.activeProject });
-        }
+        // Selhaný nástroj už zapisuje main (IPC tools:exec) — tady by vznikl duplikát
+        // každé chyby. Tahle větev se loguje jen pro záznam viz níže (emptycall jde do dlog).
         if (res && res.ok && ['write_file', 'append_file', 'edit_file', 'shell', 'env_install'].includes(c.name)) roundProductive = true;
         if (!emptyWhy) {
           // Stráží zachycené prázdné volání se v chatu neukazuje (nic se nestalo) — jen v logu a v kontextu modelu.

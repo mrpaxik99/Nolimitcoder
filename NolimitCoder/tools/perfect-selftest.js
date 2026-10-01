@@ -6,11 +6,12 @@ function grab(re) {
   if (!m) throw new Error('tools.js: nenalezeno ' + re);
   return m[0];
 }
-const tctx = { console, require, process, module: {}, exports: {}, Buffer, setTimeout, os, __dirname: path.join(__dirname, '..', 'src', 'main') };
+const tctx = { console, require, process, module: {}, exports: {}, Buffer, setTimeout, os, fs, path, __dirname: path.join(__dirname, '..', 'src', 'main') };
 vm.createContext(tctx);
 for (const re of [/function expandEnvVars[\s\S]*?\n}\n/, /function backupJunkGuard[\s\S]*?\n}\n/,
   /function destructiveShellGuard[\s\S]*?\n}\n/, /function splitShellSegments[\s\S]*?\n}\n/,
-  /function normalizeShell[\s\S]*?\n  \}\)\.join\(''\);\n}\n/, /function decodeConsole[\s\S]*?\n}\n/]) {
+  /function normalizeShell[\s\S]*?\n  \}\)\.join\(''\);\n}\n/, /function decodeConsole[\s\S]*?\n}\n/,
+  /function guiTargetExists[\s\S]*?\n}\n/]) {
   vm.runInContext(grab(re), tctx);
 }
 let pass = 0, fail = 0;
@@ -43,10 +44,25 @@ ok('rmdir /s /q %TEMP% blokovan', !!tctx.destructiveShellGuard('rmdir /s /q "%TE
 ok('rmdir /s /q C:\\Windows blokovan', !!tctx.destructiveShellGuard('rmdir /s /q C:\\Windows\\Temp'));
 ok('del /s /q C:\\ blokovan', !!tctx.destructiveShellGuard('del /s /q C:\\*.*'));
 ok('format blokovan', !!tctx.destructiveShellGuard('format D: /q'));
+ok('format C: blokovan', !!tctx.destructiveShellGuard('cmd /c format C: /q'));
+ok('Format-Volume blokovan', !!tctx.destructiveShellGuard('Format-Volume -DriveLetter D'));
+// PowerShellský výpis a --format nesmějí spadnout pod zákaz formátování disku
+ok('Format-List projde', !tctx.destructiveShellGuard('Get-Process | Where-Object {$_.Id -gt 0} | Format-List'));
+ok('Format-Table projde', !tctx.destructiveShellGuard('Get-ChildItem . | Format-Table Name,Length'));
+ok('--format projde', !tctx.destructiveShellGuard('yt-dlp --format bv* https://example.com/a'));
 ok('bez /s /q projde', !tctx.destructiveShellGuard('rmdir projekt\\old'));
 ok('npm run dist projde', !tctx.destructiveShellGuard('npm run dist'));
 ok('dir projde', !tctx.destructiveShellGuard('dir /b src'));
 ok('bez mazani projde', !tctx.destructiveShellGuard('copy /Y a b'));
+
+console.log('--- 3b) guiTargetExists (%TEMP% expanze) ---');
+const tmpExe = path.join(realTmp, 'nl-selftest-target.exe');
+try { fs.writeFileSync(tmpExe, 'x'); } catch {}
+ok('%TEMP% cesta existuje', tctx.guiTargetExists('%TEMP%\\nl-selftest-target.exe', realTmp) === true);
+ok('%TEMP% cesta v uvozovkach existuje', tctx.guiTargetExists('"%TEMP%\\nl-selftest-target.exe"', realTmp) === true);
+ok('neexistujici %TEMP% cesta false', tctx.guiTargetExists('%TEMP%\\nl-selftest-missing-xyz.exe', realTmp) === false);
+ok('holé \\ je false', tctx.guiTargetExists('\\', realTmp) === false);
+try { fs.rmSync(tmpExe, { force: true }); } catch {}
 
 console.log('--- 4) splitShellSegments (quote-aware) ---');
 const segs1 = tctx.splitShellSegments('node -e "const a=1;const b=2"');

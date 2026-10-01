@@ -16,7 +16,7 @@ const PX = require('./proxy');
 const VX = require('./video-export');
 const ERR = require('./errlog');
 
-// ===== Error Log (dist/Error Log.txt) =====
+// ===== Error Log (Logs/errors-AAAA-MM-DD.txt) =====
 // Všechny chyby sem. Zapíná se Settings → Permissions → Log errors, default zapnutý.
 let LOG_ERRORS = true;
 process.on('uncaughtException', (e) => { try { ERR.logError('main/uncaught', e); } catch {} });
@@ -112,7 +112,7 @@ const STORE_PATH = path.join(app.getPath('userData'), 'config.json');
 try { fs.mkdirSync(path.join(os.tmpdir(), 'nolimitcoder'), { recursive: true }); } catch {}
 function getStore() {
   const defaults = {
-    logErrors: true,          // zapisovat chyby do dist/Error Log.txt
+    logErrors: true,          // zapisovat chyby do Logs/errors-AAAA-MM-DD.txt
     activeProject: null,      // full path to the project folder
     sound: true,              // sound after generation finishes
     terminal: 'auto',         // terminal always auto
@@ -894,16 +894,21 @@ ipcMain.handle('tools:exec', async (_, data) => {
       root: d.root, ok: !!(r && r.ok), outLen: String((r && r.output) || '').length, ms: Date.now() - t0
     });
   } catch {}
-  // Selhaný nástroj (timeout, exit code, chybný příkaz…) do dist/Error Log.txt
+  // Selhaný nástroj (timeout, exit code, chybný příkaz…) do Logs/errors-AAAA-MM-DD.txt
   if (LOG_ERRORS && r && r.ok === false) {
     try {
+      const cmd = String((d.args || {}).command || '');
       const out = String(r.error || r.output || 'tool failed');
       // Náš vlastní zamítnutí (guard, GUI cíl, …) a "neexistuje" nejsou chyba aplikace —
       // do logu by se jen hromadily a přehlušily skutečné problémy.
-      const intentional = /^\s*ZAMÍTNUTO|not launching \(no system dialog\)|does not exist/i.test(out);
+      // ZAM[ÍI]TNUTO: guardy píšou ZAMITNUTO bez diakritiky, musí to sedět obojí.
+      const intentional = /^\s*ZAM[ÍI]TNUTO|not launching \(no system dialog\)|does not exist/i.test(out);
       // Sonda ("dir /b x 2>nul") končí exit 1 záměrně, když složka není — to není chyba.
-      const probe = d.tool === 'shell' && /\b2>nul\b|\/dev\/null|\bif exist\b|\bwhere\b|\bwhich\b/i.test(String((d.args || {}).command || ''));
-      if (!intentional && !(probe && /\[exit 1\]\s*$/i.test(out.trim()) && !/\[stderr\]/i.test(out))) {
+      const probe = d.tool === 'shell' && /\b2>nul\b|\/dev\/null|\bif exist\b|\bwhere\b|\bwhich\b/i.test(cmd);
+      // `git rev-parse` mimo repo končí exit 128 ("not a git repository") — běžný
+      // stav u projektu bez gitu, ne chyba aplikace (v logu to dělalo jen šum).
+      const notRepo = d.tool === 'shell' && /(^|\s)git\s+rev-parse/i.test(cmd) && /\[exit 128\]/i.test(out);
+      if (!intentional && !notRepo && !(probe && /\[exit 1\]\s*$/i.test(out.trim()) && !/\[stderr\]/i.test(out))) {
         ERR.logError('tool:' + String(d.tool || '?'), out.slice(0, 2000),
           { args: d.args || {}, root: d.root || '', ms: Date.now() - t0 });
       }
@@ -1058,10 +1063,10 @@ ipcMain.handle('img:save', async (_, data) => {
 
 // ===== Error Log — čtení / otevření / smazání (Settings → Permissions) =====
 ipcMain.handle('errlog:read', () => ERR.readLog(200 * 1024));
-ipcMain.handle('errlog:path', () => ({ path: ERR.errFilePath() || '' }));
+ipcMain.handle('errlog:path', () => ({ path: ERR.currentLogFile() || '' }));
 ipcMain.handle('errlog:open', () => {
   try {
-    const p = ERR.errFilePath();
+    const p = ERR.currentLogFile();
     if (p && fs.existsSync(p)) { shell.showItemInFolder(p); return { ok: true, path: p }; }
     return { ok: false, error: 'Log zatím neexistuje — zatím nic selhalo.' };
   } catch (e) { return { ok: false, error: e.message }; }
@@ -1264,7 +1269,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
           via: PX.status().current || 'direct'
         });
       } catch {}
-      // Každá chyba streamu do dist/Error Log.txt (aby se dala poslat vývojáři)
+      // Každá chyba streamu do Error Logu (aby se dala poslat vývojáři)
       if (ch === 'chat:stream-error' && LOG_ERRORS) {
         try { ERR.logError('aistream', (data && data.error) || 'stream error', { url: (data && data.url) || '', via: (data && data.via) || 'direct', chunks: chunks || 0, bytes: bytes || 0, ms: Date.now() - reqT0 }); } catch {}
       }

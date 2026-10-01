@@ -344,8 +344,8 @@
         <section class="pref-page" data-ppage="permissions" style="display:none">
           <div class="pref-group">
             <div class="pref-title">Error Log</div>
-            <div class="settings-info" style="margin:0 0 10px">Every error in the app is written to <b>Error Log.txt</b> in your user profile (path below) — AI failures, failed tools, UI exceptions. Secrets are scrubbed, never plaintext. Send that file if something breaks.</div>
-            <label class="switch-row"><input type="checkbox" id="errLogCheck" checked><span class="switch"><span class="switch-dot"></span></span><span><b>Log errors</b><small>Write every error to Error Log.txt (scrubbed).</small></span></label>
+            <div class="settings-info" style="margin:0 0 10px">Every error in the app is written to a daily text file in the <b>Logs</b> folder (<b>errors-AAAA-MM-DD.txt</b>, actual path below) — AI failures, failed tools, UI exceptions. Secrets are scrubbed, never plaintext. Send that file if something breaks.</div>
+            <label class="switch-row"><input type="checkbox" id="errLogCheck" checked><span class="switch"><span class="switch-dot"></span></span><span><b>Log errors</b><small>Write every error to the daily log file (scrubbed).</small></span></label>
             <div class="proj-dir-row" style="margin-top:8px"><code id="errLogPath">…</code><button class="mini-btn" id="errOpenBtn">Open</button></div>
             <div class="env-actions" style="margin-top:8px">
               <button class="mini-btn" id="errRefreshBtn">Refresh</button>
