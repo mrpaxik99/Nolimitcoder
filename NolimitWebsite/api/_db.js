@@ -47,14 +47,6 @@ export async function ensureSchema() {
     note TEXT DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`;
-  await sql`CREATE TABLE IF NOT EXISTS app_versions (
-    version TEXT PRIMARY KEY,
-    download_url TEXT DEFAULT '',
-    notes TEXT DEFAULT '',
-    is_latest BOOLEAN DEFAULT FALSE,
-    released_at TIMESTAMPTZ DEFAULT NOW()
-  )`;
-  await sql`ALTER TABLE app_versions ADD COLUMN IF NOT EXISTS size_bytes BIGINT DEFAULT 0`;
   schemaReady = true;
 }
 

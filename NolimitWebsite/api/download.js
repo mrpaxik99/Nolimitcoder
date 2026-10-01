@@ -1,30 +1,21 @@
-import { db, ensureSchema, markSchemaStale } from './_db.js';
+import { db, ensureSchema } from './_db.js';
+import { currentRelease } from './_releases.js';
 
-// Veřejné stahování aktuální verze: GET /api/download → 302 na download_url Latest verze.
-// Tlačítka „Stáhnout" na webu vedou sem, takže vždy tahají nejnovější build.
+// Veřejné stahování: GET /api/download → 302 na instalátor ze složky
+// NolimitWebsite/Downloads Updates (GitHub). Je to ta samá verze, která jediná
+// v aplikaci funguje — viz /api/app-status.
 export default async function handler(req, res) {
   try {
-    await ensureSchema();
-    const sql = db();
-    const run = () => sql`SELECT version, download_url FROM app_versions
-      ORDER BY is_latest DESC, released_at DESC LIMIT 1`;
-    let rows;
+    const cur = await currentRelease();
+    if (!cur || !cur.url) return res.status(404).send('No version published yet.');
     try {
-      rows = await run();
-    } catch (e) {
-      if (markSchemaStale(e)) { await ensureSchema(); rows = await run(); }
-      else throw e;
-    }
-    const latest = rows && rows[0];
-    if (!latest || !latest.download_url) {
-      return res.status(404).send('No version published yet.');
-    }
-    try {
+      await ensureSchema();
+      const sql = db();
       await sql`INSERT INTO visits (email, path) VALUES (NULL, '/api/download')`;
     } catch {}
     res.setHeader('Cache-Control', 'no-store');
-    return res.redirect(302, latest.download_url);
+    return res.redirect(302, cur.url);
   } catch (e) {
-    return res.status(500).send('Download unavailable.');
+    return res.status(503).send('Download unavailable.');
   }
 }

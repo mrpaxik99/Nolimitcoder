@@ -1,6 +1,5 @@
 import '../style.css';
 import './track.js';
-import { upload } from '@vercel/blob/client';
 
 // Admin panel. Klient jen zobrazuje — skutečná kontrola práv je na serveru
 // (každý /api/admin/* ověřuje Google ID token + e-mail).
@@ -70,201 +69,35 @@ document.querySelectorAll('#adNav button').forEach((b) => {
   });
 });
 
-// ---------- Updates: upload .exe z počítače + verze ----------
-let uploadedUrl = '';
-let uploadedSize = 0;
-function upSetStatus(m) {
-  document.getElementById('upStatus').textContent = m || '';
-}
-// Verze přímo zevnitř .exe (PE version resource — to samé číslo, co aplikace hlásí serveru).
-// Čte VS_FIXEDFILEINFO z RT_VERSION, fallback je odhad z názvu souboru.
-async function readExeVersion(file) {
+// ---------- Downloads: instalátory ze složky NolimitWebsite/Downloads Updates ----------
+// Nová verze = zkopíruješ .exe do téhle složky a pushneš na GitHub. Nic se neuploaduje.
+// Ve složce je vždycky jen to, co se stahuje — a jen ta verze v aplikaci funguje.
+async function loadReleases() {
   try {
-    const buf = await file.arrayBuffer();
-    const dv = new DataView(buf);
-    const u16 = (o) => dv.getUint16(o, true);
-    const u32 = (o) => dv.getUint32(o, true);
-    if (u16(0) !== 0x5A4D) return '';
-    const peOff = u32(0x3C);
-    if (peOff > buf.byteLength - 64 || u32(peOff) !== 0x4550) return '';
-    const numSec = u16(peOff + 6);
-    const optSize = u16(peOff + 20);
-    const optOff = peOff + 24;
-    const isPlus = u16(optOff) === 0x20B;
-    const ddOff = optOff + (isPlus ? 112 : 96);
-    const resRVA = u32(ddOff + 16);
-    if (!resRVA || numSec <= 0 || numSec > 64) return '';
-    const secOff = optOff + optSize;
-    const rva2off = (rva) => {
-      for (let i = 0; i < numSec; i++) {
-        const s = secOff + i * 40;
-        if (s + 40 > buf.byteLength) return 0;
-        const vAddr = u32(s + 12), vSize = Math.max(u32(s + 8), u32(s + 16)), rawPtr = u32(s + 20);
-        if (rva >= vAddr && rva < vAddr + vSize && rawPtr) return rawPtr + (rva - vAddr);
-      }
-      return 0;
-    };
-    const resOff = rva2off(resRVA);
-    if (!resOff) return '';
-    // Průchod resource stromem: typ 16 (RT_VERSION) → první potomek → datový záznam
-    const walk = (dirOff, level) => {
-      if (dirOff + 16 > buf.byteLength) return 0;
-      const n = u16(dirOff + 12) + u16(dirOff + 14);
-      if (n > 256) return 0;
-      for (let i = 0; i < n; i++) {
-        const e = dirOff + 16 + i * 8;
-        const id = u32(e);
-        const childRaw = u32(e + 4);
-        const isDir = (childRaw & 0x80000000) !== 0;
-        const child = resOff + (childRaw & 0x7FFFFFFF);
-        if (level === 0) {
-          if (id !== 16 || !isDir) continue;
-          const r = walk(child, 1);
-          if (r) return r;
-        } else if (level === 1) {
-          if (!isDir) continue;
-          const r = walk(child, 2);
-          if (r) return r;
-        } else if (!isDir) {
-          return child;
-        }
-      }
-      return 0;
-    };
-    const dataEnt = walk(resOff, 0);
-    if (!dataEnt) return '';
-    const dataOff = rva2off(u32(dataEnt));
-    if (!dataOff) return '';
-    let p = dataOff + 6;
-    let key = '';
-    for (let i = 0; i < 32; i++) {
-      const c = u16(p + i * 2);
-      if (!c) break;
-      key += String.fromCharCode(c);
+    const j = await api('/api/admin/releases');
+    const cur = j.current;
+    const box = document.getElementById('dlCur');
+    if (box) {
+      box.innerHTML = cur
+        ? '<b>Právě jede: ' + esc(cur.version || '(verze v názvu nenalezena)') + '</b>' +
+          '<div class="muted">' + esc(cur.name) + ' · ' + Math.round((cur.size || 0) / 1048576) +
+          ' MB · jediná verze, která funguje</div>'
+        : '<b>Ve složce zatím není žádný instalátor.</b>' +
+          '<div class="muted">Zkopíruj .exe do NolimitWebsite/Downloads Updates a pushni na GitHub.</div>';
     }
-    if (key !== 'VS_VERSION_INFO') return '';
-    p += (key.length + 1) * 2;
-    p = (p + 3) & ~3;
-    if (p + 16 > buf.byteLength || u32(p) !== 0xFEEF04BD) return '';
-    const ms = u32(p + 8), ls = u32(p + 12);
-    const q = [(ms >>> 16) & 0xFFFF, ms & 0xFFFF, (ls >>> 16) & 0xFFFF, ls & 0xFFFF];
-    while (q.length > 3 && q[q.length - 1] === 0) q.pop();
-    while (q.length < 3) q.push(0);
-    return q.join('.');
-  } catch (e) { return ''; }
+    const fb = document.getElementById('dlFolder');
+    if (fb && j.folderUrl) fb.href = j.folderUrl;
+    const files = j.files || [];
+    const tb = document.getElementById('dlList');
+    if (tb) {
+      tb.innerHTML = files.length ? files.map((f) =>
+        '<tr><td class="mono">' + esc(f.name) + '</td>' +
+        '<td class="mono">' + (f.version ? esc(f.version) : '<span class="muted">—</span>') + '</td>' +
+        '<td class="mono">' + Math.round((f.size || 0) / 1048576) + ' MB</td></tr>'
+      ).join('') : '<tr><td colspan="3" class="muted">Složka je prázdná.</td></tr>';
+    }
+  } catch (e) { /* ticho — sekce není kritická */ }
 }
-
-document.getElementById('upFile').addEventListener('change', () => {
-  const f = document.getElementById('upFile').files[0];
-  uploadedUrl = '';
-  if (!f) { upSetStatus(''); return; }
-  // Dialog už soubory nefiltruje (to právě schovávalo .exe) — kontrola je tady:
-  if (!/\.exe$/i.test(f.name)) {
-    document.getElementById('upFile').value = '';
-    upSetStatus('');
-    showErr('Vyber soubor s příponou .exe (instalátor aplikace).');
-    return;
-  }
-  // Verze se předvyplní z názvu (NolimitCoder V5 Setup.exe → 5.0.0), nic psát nemusíš
-  try {
-    const m = f.name.match(/V(\d+)/i);
-    const vin = document.getElementById('upVer');
-    if (m && vin && !vin.value) vin.value = m[1] + '.0.0';
-  } catch {}
-  upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — čtu verzi ze souboru…');
-  // Přesná verze zevnitř .exe přepíše odhad z názvu (tohle číslo pak aplikace hlásí serveru)
-  readExeVersion(f).then((v) => {
-    try {
-      if (v) {
-        const vin = document.getElementById('upVer');
-        if (vin) vin.value = v;
-        upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — verze ze souboru: ' + v + '. Klikni „Nahrát .exe".');
-      } else {
-        upSetStatus('Vybráno: ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB) — klikni „Nahrát .exe".');
-      }
-    } catch {}
-  });
-});
-document.getElementById('upUpload').addEventListener('click', async () => {
-  showErr(''); showOk('');
-  const f = document.getElementById('upFile').files[0];
-  if (!f) { showErr('Nejdřív vyber .exe soubor z počítače.'); return; }
-  const btn = document.getElementById('upUpload');
-  const prog = document.getElementById('upProg');
-  btn.disabled = true;
-  prog.classList.add('on');
-  upSetStatus('Nahrávám ' + f.name + ' (' + Math.round(f.size / 1048576) + ' MB)… chvíli to trvá, nezavírej stránku.');
-  try {
-    // contentType natvrdo — prohlížeče hlásí .exe různě (x-msdownload / x-dosexec / prázdné),
-    // explicitní typ vždy projde přes allowedContentTypes na serveru.
-    const blob = await upload(f.name, f, {
-      access: 'public',
-      contentType: 'application/x-msdownload',
-      handleUploadUrl: '/api/admin/blob-token?token=' + encodeURIComponent(token)
-    });
-    uploadedUrl = blob.url;
-    uploadedSize = blob.size || f.size || 0;
-    upSetStatus('Hotovo: ' + f.name + ' — teď dole potvrď verzi.');
-    showOk('Soubor nahrán. Zbývá potvrdit verzi.');
-  } catch (e) {
-    upSetStatus('');
-    showErr('Upload selhal: ' + (e.message || e));
-  }
-  btn.disabled = false;
-  prog.classList.remove('on');
-});
-async function loadVersions() {
-  const j = await api('/api/admin/versions');
-  const tb = document.getElementById('upList');
-  const vs = j.versions || [];
-  if (!vs.length) { tb.innerHTML = '<tr><td colspan="6" class="muted">Zatím žádná verze.</td></tr>'; return; }
-  tb.innerHTML = vs.map((v) =>
-    '<tr><td class="mono"><b>' + esc(v.version) + '</b></td>' +
-    '<td>' + (v.is_latest ? '<span class="badge green">LATEST</span>' : '<span class="badge">starší</span>') + '</td>' +
-    '<td>' + (v.download_url ? '<a href="' + esc(v.download_url) + '">stáhnout</a>' : '<span class="muted">—</span>') + '</td>' +
-    '<td class="mono">' + (v.size_bytes ? (Math.round(v.size_bytes / 1048576) + ' MB') : '<span class="muted">—</span>') + '</td>' +
-    '<td>' + esc(v.notes || '') + '</td>' +
-    '<td style="white-space:nowrap">' +
-      (v.is_latest ? '' : '<button class="ad-btn ad-btn-ghost sm" data-act="latest" data-v="' + esc(v.version) + '">Latest</button> ') +
-      (v.is_latest
-        ? '<span class="badge blue" title="Jediná verze, která je v provozu — starší se v aplikaci zablokují samy">🔒 latest</span> '
-        : '') +
-      '<button class="ad-btn ad-btn-ghost sm" data-act="remove" data-v="' + esc(v.version) + '">Smazat</button>' +
-    '</td></tr>'
-  ).join('');
-  tb.querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
-    const act = b.getAttribute('data-act') === 'latest' ? 'setLatest' : b.getAttribute('data-act');
-    if (act === 'remove' && !confirm('Smazat verzi ' + b.getAttribute('data-v') + '?')) return;
-    showErr(''); showOk('');
-    try {
-      await api('/api/admin/versions', { method: 'POST',
-        body: JSON.stringify({ action: act, version: b.getAttribute('data-v') }) });
-      await loadVersions();
-      showOk('Hotovo.');
-    } catch (e) { showErr(e.message); }
-  }));
-}
-document.getElementById('upAdd').addEventListener('click', async () => {
-  showErr(''); showOk('');
-  const version = document.getElementById('upVer').value.trim();
-  if (!version) { showErr('Zadej verzi.'); return; }
-  if (!uploadedUrl) { showErr('Nejdřív nahoře nahraj .exe z počítače.'); return; }
-  try {
-    await api('/api/admin/versions', { method: 'POST', body: JSON.stringify({ action: 'upsert',
-      version,
-      download_url: uploadedUrl,
-      size_bytes: uploadedSize,
-      notes: document.getElementById('upNotes').value.trim() }) });
-    document.getElementById('upVer').value = '';
-    document.getElementById('upNotes').value = '';
-    document.getElementById('upFile').value = '';
-    uploadedUrl = '';
-    uploadedSize = 0;
-    upSetStatus('');
-    await loadVersions();
-    showOk('Verze ' + version + ' nahrána a je teď Latest.');
-  } catch (e) { showErr(e.message); }
-});
 
 // ---------- Customers ----------
 let allUsers = [];
@@ -395,7 +228,7 @@ async function loadAnalytics() {
 // Start — server je zdroj pravdy (403 = nejsi admin)
 (async function init() {
   try {
-    await loadVersions();
+    await loadReleases();
     await loadCustomers();
     await loadAnalytics();
   } catch (e) {

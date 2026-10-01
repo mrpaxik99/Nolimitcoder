@@ -110,7 +110,7 @@
         <div class="pf-mail" id="adMail">…</div>
       </div>
       <nav class="pf-nav" id="adNav">
-        <button data-sec="updates" class="active"><span class="pi">⇪</span> Updates</button>
+        <button data-sec="updates" class="active"><span class="pi">⇪</span> Downloads</button>
         <button data-sec="customers"><span class="pi"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6" fill="none" stroke="currentColor" stroke-width="2"/></svg></span> Customers</button>
         <button data-sec="analytics"><span class="pi">▤</span> Analytics</button>
       </nav>
@@ -122,30 +122,17 @@
       <div class="ad-ok" id="adOk"></div>
 
       <section class="pf-sec" data-spage="updates">
-        <h1>Updates</h1>
-        <p class="muted">Verze aplikace (Downloads) — drží se <b>max 2</b>. Nově nahraná je vždy <b>Latest</b>. Funguje <b>jen Latest verze</b>: starší se v aplikaci zablokují samy a nabídnou tlačítko Aktualizovat (tiše přeinstaluje novou verzi).</p>
-        <div class="up-card">
-          <b>1 · Vyber .exe z počítače</b>
-          <div class="up-row" style="margin-top:10px">
-            <input type="file" class="up-file" id="upFile">
-            <button class="ad-btn" id="upUpload">Nahrát .exe</button>
-          </div>
-          <div class="up-prog" id="upProg"><div></div></div>
-          <div class="up-status" id="upStatus"></div>
+        <h1>Downloads</h1>
+        <p class="muted">Instalátory leží ve složce <b>NolimitWebsite/Downloads Updates</b> v repozitáři (GitHub). Nová verze = zkopíruješ tam .exe a pushneš — nic se neuploaduje. Funguje <b>jedna ta nejvyšší verze ze složky</b>; co v ní není, to se v aplikaci zablokuje a nabídne tlačítko Aktualizovat (tiše přeinstaluje novou verzi).</p>
+        <div class="up-card" id="dlCur"><b>Načítám…</b></div>
+        <div class="ad-row">
+          <a class="ad-btn" id="dlFolder" href="https://github.com/mrpaxik99/Nolimitcoder" target="_blank" rel="noopener" style="text-decoration:none">Otevřít složku na GitHubu</a>
+          <a class="ad-btn ad-btn-ghost" href="/api/download" style="text-decoration:none">Stáhnout aktuální verzi</a>
         </div>
-        <div class="ad-form">
-          <b style="margin-top:6px">2 · Potvrď verzi</b>
-          <div class="ad-row" style="margin-top:0">
-            <input class="ad-input" id="upVer" placeholder="Verze, např. 3.0.14" style="width:170px">
-            <input class="ad-input" id="upNotes" placeholder="Poznámky k verzi (co je nového)" style="flex:1;min-width:200px">
-          </div>
-          <div class="ad-row">
-            <button class="ad-btn" id="upAdd">Nahrát verzi</button>
-          </div>
-        </div>
+        <h3 style="margin:18px 0 0">Soubory ve složce</h3>
         <table class="ad-table">
-          <thead><tr><th>Verze</th><th>Stav</th><th>Download</th><th>Velikost</th><th>Poznámky</th><th></th></tr></thead>
-          <tbody id="upList"><tr><td colspan="6" class="muted">Načítám…</td></tr></tbody>
+          <thead><tr><th>Soubor</th><th>Verze</th><th>Velikost</th></tr></thead>
+          <tbody id="dlList"><tr><td colspan="3" class="muted">Načítám…</td></tr></tbody>
         </table>
       </section>
 
