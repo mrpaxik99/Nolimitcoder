@@ -111,26 +111,26 @@ const STORE_PATH = path.join(app.getPath('userData'), 'config.json');
 try { fs.mkdirSync(path.join(os.tmpdir(), 'nolimitcoder'), { recursive: true }); } catch {}
 function getStore() {
   const defaults = {
-    // ===== Permissions (Settings → Permissions) =====
-    // all = full access, no questions anywhere. Jednotlivé přepínače ho můžou zúžit.
-    permissions: 'all',
-    fullAccess: true,         // soubory/složky kdekoliv na disku
-    allowShell: true,         // spouštění příkazů bez schvalování
-    allowInstall: true,       // instalace balíčků a nástrojů bez ptání
-    allowNetwork: true,       // stahování ze sítě (download_file, web_fetch)
-    allowDelete: true,        // mazání souborů/složek
-    allowHeavy: true,         // velké toolchainy (MSVC, Docker) bez dotazu
     logErrors: true,          // zapisovat chyby do dist/Error Log.txt
     activeProject: null,      // full path to the project folder
-    mode: 'build',            // build | plan
     sound: true,              // sound after generation finishes
     terminal: 'auto',         // terminal always auto
     ollamaUrl: 'http://127.0.0.1:11434',
     lmstudioUrl: 'http://127.0.0.1:1234',
 
   };
+  // Staré klíče (agent systém / pravidla oprávnění) se ze savefile mažou.
+  const LEGACY_KEYS = ['permissions', 'fullAccess', 'allowShell', 'allowInstall', 'allowNetwork', 'allowDelete', 'allowHeavy',
+    'mode', 'defaultAgent', 'aiPermissions', 'aiAgents', 'aiCommands', 'aiCompaction'];
   try {
-    if (fs.existsSync(STORE_PATH)) return { ...defaults, ...JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8')) };
+    if (fs.existsSync(STORE_PATH)) {
+      const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
+      let dirty = false;
+      for (const k of LEGACY_KEYS) if (k in raw) { delete raw[k]; dirty = true; }
+      const merged = { ...defaults, ...raw };
+      if (dirty) saveStore(merged);
+      return merged;
+    }
   } catch {}
   return { ...defaults };
 }
@@ -144,6 +144,7 @@ function createWindow() {
     height: 900,
     minWidth: 1050,
     minHeight: 700,
+    fullscreenable: false,
     backgroundColor: '#101010',
     icon: path.join(__dirname, '../renderer/assets/logo.png'),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
@@ -233,6 +234,7 @@ ipcMain.handle('app:relaunchAdmin', async () => {
   // Relaunches THIS application as administrator (1x UAC prompt). The old instance
   // quits on its own via second-instance — if you deny UAC, nothing happens and it keeps running.
   try {
+    try { saveNetMaps(); } catch {}
     const { execFile } = require('child_process');
     const exe = app.getPath('exe');
     const args = [...process.argv.slice(1).filter(a => !/^--squirrel/.test(a) && a !== '--elevated-child'), '--elevated-child'];
@@ -245,6 +247,12 @@ ipcMain.handle('app:relaunchAdmin', async () => {
 });
 
 app.whenReady().then(async () => {
+  // ===== Síťové disky po zvýšení oprávnění =====
+  // Elevovaný proces běží s jiným tokenem a mapované síťové disky (Z: WebDAV)
+  // v něm nejsou — v dialogu bys je neviděl. Potomek si je proto hned připojí zpět.
+  if (process.platform === 'win32' && process.argv.includes('--elevated-child')) {
+    try { restoreNetMaps(); } catch {}
+  }
   // ===== Plná administrace: aplikace se sama spustí jako Administrator =====
   // Jediný UAC prompt je při startu (Windows ho nepřeskakuje). Po něm běží vše
   // jako admin a už se nikdy nic neptá.
@@ -256,6 +264,9 @@ app.whenReady().then(async () => {
       });
       if (!admin) {
         let spawned = false;
+        // Mapované síťové disky (Z: WebDAV) neadmin proces vidí, elevovaný ne.
+        // Uložíme je, než se zvýšíme oprávnění, a potomek je připojí zpět.
+        try { saveNetMaps(); } catch {}
         try {
           const exe = app.getPath('exe');
           const args = [...process.argv.slice(1).filter(a => !/^--squirrel/.test(a) && a !== '--elevated-child'), '--elevated-child'];
@@ -307,6 +318,8 @@ ipcMain.handle('store:get', () => getStore());
 ipcMain.handle('store:set', (_, data) => {
   const cur = getStore();
   const next = { ...cur, ...data };
+  // Hodnota null = klíč smazat (očista starých klíčů)
+  if (data) for (const k of Object.keys(data)) if (data[k] === null) delete next[k];
   saveStore(next);
   // přepínač "Log errors" má platit hned, ne až při dalším tool callu
   if (data && 'logErrors' in data) { try { LOG_ERRORS = next.logErrors !== false; } catch {} }
@@ -569,30 +582,116 @@ ipcMain.handle('projects:pick', async () => {
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'out', 'build', '.next', '__pycache__', '.venv', 'venv', 'target']);
 const TEXT_EXT = new Set(['.txt', '.md', '.js', '.jsx', '.ts', '.tsx', '.json', '.py', '.html', '.css', '.c', '.cpp', '.h', '.java', '.cs', '.go', '.rs', '.php', '.rb', '.sql', '.xml', '.yml', '.yaml', '.toml', '.ini', '.cfg', '.sh', '.bat', '.ps1', '.vue', '.svelte']);
 
-ipcMain.handle('projects:files', (_, dirPath, includeContents) => {
-  const root = path.resolve(String(dirPath || ''));
-  if (!root || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
+// ===== Sken složky: ASYNCHRONNÍ, BEZ ČASOVÉHO STROPU =====
+// Dřív šlo o readdirSync v hlavním procesu. Na síťovém disku (Z: WebDAV) trval
+// jeden readdir 3,2 s a sken celé složky desítky sekund — hlavní proces v tu dobu
+// nezpracoval žádné události, Windows prohlíčič ukázal "neodpovídá" a UI zamrzlo.
+// Teď je vše fs.promises: event loop žije, okno je živé a sken běží na pozadí.
+// BEZ limitu na čas — jen mírná pojistka na počet položek, aby prompt nezasypl.
+const TREE_ITEM_CAP = 5000;
+const projTreeCache = new Map(); // root -> { tree, at, scanning, promise, partial }
+
+// Sken na Z: (WebDAV) trvá MINUTY. Proto se výsledky zveřejňují UŽ BĚHEM skenu:
+// cache roste po částech a AI ho v každé zprávě vidí tolik, kolik je zatím známo.
+// Žádný časový limit, žádný freeze — jen postupné naplňování.
+// Yield control to event loop every N items — na síťovém disku (Z: WebDAV)
+// jinak blokujeme event loop a celá aplikace se zpomaluje během AI generování.
+const YIELD_EVERY = 200;
+let yieldCounter = 0;
+function yieldToEventLoop() {
+  if (++yieldCounter >= YIELD_EVERY) {
+    yieldCounter = 0;
+    return new Promise(r => setImmediate(r));
+  }
+  return Promise.resolve();
+}
+async function scanProjectTree(root, onProgress) {
   const tree = [];
   let truncated = false;
-  (function walk(dir, rel) {
-    if (tree.length > 300) { truncated = true; return; }
+  let lastPub = 0;
+  const publish = (force) => {
+    if (!onProgress) return;
+    const now = Date.now();
+    if (!force && now - lastPub < 400) return;   // nepublikovat příliš často
+    lastPub = now;
+    onProgress(tree);
+  };
+  const walk = async (dir, rel) => {
+    if (tree.length >= TREE_ITEM_CAP) { truncated = true; return; }
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
+    publish();
     for (const e of entries) {
-      if (tree.length > 300) { truncated = true; return; }
+      if (tree.length >= TREE_ITEM_CAP) { truncated = true; return; }
       if (e.name.startsWith('.') && e.name !== '.env') continue;
       const rp = rel ? rel + '/' + e.name : e.name;
-      try {
-        if (e.isDirectory()) {
-          if (SKIP_DIRS.has(e.name)) continue;
-          tree.push({ path: rp + '/', dir: true });
-          walk(path.join(dir, e.name), rp);
-        } else if (e.isFile()) {
-          tree.push({ path: rp, dir: false });
-        }
-      } catch {}
+      if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name)) continue;
+        tree.push({ path: rp + '/', dir: true });
+        await walk(path.join(dir, e.name), rp);   // await = node diky, ale event loop nezamrzne
+      } else if (e.isFile()) {
+        tree.push({ path: rp, dir: false });
+        publish();
+      }
+      // Yield to event loop — na síťovém disku jinak blokujeme celou aplikaci
+      await yieldToEventLoop();
     }
-  })(root, '');
+  };
+  await walk(root, '');
+  return { tree, truncated };
+}
+
+// Vrati hotovy strom HNED (z cache). Pokud prave bezi sken, vrati stary/nic — nikdy neceka.
+async function getTreeCached(root, { awaitScan } = {}) {
+  const hit = projTreeCache.get(root);
+  // cache existuje (i když sken ještě běží) → vrať co máme HNED
+  if (hit && hit.tree && hit.tree.length) return { tree: hit.tree, truncated: hit.truncated, scanning: !!hit.scanning, partial: !!hit.partial };
+  if (awaitScan) { const r = await scanAndStore(root); return { tree: r.tree, truncated: r.truncated }; }
+  // studená cache: rozbehneme sken na pozadí, nečekáme
+  scanAndStore(root).catch(() => {});
+  return { tree: [], truncated: false, scanning: true };
+}
+function scanAndStore(root) {
+  const prev = projTreeCache.get(root);
+  if (prev && prev.promise) return prev.promise;
+  // Cache roste během skenu — každá zpráva vidí to, co už AI systém objevil.
+  projTreeCache.set(root, { tree: (prev && prev.tree) || [], truncated: false, at: prev ? prev.at : 0, scanning: true, partial: true });
+  const promise = scanProjectTree(root, (partial) => {
+    const c = projTreeCache.get(root);
+    if (c) { c.tree = partial; }   // průběžná aktualizace, bez čekání na dočtení
+  })
+    .then((r) => {
+      projTreeCache.set(root, { tree: r.tree, truncated: r.truncated, at: Date.now(), scanning: false });
+      try { T.dbgLog('projscan', { root, items: r.tree.length, truncated: r.truncated }); } catch {}
+      return r;
+    })
+    .catch(() => { projTreeCache.set(root, { tree: [], truncated: false, at: Date.now(), scanning: false }); return { tree: [], truncated: false }; });
+  projTreeCache.get(root).promise = promise;
+  return promise;
+}
+// Vynutit novy sken (po zmene slozky) — stale pri spusteni, at se to neopakuje donekonecna.
+setInterval(() => {
+  for (const [root, v] of projTreeCache) if (v.at && Date.now() - v.at > 300000) projTreeCache.delete(root);
+}, 60000);
+
+// Rozbehne sken složky na pozadí a VRÁTÍ SE HNED (bez čekání na Z:).
+// Renderer to volá při odeslání, aby AI dostal soubory od druhé zprávy, ale UI nikdy nečeká.
+ipcMain.handle('projects:scanAsync', async (_, dirPath) => {
+  try {
+    const root = path.resolve(String(dirPath || ''));
+    if (!root || !fs.existsSync(root)) return { ok: false };
+    scanAndStore(root).catch(() => {});
+    return { ok: true, started: true };
+  } catch { return { ok: false }; }
+});
+
+ipcMain.handle('projects:files', async (_, dirPath, includeContents, nonBlocking) => {
+  const root = path.resolve(String(dirPath || ''));
+  if (!root || !fs.existsSync(root)) return { ok: false, error: 'Folder does not exist' };
+  // nonBlocking = true (cesta pri odeslani): vrat HNED to, co je v cache, a spusť sken
+  // na pozadí. Na Z: by cekání trvalo desítky sekund a okno by vypadalo mrtve.
+  const res = await getTreeCached(root, { awaitScan: !nonBlocking });
+  const tree = res.tree || [];
   const contents = {};
   if (includeContents) {
     let budget = 60000;
@@ -600,16 +699,17 @@ ipcMain.handle('projects:files', (_, dirPath, includeContents) => {
       if (t.dir || budget <= 0) continue;
       if (!TEXT_EXT.has(path.extname(t.path).toLowerCase())) continue;
       try {
-        const st = fs.statSync(path.join(root, t.path));
+        const abs = path.join(root, t.path);
+        const st = await fs.promises.stat(abs);          // async — na Z: to trvá stovky ms
         if (st.size > 40000) continue;
-        const txt = fs.readFileSync(path.join(root, t.path), 'utf-8');
+        const txt = await fs.promises.readFile(abs, 'utf-8');
         const slice = txt.slice(0, Math.min(txt.length, budget));
         contents[t.path] = slice;
         budget -= slice.length;
       } catch {}
     }
   }
-  return { ok: true, root, tree, contents, truncated };
+  return { ok: true, root, tree, contents, truncated: res.truncated, scanning: !!res.scanning };
 });
 
 ipcMain.handle('projects:openPath', (_, p) => {
@@ -663,12 +763,14 @@ function getSessionId(convoId) {
 
 // ===== FILE TOOLS — complete tool set (executed in tools.js) =====
 // Gatekeeper requires a tool named shell (+read) — that's why shell is always in the list.
-// agent=true only in Build mode (Plan is text-only) and only when there is somewhere to reach.
+// agent=true only when there are real tools to reach.
 const P = (properties, required) => ({ type: 'object', properties, required: required || Object.keys(properties) });
 const STR = (d) => ({ type: 'string', description: d || '' });
 const SHELL_REAL = { type: 'function', name: 'shell', description: `Execute a shell command (Windows cmd.exe on win32).
 
 Use %TEMP%/nolimitcoder for temporary work outside the workspace. This directory already exists and is pre-approved.
+
+NEVER write file content through this tool. Writing code with shell one-liners (echo > file, PowerShell here-strings @'...'@, Set-Content, cat <<EOF, redirecting a long string) always fails: cmd.exe truncates the command line at 8191 characters and PowerShell here-strings need the '@ terminator on its own line. To create or change a file, use write_file (new content), append_file (add to the end) or edit_file (precise change) — they have no length limit and no quoting problems.
 
 IMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.
 
@@ -699,7 +801,7 @@ Terminals: cmd (default), powershell, pwsh. The backend parameter selects one (d
 - Only commit, amend or push when explicitly requested. Before committing, inspect \`git status\`, \`git diff\`, \`git log --oneline -10\`; stage only intended files, never commit secrets. Write a concise commit message.
 - Use \`gh\` for GitHub tasks and return the PR URL when done.`, parameters: P({ command: STR('The command to execute'), timeout: { type: 'number', description: 'Optional timeout in milliseconds (default 120000, max 900000)' }, workdir: STR('The working directory to run the command in. Defaults to the project folder. Use this instead of cd commands.'), backend: STR('cmd | powershell | pwsh | auto (default auto)') }, ['command']) };
 // The gateway gatekeeper requires the list to contain a tool named "shell" and "read".
-// In chat/plan mode (no agent) these are intentionally dead plugs so the model calls nothing.
+// In hidden runs (no agent) these are intentionally dead plugs so the model calls nothing.
 // In build mode ONLY real tools are sent (no duplicate names!).
 const READ_GATE = { type: 'function', name: 'read', description: 'Read a text file (alias of read_file).', parameters: P({ path: STR('Path to the file') }) };
 const SHELL_GATE = { type: 'function', name: 'shell', description: 'INTERNAL ONLY — never call this tool in chat mode.', parameters: P({ command: STR('ignored, do not use') }) };
@@ -707,20 +809,21 @@ const DUMMY_TOOLS_RESP = [ SHELL_GATE, READ_GATE ];
 const AGENT_TOOLS_RESP = [
   SHELL_REAL,
   READ_GATE,
-  { type: 'function', name: 'write_file', description: 'Writes a text file (creates subfolders too). Instead of printing code into the chat, ALWAYS write it with this tool.', parameters: P({ path: STR('Relative path to the project or absolute path'), content: STR('Entire file content') }, ['path', 'content']) },
+  { type: 'function', name: 'write_file', description: 'Writes a text file (creates subfolders too). Instead of printing code into the chat, ALWAYS write it with this tool. This is also the ONLY safe way to create a file with long content — writing it through shell (echo >, PowerShell here-string @\'…\'@, Set-Content, cat <<EOF) fails on anything over ~8 KB, because cmd.exe truncates the command line at 8191 characters.', parameters: P({ path: STR('Relative path to the project or absolute path'), content: STR('Entire file content') }, ['path', 'content']) },
   { type: 'function', name: 'append_file', description: 'Appends text to the end of a file (creates the file if needed).', parameters: P({ path: STR('Path to the file'), content: STR('Text to append') }, ['path', 'content']) },
   { type: 'function', name: 'edit_file', description: 'Precise file edit: oldString must match exactly 1x in the file, otherwise send a larger context or replaceAll: true.', parameters: P({ path: STR('Path to the file'), oldString: STR('Exact original text'), newString: STR('New text') }, ['path', 'oldString', 'newString']) },
   { type: 'function', name: 'read_file', description: 'Reads a text file (max 40 KB).', parameters: P({ path: STR('Path to the file') }) },
-  { type: 'function', name: 'list_dir', description: 'Lists files and subfolders in a folder.', parameters: P({ path: STR('Path to the folder, "." = project') }) },
+  { type: 'function', name: 'list_dir', description: 'Lists files and subfolders in a folder. USE THIS INSTEAD of shell probes like "dir /b", "ls", "if exist" or "test -f" — one call, no exit codes, no error when the folder is missing.', parameters: P({ path: STR('Path to the folder, "." = project') }) },
   { type: 'function', name: 'glob_file', description: 'Finds files by pattern (e.g. **/*.js, src/*.py).', parameters: P({ pattern: STR('Glob pattern'), dir: STR('Where to search, default "."') }, ['pattern']) },
   { type: 'function', name: 'create_dir', description: 'Creates a folder including subfolders.', parameters: P({ path: STR('Path to the folder') }) },
   { type: 'function', name: 'move_file', description: 'Moves or renames a file (images too) between folders.', parameters: P({ from: STR('Source path'), to: STR('Target path') }, ['from', 'to']) },
   { type: 'function', name: 'copy_file', description: 'Copies a file (image too) to another folder.', parameters: P({ from: STR('Source path'), to: STR('Target path') }, ['from', 'to']) },
   { type: 'function', name: 'delete_file', description: 'Deletes a file.', parameters: P({ path: STR('Path to the file') }) },
-  { type: 'function', name: 'file_info', description: 'Info about a file/folder: size, date, type.', parameters: P({ path: STR('Path') }) },
+  { type: 'function', name: 'file_info', description: 'Info about a file/folder: size, date, type, whether it exists. USE THIS INSTEAD of shell existence checks ("if exist", "test -f", "dir", "type") — it never fails and never needs quoting.', parameters: P({ path: STR('Path') }) },
   { type: 'function', name: 'search_files', description: 'Searches text in project files (grep).', parameters: P({ pattern: STR('Text to search'), dir: STR('Where to search, default "."'), ext: STR('Extension without a dot, e.g. js (optional)') }, ['pattern']) },
   { type: 'function', name: 'open_path', description: 'Opens a file/folder in the system (Explorer).', parameters: P({ path: STR('Path') }) },
-  { type: 'function', name: 'close_app', description: 'Closes an app YOU opened for verification (exe by name or path, or the preview server by its http://127.0.0.1:port URL). ALWAYS call this after verification finishes — whatever you opened for testing, you close. Never leave test windows running for the user.', parameters: P({ target: STR('exe name (app.exe), full exe path, or http://127.0.0.1:port preview URL') }, ['target']) },
+  { type: 'function', name: 'close_app', description: 'Closes an app YOU opened (exe by name or path, or the preview server by its http://127.0.0.1:port URL). Do NOT use this to "verify" a built exe by opening it in front of the user and closing it after half a second — that looks like a crash. EXE verification is done by the build_exe tool (it launch-tests itself) — whatever you opened for testing, you close. Never leave test windows running for the user.', parameters: P({ target: STR('exe name (app.exe), full exe path, or http://127.0.0.1:port preview URL') }, ['target']) },
+  { type: 'function', name: 'show_panel', description: 'Opens a file in a NEW TAB of the app side panel (slides from the right) so the user sees it immediately: HTML preview, image, text, or an exe run card with Start/Stop buttons. Multiple calls = multiple tabs. ALWAYS call this when you finish something viewable/runnable instead of only describing it.', parameters: P({ path: STR('file to show (relative to project or absolute)'), mode: STR('optional: "run" = also launch exe right away') }, ['path']) },
   { type: 'function', name: 'web_fetch', description: 'Downloads the text of a web page (https URL).', parameters: P({ url: STR('https://…') }, ['url']) },
   { type: 'function', name: 'web_search', description: 'Searches anything on the internet (full web access).', parameters: P({ query: STR('Search query') }, ['query']) },
   { type: 'function', name: 'download_file', description: 'Downloads a file from the internet to disk (https URL → path). Handles large files too.', parameters: P({ url: STR('https://…/file.zip'), to: STR('Where to save (relative to the project or absolute)') }, ['url', 'to']) },
@@ -728,7 +831,9 @@ const AGENT_TOOLS_RESP = [
   { type: 'function', name: 'env_prepare', description: 'Finds what is needed (project + user request + planned commands) and installs ALL missing pieces ITSELF: winget → Chocolatey → Scoop → downloading from the internet into the app, then keeps working right away. Before telling the user to install something, call this. Large toolchains (Visual Studio Build Tools, Docker, Android Studio) are not installed without asking — ask first with the question tool and then call again with heavy: true.', parameters: P({ request: STR('What the user wants, in their own words'), ids: { type: 'array', items: STR('toolchain id'), description: 'Optional: specific toolchains instead of auto selection' }, heavy: { type: 'boolean', description: 'Allow large installs (GB) — only when the user agreed' } }) },
   { type: 'function', name: 'env_install', description: 'Installs specific toolchains via winget/Chocolatey/Scoop, otherwise downloads them from the internet (node, python, git, gcc, msvc, cmake, make, dotnet, java, maven, gradle, go, rust, bun, deno, php, ruby, docker, sevenzip, android). Call only when env_scan showed something is missing.', parameters: P({ id: STR('one id, or more separated by comma'), ids: { type: 'array', items: STR('toolchain id'), description: 'use instead of id when you want more toolchains' }, heavy: { type: 'boolean', description: 'Allow large installs (GB)' } }) },
   { type: 'function', name: 'scaffold_electron', description: 'Creates a working Electron project skeleton (package.json + main.js + index.html) for an EXE app. ALWAYS call as the first step when the user wants an Electron/desktop exe app. Then write the code, run shell npm install (timeout 600000) and npm run dist (timeout 600000).', parameters: P({ dir: STR('Project folder (relative or absolute)'), name: STR('App name') }, ['dir']) },
-  { type: 'function', name: 'question', description: 'Ask the user when you need a decision or clarification (e.g. which technology to pick). Show them options to choose from.', parameters: P({ questions: { type: 'array', description: 'Questions (1-3)', items: { type: 'object', properties: { header: STR('Short heading'), question: STR('Question'), options: { type: 'array', items: { type: 'object', properties: { label: STR('Option name'), description: STR('Option description') } } }, multiple: { type: 'boolean', description: 'Multiple choices at once' } } } } }, ['questions']) }
+  { type: 'function', name: 'question', description: 'Ask the user when you need a decision or clarification (e.g. which technology to pick). Show them options to choose from.', parameters: P({ questions: { type: 'array', description: 'Questions (1-3)', items: { type: 'object', properties: { header: STR('Short heading'), question: STR('Question'), options: { type: 'array', items: { type: 'object', properties: { label: STR('Option name'), description: STR('Option description') } } }, multiple: { type: 'boolean', description: 'Multiple choices at once' } } } } }, ['questions']) },
+  // ---- build_exe: kompletni pipeline EXE (inventura -> oprava package.json -> npm install -> plny rebuild -> verifikace -> launch-test) ----
+  { type: 'function', name: 'build_exe', description: 'Builds the project into a working Windows .exe — ALWAYS call this as the LAST step of every EXE/desktop app, instead of running npm/dist commands yourself. It does everything: checks that every file index.html points to exists, auto-fixes package.json (scripts.dist, devDependencies, complete build.files), runs npm install when needed, performs a FULL rebuild (nothing is skipped, dist/ is created automatically when missing), verifies the exe is fresh and the asar contains all files, and launch-tests the exe (starts it, must run 4 s, then kills it). If nothing changed since the last successful build, it skips the rebuild instantly and returns the existing exe (no pointless 10-minute rebuild). Returns a step-by-step report ending with HOTOVO - 100% and the exe path. NEVER "test" by opening the exe yourself in front of the user and closing it after half a second — this tool does the launch-test itself.', parameters: P({ target: STR('Optional: nsis (installer, default), portable (single exe) or dir (unpacked folder)') }) }
 ];
 const DUMMY_TOOLS_CHAT = DUMMY_TOOLS_RESP.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
 const AGENT_TOOLS_CHAT = AGENT_TOOLS_RESP.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
@@ -791,9 +896,16 @@ ipcMain.handle('tools:exec', async (_, data) => {
   // Selhaný nástroj (timeout, exit code, chybný příkaz…) do dist/Error Log.txt
   if (LOG_ERRORS && r && r.ok === false) {
     try {
-      ERR.logError('tool:' + String(d.tool || '?'),
-        String(r.error || r.output || 'tool failed').slice(0, 2000),
-        { args: d.args || {}, root: d.root || '', ms: Date.now() - t0 });
+      const out = String(r.error || r.output || 'tool failed');
+      // Náš vlastní zamítnutí (guard, GUI cíl, …) a "neexistuje" nejsou chyba aplikace —
+      // do logu by se jen hromadily a přehlušily skutečné problémy.
+      const intentional = /^\s*ZAMÍTNUTO|not launching \(no system dialog\)|does not exist/i.test(out);
+      // Sonda ("dir /b x 2>nul") končí exit 1 záměrně, když složka není — to není chyba.
+      const probe = d.tool === 'shell' && /\b2>nul\b|\/dev\/null|\bif exist\b|\bwhere\b|\bwhich\b/i.test(String((d.args || {}).command || ''));
+      if (!intentional && !(probe && /\[exit 1\]\s*$/i.test(out.trim()) && !/\[stderr\]/i.test(out))) {
+        ERR.logError('tool:' + String(d.tool || '?'), out.slice(0, 2000),
+          { args: d.args || {}, root: d.root || '', ms: Date.now() - t0 });
+      }
     } catch {}
   }
   return r;
@@ -803,6 +915,144 @@ ipcMain.on('log:debug', (_, e) => { try { if (e && e.tag) T.dbgLog('UI:' + e.tag
 // Chyby běžící v rendereru (nevyznaná výjimka v chatu, UI…) — sem z preloadu.
 ipcMain.on('log:error', (_, e) => {
   try { if (e && LOG_ERRORS) ERR.logError(e.tag || 'renderer', e.error || e.message || e, e.detail); } catch {}
+});
+
+// ===== Prohlížeč souborů: všechny disky + celý filesystem =====
+// showOpenDialog na Windows ukáže jen pár složek; tady si vybereme všechno ručně.
+function listDrives() {
+  const out = [];
+  if (process.platform !== 'win32') {
+    return [{ name: '/', path: '/' }];
+  }
+  // Písmena A:–Z: existující = disk (partition, USB, síťová mapa)
+  for (let c = 65; c <= 90; c++) {
+    const root = String.fromCharCode(c) + ':\\';
+    try {
+      if (!fs.existsSync(root)) continue;     // neexistující písmena přeskočíme (jinak to hloučí chyby)
+      out.push({ name: String.fromCharCode(c) + ':', path: root });
+    } catch {}
+  }
+  if (!out.length) out.push({ name: 'C:\\', path: 'C:\\' });
+  return out;
+}
+// ===== Síťové disky (Z: WebDAV apod.) =====
+// Elevovaný proces na Windows NEVIDÍ mapované síťové disky (jiný token než původní
+// session). Než zvýšíme oprávnění, uložíme mapování do temp souboru a po startu
+// elevated potomka ho připojíme znovu — jinak by uživatel v dialogu neviděl Z:.
+function netUseMappings() {
+  const out = [];
+  try {
+    const { execFileSync } = require('child_process');
+    const raw = execFileSync('cmd.exe', ['/d', '/c', 'net use'], { timeout: 8000, windowsHide: true, encoding: 'utf8' });
+    for (const line of String(raw).split(/\r?\n/)) {
+      // Format:  Z:  \\server\share   Web Client Network
+      const m = line.match(/^\s*([A-Za-z]:)\s+(\\\\[^\s]+)/);
+      if (m) out.push({ drive: m[1], unc: m[2] });
+    }
+  } catch {}
+  return out;
+}
+const NETMAP_FILE = () => path.join(os.tmpdir(), 'nolimitcoder', 'netdrives.json');
+function saveNetMaps() {
+  const maps = netUseMappings();
+  try {
+    if (!maps.length) return;
+    const f = NETMAP_FILE();
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, JSON.stringify(maps), 'utf8');
+  } catch {}
+  try { T.dbgLog('netdrv', { act: 'save', maps }); } catch {}
+}
+function restoreNetMaps() {
+  const res = [];
+  try {
+    const f = NETMAP_FILE();
+    if (!fs.existsSync(f)) return;
+    const maps = JSON.parse(fs.readFileSync(f, 'utf8'));
+    for (const m of (maps || [])) {
+      if (!m || !m.drive || !m.unc) continue;
+      let done = false;
+      try { if (fs.existsSync(m.drive + '\\')) done = true; } catch {}   // už existuje
+      if (!done) {
+        try {
+          require('child_process').execFileSync('net.exe', ['use', m.drive, m.unc, '/persistent:no'],
+            { timeout: 8000, windowsHide: true, stdio: 'ignore' });
+          try { done = fs.existsSync(m.drive + '\\'); } catch {}
+        } catch {}
+      }
+      res.push({ drive: m.drive, unc: m.unc, ok: done });
+    }
+    try { fs.rmSync(f, { force: true }); } catch {}
+  } catch {}
+  try { T.dbgLog('netdrv', { act: 'restore', res }); } catch {}
+}
+
+ipcMain.handle('fs:browse', async (_, data) => {
+  try {
+    const d = data || {};
+    const target = String(d.path || '').trim();
+    if (!target) return { ok: true, path: null, drives: listDrives(), folders: [] };
+    const abs = path.resolve(target);
+    let items = [];
+    try {
+      items = (await fs.promises.readdir(abs, { withFileTypes: true }))
+        .filter(e => e.isDirectory() || e.isSymbolicLink())
+        .map(e => {
+          const full = path.join(abs, e.name);
+          return { name: e.name, path: full };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, 'cs', { numeric: true }));
+    } catch (e) {
+      return { ok: false, error: 'Složku nelze otevřít: ' + (e && e.message) };
+    }
+    return {
+      ok: true,
+      path: abs,
+      parent: path.dirname(abs) === abs ? null : path.dirname(abs),
+      folders: items,
+      drives: listDrives(),
+      shortcuts: [
+        { name: '🏠 Uživatelská složka', path: os.homedir() },
+        { name: '🖥️ Plocha', path: path.join(os.homedir(), 'Desktop') },
+        { name: '📄 Dokumenty', path: path.join(os.homedir(), 'Documents') },
+        { name: '⬇️ Stažené', path: path.join(os.homedir(), 'Downloads') },
+        { name: '🖼️ Obrázky', path: path.join(os.homedir(), 'Pictures') },
+        { name: '⚙️ Program Files', path: process.env.ProgramFiles || 'C:\\Program Files' },
+        { name: '🖥️ Windows', path: process.env.SystemRoot || 'C:\\Windows' }
+      ].filter(s => { try { return fs.existsSync(s.path); } catch { return false; } })
+    };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('fs:mkdir', async (_, data) => {
+  try {
+    const d = data || {};
+    const abs = path.resolve(String(d.path || ''));
+    const name = String(d.name || '').replace(/[\\/:*?"<>|]/g, '').trim();
+    if (!name) return { ok: false, error: 'Prázdný název' };
+    fs.mkdirSync(path.join(abs, name), { recursive: true });
+    return { ok: true, path: path.join(abs, name) };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// ===== Obrázky z chatu (Ctrl+V / výběr souboru) =====
+// Uloží base64 do <projekt>/uploads/ a vrátí relativní cestu, kterou AI dostane.
+// Žádný dialog, žádné čtení cizích cest — data jdou přímo z rendereru.
+ipcMain.handle('img:save', async (_, data) => {
+  try {
+    const d = data || {};
+    const b64 = String(d.data || '').replace(/^data:[^;]+;base64,/, '');
+    if (!b64 || b64.length < 16) return { ok: false, error: 'Prázdný obrázek' };
+    let ext = String(d.ext || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    if (!['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext)) ext = 'png';
+    const root = String(d.root || '').trim() || projectsDir();
+    const dir = path.join(root, 'uploads');
+    fs.mkdirSync(dir, { recursive: true });
+    const name = 'img-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7) + '.' + ext;
+    const abs = path.join(dir, name);
+    fs.writeFileSync(abs, Buffer.from(b64, 'base64'));
+    const st = fs.statSync(abs);
+    return { ok: true, abs, rel: 'uploads/' + name, bytes: st.size };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 
 // ===== Error Log — čtení / otevření / smazání (Settings → Permissions) =====
@@ -818,10 +1068,41 @@ ipcMain.handle('errlog:open', () => {
 ipcMain.handle('errlog:clear', () => { try { ERR.clearLog(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
 
 // Streaming the request - renderer will call this and we stream back via event
-ipcMain.on('chat:stream-abort', () => { abortFlag = true; });
+// Zastavení generování. S {streamId} se zruší JEN ten jeden stream (jiný chat
+// běží dál); bez ID se zruší všechny (bezpečnostní fallback).
+const streamAborts = new Map();
+ipcMain.on('chat:stream-abort', (ev, payload) => {
+  const p = payload || {};
+  if (p.streamId) {
+    const f = streamAborts.get(p.streamId);
+    if (f) { try { f.abort(); } catch {} }
+    return;
+  }
+  if (p.convoId) {
+    for (const [, f] of streamAborts) { if (f.convoId === p.convoId) { try { f.abort(); } catch {} } }
+    return;
+  }
+  abortFlag = true;
+  for (const [, f] of streamAborts) { try { f.abort(); } catch {} }
+});
 ipcMain.on('chat:stream-start', async (event, payload) => {
-  const { messages, model, convoId, agent, mode: reqMode, projectRoot, fullAccess, inputItems, maxTokens, websearch } = payload || {};
-  const maxT = Math.min(Math.max(parseInt(maxTokens) || 4096, 256), 32000);
+  const { messages, model, convoId, agent, projectRoot, fullAccess, inputItems, maxTokens, websearch, reasonEffort: reasonEffortRaw, allowedTools, noTools } = payload || {};
+  // max_tokens: strop změřený proti bráně = 524 288 (2^19). Nad to (530 000, 1M) vrací
+  // HTTP 400 a zahazuje celý požadavek. Proto tady držíme tvrdý strop a pošleme přesně
+  // maximum, co model snese. Hodnota 0/nezadaná = parametr se vůbec nepošle (pak model
+  // použije vlastní výchozí).
+  const GW_MAX_TOKENS_CEIL = 524288;
+  const wantMaxT = parseInt(maxTokens);
+  const maxT = (wantMaxT > 0)
+    ? Math.min(Math.max(wantMaxT, 256), GW_MAX_TOKENS_CEIL)
+    : 0; // 0 = parametr se v požadavku vůbec neobjeví
+  const omitMaxTokens = maxT === 0;
+  // Úroveň uvažování (reasoning effort). Změřeno proti bráně: brána parametr přijímá
+  // a reasoning_tokens rostou s úrovní (průměr low 32 → medium 52 → high 62 → xhigh 68 → max 85).
+  // Neplatné hodnoty se neposílají, nechá se výchozí chování modelu.
+  const REASON_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+  const reasonEffort = String(reasonEffortRaw || '').toLowerCase();
+  const eff = REASON_LEVELS.has(reasonEffort) ? reasonEffort : '';
   const sender = event.sender;
   abortFlag = false;
   try {
@@ -835,6 +1116,9 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
     }
     const sid = getSessionId(convoId || mId);
     const reqId = 'req_' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    // Identifikátor tohoto konkrétního streamu. Renderer po něm routuje chunky,
+    // takže dvě chaty mohou generovat současně bez míchání odpovědí.
+    const streamId = 'st_' + Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36);
 
     // EVERYTHING goes via the NolimitCoder gateway - no user key, always Bearer public
     const zenHeaders = {
@@ -852,8 +1136,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
     const scrubModels = (s) => String(s || '')
       .replace(/space[-_]?bunny-free/gi, 'NolimitCoder Free')
       .replace(/longcat-2\.5-preview-free/gi, 'NolimitCoder Free');
-    const agentOn = agent === true; // renderer sends agent only in Build mode; where it may reach is guarded by the sandbox + panel
-    const planOn = reqMode === 'plan';
+    const agentOn = agent === true; // renderer sends tools only for the working (non-hidden) run
     // LOCAL models (Ollama / LM Studio / vLLM, OpenAI-compatible)
     const LOCAL_PREFIX = /^(local|ollama|lmstudio|vllm)[:/]/i;
     let localBase = null;
@@ -870,34 +1153,65 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
     const noWeb = websearch === false;
     const dropWeb = (arr, get) => noWeb ? arr.filter(t => get(t) !== 'web_search') : arr;
     const gR = (t) => t.name, gC = (t) => t.function.name;
-    const READ_TOOLS_RESP = AGENT_TOOLS_RESP.filter(t => ['read', 'read_file', 'list_dir', 'glob_file', 'search_files', 'file_info', 'web_fetch', 'web_search', 'question', 'env_scan'].includes(t.name));
-    const READ_TOOLS_CHAT = AGENT_TOOLS_CHAT.filter(t => ['read', 'read_file', 'list_dir', 'glob_file', 'search_files', 'file_info', 'web_fetch', 'web_search', 'question', 'env_scan'].includes(t.function.name));
-    // Gatekeeper wants "shell" in the list too — in plan it is a dead plug (the model must not call it).
-    const PLAN_TOOLS_RESP = [SHELL_GATE, ...READ_TOOLS_RESP];
-    const PLAN_TOOLS_CHAT = [{ type: 'function', function: { name: 'shell', description: 'INTERNAL ONLY — never call this tool in plan mode.', parameters: P({ command: STR('ignored') }) } }, ...READ_TOOLS_CHAT];
+    // ---- renderer posílá povolený seznam nástrojů ----
+    // shell + read musí v listě zůstat vždy (gatekeeper), i když je v seznamu nemá.
+    const allowed = Array.isArray(allowedTools) ? new Set(allowedTools.map(x => String(x))) : null;
+    const filterByAgent = (arr, getName) => {
+      if (!allowed) return arr;
+      return arr.filter(t => {
+        const n = getName(t);
+        return n === 'shell' || n === 'read' || allowed.has(n);
+      });
+    };
+    const noToolsOn = noTools === true;
     let url, body, headers;
     if (localBase) {
       // local OpenAI-compatible endpoint, no auth, no tools gatekeeper
       url = localBase.replace(/\/$/, '') + '/v1/chat/completions';
       headers = { 'Content-Type': 'application/json' };
-      body = JSON.stringify({ model: localModel, messages, stream: true, max_tokens: maxT });
+      body = JSON.stringify(Object.assign({ model: localModel, messages, stream: true },
+        omitMaxTokens ? {} : { max_tokens: maxT }));
     } else {
       headers = zenHeaders;
       // Free modely -> /chat/completions (stream:true + chat-tools + prompt_cache_key = required)
       // Without agent: tool_choice:none = the model MUST NOT call tools (gatekeeper only checks the presence of the tools field),
       // otherwise weak FREE models sometimes emit "undefined" / phantom tool-call gibberish
       url = `${API_BASE}/chat/completions`;
-      const chatTools = dropWeb(agentOn ? AGENT_TOOLS_CHAT : (planOn ? PLAN_TOOLS_CHAT : DUMMY_TOOLS_CHAT), gC);
+      // Skrytý běh (summary…) jede bez tools a s tool_choice:none.
+      const noToolsMode = noToolsOn || !agentOn;
+      let baseTools = agentOn ? AGENT_TOOLS_CHAT : DUMMY_TOOLS_CHAT;
+      const chatTools = dropWeb(filterByAgent(baseTools, gC), gC);
       body = JSON.stringify({
         model: mId,
         messages,
         stream: true,
-        max_tokens: maxT,
+        ...(omitMaxTokens ? {} : { max_tokens: maxT }),
+        ...(eff ? { reasoning_effort: eff } : {}),
         tools: chatTools,
-        ...((agentOn || planOn) ? {} : { tool_choice: 'none' }),
+        ...(noToolsMode ? { tool_choice: 'none' } : {}),
         prompt_cache_key: sid
       });
     }
+    // Záložní plán pro HTTP 400: schodni max_tokens dolů a zkus to znovu.
+    // body se přepisuje přes tuto funkci a streamDirect/proxy čtou bodyNow.
+    // Když se max_tokens původně neposílal, 400 znamená spíš moc dlouhý kontext —
+    // vložíme tedy konzervativní hodnotu a když to nepomůže, latka dojde a chyba se
+    // ukáže normálně (žádná smyčka naprázdno).
+    let bodyNow = body;
+    const MAXT_LADDER = [65536, 16384, 8192, 4096];
+    let maxTLadderIdx = -1;
+    const nextMaxT = () => {
+      maxTLadderIdx++;
+      if (maxTLadderIdx >= MAXT_LADDER.length) return 0;
+      const v = MAXT_LADDER[maxTLadderIdx];
+      try {
+        const o = JSON.parse(bodyNow);
+        o.max_tokens = v;
+        bodyNow = JSON.stringify(o);
+        try { T.dbgLog('aistream', { end: 'max-tokens-fallback', from: omitMaxTokens ? 'omit' : maxT, to: v }); } catch {}
+        return v;
+      } catch { return 0; }
+    };
 
     const u = new URL(url);
     const isHttps = u.protocol === 'https:';
@@ -909,17 +1223,25 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       const tls = parsed.tools || [];
       T.dbgLog('aireq', {
         model: parsed.model, api: url.includes('/responses') ? 'responses' : 'chat',
-        mode: agentOn ? 'build' : (planOn ? 'plan' : 'chat'),
+        mode: agentOn ? 'build' : 'chat',
         tools: tls.map(t => (t.function || t).name),
         inputChars: String(parsed.input || JSON.stringify(parsed.messages || '')).length,
-        maxT, websearch: websearch !== false
+        maxT: omitMaxTokens ? 'omit' : maxT, effort: eff || 'default', websearch: websearch !== false
       });
     } catch {}
 
     // --- Gateway request: direct, on quota/429 automatically via random proxies, infinitely ---
     let finished = false;
     let currentAbort = null;
-    const safeSend = (ch, data) => { try { sender.send(ch, data); } catch {} };
+    // chat:stream-* vždy s ID streamu, aby renderer věděl, komu chunk patří
+    const safeSend = (ch, data) => {
+      try {
+        if (ch === 'chat:stream-chunk') sender.send(ch, { s: streamId, d: data });
+        else if (ch === 'chat:stream-end') sender.send(ch, { s: streamId });
+        else if (ch === 'chat:stream-error') sender.send(ch, { s: streamId, e: Object.assign({}, data || {}, { error: String((data && data.error) || 'stream error').slice(0, 300) }) });
+        else sender.send(ch, data);
+      } catch {}
+    };
     const notifyProxy = (proxy, reason) => {
       try {
         PX.onProxySwitch(proxy);
@@ -931,6 +1253,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
     const finishOnce = (ch, data, chunks, bytes) => {
       if (finished) return;
       finished = true;
+      streamAborts.delete(streamId);
       try { currentAbort && currentAbort(); } catch {}
       try {
         T.dbgLog('aistream', {
@@ -958,7 +1281,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         req.on('error', (e) => { finishOnce('chat:stream-error', { error: e.message, url }); resolve({ fatal: true }); });
         req.setTimeout(60000);
         req.on('timeout', () => { try { req.destroy(); } catch {} finishOnce('chat:stream-error', { error: 'timeout 60s' }); resolve({ fatal: true }); });
-        req.write(body); req.end();
+        req.write(bodyNow); req.end();
         return;
       }
       const req = mod.request(url, {
@@ -978,7 +1301,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         if (!localBase && !finished) resolve({ netError: true, error: 'timeout 60s' });
         else { finishOnce('chat:stream-error', { error: 'timeout 60s' }); resolve({ fatal: true }); }
       });
-      req.write(body);
+      req.write(bodyNow);
       req.end();
     });
 
@@ -996,7 +1319,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         if (ended) return;
         ended = true;
         clearTimeout(idleTimer); clearTimeout(hardTimer);
-        try { ipcMain.removeListener('chat:stream-abort', onAbort); } catch {}
+        streamAborts.delete(streamId);
         if (ch === 'chat:stream-end' && !viaProxy) { try { PX.onDirectOk(); PX.markGood(); } catch {} }
         if (ch === 'chat:stream-end' && viaProxy) { try { PX.markGood(); } catch {} }
         if (resolve && ch && ch !== '__streaming__') {
@@ -1012,9 +1335,17 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         res.on('data', c => errData += c);
         res.on('end', () => {
           clearTimeout(idleTimer); clearTimeout(hardTimer);
-          try { ipcMain.removeListener('chat:stream-abort', onAbort); } catch {}
+          streamAborts.delete(streamId);
           const quota = rl || PX.isQuotaStatus(res.statusCode, errData);
           const geoBlocked = res.statusCode === 403 && isGeoBlockedBody(errData);
+          // 400 invalid_request = brana odmítila parametr (nejčastěji max_tokens).
+          // Není to chyba sítě ani kvóty — zkusíme menší max_tokens a jedeme dál.
+          const badParam = res.statusCode === 400 && !quota && !localBase
+            && /invalid[_ ]request|invalid request|max_tokens|context[_ ]length/i.test(errData);
+          if (badParam) {
+            const retryMt = nextMaxT();
+            if (retryMt) { resolve({ badParam: true, retryMt }); return; }
+          }
           if (quota && !geoBlocked && !localBase) {
             PX.onQuotaHit(raMs);
             resolve({ quota: true, status: res.statusCode, body: errData.slice(0, 1200), retryAfterMs: raMs });
@@ -1033,7 +1364,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         if (ended) return;
         ended = true;
         clearTimeout(idleTimer); clearTimeout(hardTimer);
-        try { ipcMain.removeListener('chat:stream-abort', onAbort); } catch {}
+        streamAborts.delete(streamId);
         if (ch === 'chat:stream-end' && !viaProxy) { try { PX.onDirectOk(); PX.markGood(); } catch {} }
         if (ch === 'chat:stream-end' && viaProxy) { try { PX.markGood(); } catch {} }
         finishOnce(ch, data, chunks, bytes);
@@ -1047,7 +1378,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       res.on('end', () => fwdEnd('chat:stream-end'));
       res.on('close', () => fwdEnd('chat:stream-end'));
       res.on('error', (e) => fwdEnd('chat:stream-error', { error: scrubModels(e.message), url, via: viaProxy ? viaProxy.str : 'direct' }));
-      ipcMain.once('chat:stream-abort', onAbort);
+      streamAborts.set(streamId, { abort: onAbort, convoId: convoId || '' });
       currentAbort = () => { try { res.destroy(); } catch {} };
     };
 
@@ -1065,11 +1396,11 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       };
       hardTimer = setTimeout(() => { try { api.abort(); } catch {} finishProxyFail('timeout 360s (proxy)'); }, 360000);
       const onAbort = () => { try { api.abort(); } catch {} clearTimeout(idleTimer); clearTimeout(hardTimer); finishOnce('chat:stream-end', undefined, chunks, bytes); resolve({ fatal: true }); };
-      ipcMain.once('chat:stream-abort', onAbort);
+      streamAborts.set(streamId, { abort: onAbort, convoId: convoId || '' });
       const api = PX.postStreamViaProxy(url, {
         method: 'POST',
         headers: { ...headers, 'Accept': 'text/event-stream' },
-        body, proxy, connectTimeout: 8000, timeout: 60000,
+        body: bodyNow, proxy, connectTimeout: 8000, timeout: 60000,
       }, {
         onHead: (status, headers) => {
           gotHead = true;
@@ -1089,12 +1420,17 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         },
         onEnd: () => {
           clearTimeout(idleTimer); clearTimeout(hardTimer);
-          try { ipcMain.removeListener('chat:stream-abort', onAbort); } catch {}
+          streamAborts.delete(streamId);
           if (api._errStatus) {
             const st = api._errStatus;
             const bd = String(api._errBody || '');
             const quota = st === 429 || PX.isQuotaStatus(st, bd);
             const geoBlocked = st === 403 && isGeoBlockedBody(bd);
+            const badParam = st === 400 && !quota && /invalid[_ ]request|invalid request|max_tokens|context[_ ]length/i.test(bd);
+            if (badParam) {
+              const retryMt = nextMaxT();
+              if (retryMt) { resolve({ badParam: true, retryMt }); return; }
+            }
             if (quota && !geoBlocked) {
               PX.onQuotaHit(parseRetryAfterMs(api._errHeaders && api._errHeaders['retry-after']));
               resolve({ quota: true, status: st, body: bd.slice(0, 1200) });
@@ -1115,7 +1451,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         },
         onError: (e) => {
           clearTimeout(idleTimer); clearTimeout(hardTimer);
-          try { ipcMain.removeListener('chat:stream-abort', onAbort); } catch {}
+          streamAborts.delete(streamId);
           resolve({ proxyFail: true, error: String((e && e.message) || e) });
         },
       });
@@ -1131,14 +1467,16 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       if (localBase) { await streamDirect(); return; }
       // The Stop button must also work while waiting between attempts (no attempt is listening then).
       const onLoopAbort = () => { try { currentAbort && currentAbort(); } catch {} finishOnce('chat:stream-end', undefined, 0, 0); };
-      ipcMain.on('chat:stream-abort', onLoopAbort);
+      streamAborts.set(streamId, { abort: onLoopAbort, convoId: convoId || '' });
       let n = 0; // failed attempts in this request (drives backoff growth)
       let waitCap = 0; // Retry-After from the last quota hit (ms, capped)
       const sleep = (ms) => new Promise((res) => {
         const t0 = Date.now();
-        const iv = setInterval(() => {
-          if (finished || (Date.now() - t0) >= ms) { clearInterval(iv); res(); }
-        }, 250);
+        const check = () => {
+          if (finished || (Date.now() - t0) >= ms) res();
+          else setTimeout(check, 250);
+        };
+        setTimeout(check, 250);
       });
       const backoffMs = () => {
         const base = Math.min(1000 * Math.pow(2, Math.min(n, 5)), 30000); // 1,2,4,8,16,30,30… s
@@ -1154,6 +1492,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
               notifyProxy(proxy, n === 0 ? 'preemptive-quota' : 'retry');
               const r = await streamViaProxy(proxy);
               if (!r || r.fatal) return;
+              if (r.badParam) { try { T.dbgLog('aistream', { end: 'max-tokens-retry-proxy', to: r.retryMt }); } catch {} continue; }
               if (r.quota || r.proxyFail) {
                 if (r.quota && r.retryAfterMs) waitCap = Math.min(r.retryAfterMs, 120000);
                 PX.markBad(proxy);
@@ -1166,6 +1505,11 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
           }
           const d = await streamDirect();
           if (!d || d.fatal || d.streaming) return; // done / running / fatal error
+          if (d.badParam) {
+            // brana odmítila max_tokens — sníženo v nextMaxT(), hned to zkus znovu (bez čekání)
+            try { T.dbgLog('aistream', { end: 'max-tokens-retry', to: d.retryMt }); } catch {}
+            continue;
+          }
           if (d.quota || d.netError) {
             if (d.retryAfterMs) waitCap = Math.min(d.retryAfterMs, 120000);
             n++;
@@ -1175,12 +1519,14 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
           return;
         }
       } finally {
-        try { ipcMain.removeListener('chat:stream-abort', onLoopAbort); } catch {}
+        streamAborts.delete(streamId);
       }
     })();
 
   } catch (e) {
-    sender.send('chat:stream-error', { error: e.message });
+    try {
+      sender.send('chat:stream-error', { s: 'st_err_' + Date.now().toString(36), e: { error: e && e.message ? e.message : String(e) } });
+    } catch {}
   }
 });
 
@@ -1237,59 +1583,67 @@ async function ensurePreview(root) {
   if (cur) return { ok: true, port: cur.port, url: `http://127.0.0.1:${cur.port}/` };
   const port = await freePort();
   const server = http.createServer((req, res) => {
-    try {
-      if (req.method !== 'GET' && req.method !== 'HEAD') {
-        res.writeHead(405, { 'Content-Type': 'text/plain' });
-        res.end('Method not allowed');
-        return;
-      }
-      const u = new URL(req.url || '/', 'http://127.0.0.1');
-      let rel = decodeURIComponent(u.pathname).replace(/\\/g, '/');
-      let abs = path.normalize(path.join(root, rel));
-      if (abs !== root && !abs.startsWith(root + path.sep)) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('Forbidden');
-        return;
-      }
-      // React/Vue build into dist/ takes precedence over the root
-      const distIndex = path.join(root, 'dist', 'index.html');
-      let effRoot = root;
+    // Async handler — na síťových discích (Z: WebDAV) synchronní fs operace
+    // blokují event loop a zpomalují celou aplikaci během AI generování.
+    (async () => {
       try {
-        if (fs.existsSync(distIndex)) {
-          effRoot = path.join(root, 'dist');
-          abs = path.normalize(path.join(effRoot, rel));
-          if (abs !== effRoot && !abs.startsWith(effRoot + path.sep)) {
-            res.writeHead(403, { 'Content-Type': 'text/plain' });
-            res.end('Forbidden');
-            return;
-          }
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          res.writeHead(405, { 'Content-Type': 'text/plain' });
+          res.end('Method not allowed');
+          return;
         }
-      } catch {}
-      try {
-        const st = fs.statSync(abs);
-        if (st.isDirectory()) abs = path.join(abs, 'index.html');
-      } catch {}
-      // SPA fallback: extensionless paths fall back to index (client routing), otherwise a 404 hint
-      if ((!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) && path.extname(abs) === '') {
-        const idx = path.join(effRoot, 'index.html');
-        if (fs.existsSync(idx)) abs = idx;
+        const u = new URL(req.url || '/', 'http://127.0.0.1');
+        let rel = decodeURIComponent(u.pathname).replace(/\\/g, '/');
+        let abs = path.normalize(path.join(root, rel));
+        if (abs !== root && !abs.startsWith(root + path.sep)) {
+          res.writeHead(403, { 'Content-Type': 'text/plain' });
+          res.end('Forbidden');
+          return;
+        }
+        // React/Vue build into dist/ takes precedence over the root
+        const distIndex = path.join(root, 'dist', 'index.html');
+        let effRoot = root;
+        try {
+          if (fs.existsSync(distIndex)) {
+            effRoot = path.join(root, 'dist');
+            abs = path.normalize(path.join(effRoot, rel));
+            if (abs !== effRoot && !abs.startsWith(effRoot + path.sep)) {
+              res.writeHead(403, { 'Content-Type': 'text/plain' });
+              res.end('Forbidden');
+              return;
+            }
+          }
+        } catch {}
+        try {
+          const st = await fs.promises.stat(abs);
+          if (st.isDirectory()) abs = path.join(abs, 'index.html');
+        } catch {}
+        // SPA fallback: extensionless paths fall back to index (client routing), otherwise a 404 hint
+        let st2;
+        try { st2 = await fs.promises.stat(abs); } catch {}
+        if ((!st2 || st2.isDirectory()) && path.extname(abs) === '') {
+          const idx = path.join(effRoot, 'index.html');
+          try { if (fs.existsSync(idx)) abs = idx; } catch {}
+        }
+        let st3;
+        try { st3 = await fs.promises.stat(abs); } catch {}
+        if (!st3 || st3.isDirectory()) {
+          res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end('<body style="background:#101010;color:#888;font-family:sans-serif"><h3>404 — nothing in the project yet. Let the AI generate something (index.html).</h3></body>');
+          return;
+        }
+        const ext = path.extname(abs).toLowerCase();
+        res.writeHead(200, {
+          'Content-Type': MIME[ext] || 'application/octet-stream',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*'
+        });
+        if (req.method === 'HEAD') { res.end(); return; }
+        fs.createReadStream(abs).pipe(res);
+      } catch (e) {
+        try { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('Error'); } catch {}
       }
-      if (!fs.existsSync(abs) || fs.statSync(abs).isDirectory()) {
-        res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end('<body style="background:#101010;color:#888;font-family:sans-serif"><h3>404 — nothing in the project yet. Let the AI generate something (index.html).</h3></body>');
-        return;
-      }
-      const ext = path.extname(abs).toLowerCase();
-      res.writeHead(200, {
-        'Content-Type': MIME[ext] || 'application/octet-stream',
-        'Cache-Control': 'no-store',
-        'Access-Control-Allow-Origin': '*'
-      });
-      if (req.method === 'HEAD') { res.end(); return; }
-      fs.createReadStream(abs).pipe(res);
-    } catch (e) {
-      try { res.writeHead(500, { 'Content-Type': 'text/plain' }); res.end('Error'); } catch {}
-    }
+    })();
   });
   await new Promise((resolve, reject) => {
     server.on('error', reject);
@@ -1347,25 +1701,71 @@ async function closeAppTarget(target) {
   } catch (e) { return { ok: false, output: 'Error: ' + (e && e.message) }; }
 }
 // ===== FILE WATCHER: jakmile do složky přistane jakýkoliv soubor, renderer hned přenačte náhled =====
-const previewWatchers = new Map(); // rootPath -> { watcher, timer }
+// Na síťových discích (Z: WebDAV) způsobuje fs.watch s recursive:true obrovské
+// množství síťového provozu (každý adresář = samostatný SMB request). Proto
+// používáme polling s exponenciálním backoffem — je to mnohem šetrnější k síti.
+const previewWatchers = new Map(); // rootPath -> { timer, interval, mtimes: Map }
 function broadcastPreviewChanged(root) {
   try {
     for (const w of BrowserWindow.getAllWindows()) { try { w.webContents.send('preview:file-changed', { root }); } catch {} }
   } catch {}
+}
+// Zjistí, jestli jde o síťový disk (Z:, Y:, ... nebo UNC cesta)
+function isNetworkPath(p) {
+  const s = String(p || '');
+  return /^[a-zA-Z]:[\\/]/.test(s) && !/^[cC]:[\\/]/i.test(s) || /^\\\\/.test(s);
+}
+// Rekurzivní seznam souborů s časovým razítkem (pro polling)
+function listFilesRecursive(dir, base, out) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (e.name.startsWith('.') && e.name !== '.env') continue;
+    const full = path.join(dir, e.name);
+    const rel = base ? base + '/' + e.name : e.name;
+    if (e.isDirectory()) {
+      if (SKIP_DIRS.has(e.name)) continue;
+      listFilesRecursive(full, rel, out);
+    } else if (e.isFile()) {
+      try {
+        const st = fs.statSync(full);
+        out.push({ path: rel, mtime: st.mtimeMs, size: st.size });
+      } catch {}
+    }
+  }
+}
+// Porovná dva seznamy souborů a vrátí true, když se něco změnilo
+function filesChanged(prev, cur) {
+  if (prev.length !== cur.length) return true;
+  for (let i = 0; i < cur.length; i++) {
+    if (prev[i].path !== cur[i].path) return true;
+    if (prev[i].mtime !== cur[i].mtime) return true;
+    if (prev[i].size !== cur[i].size) return true;
+  }
+  return false;
 }
 ipcMain.handle('preview:watch', (_, dirPath) => {
   try {
     const root = path.resolve(String(dirPath || ''));
     if (!root || !fs.existsSync(root)) return false;
     if (previewWatchers.has(root)) return true;
-    const watcher = fs.watch(root, { recursive: true }, () => {
+    // Na síťových discích používáme polling s delším intervalem
+    const net = isNetworkPath(root);
+    const interval = net ? 3000 : 500; // 3s pro síť, 500ms pro lokální
+    let files = [];
+    try { listFilesRecursive(root, '', files); } catch {}
+    const timer = setInterval(() => {
       const cur = previewWatchers.get(root);
-      if (!cur) return;
-      clearTimeout(cur.timer);
-      cur.timer = setTimeout(() => broadcastPreviewChanged(root), 400);
-    });
-    watcher.on('error', () => { try { watcher.close(); } catch {} previewWatchers.delete(root); });
-    previewWatchers.set(root, { watcher, timer: null });
+      if (!cur) { clearInterval(timer); return; }
+      let newFiles = [];
+      try { listFilesRecursive(root, '', newFiles); } catch {}
+      if (filesChanged(cur.mtimes, newFiles)) {
+        cur.mtimes = newFiles;
+        clearTimeout(cur.debounce);
+        cur.debounce = setTimeout(() => broadcastPreviewChanged(root), 400);
+      }
+    }, interval);
+    previewWatchers.set(root, { timer, interval, mtimes: files, debounce: null });
     return true;
   } catch { return false; }
 });
@@ -1373,7 +1773,7 @@ ipcMain.handle('preview:unwatch', (_, dirPath) => {
   try {
     const root = path.resolve(String(dirPath || ''));
     const cur = previewWatchers.get(root);
-    if (cur) { clearTimeout(cur.timer); try { cur.watcher.close(); } catch {} previewWatchers.delete(root); }
+    if (cur) { clearInterval(cur.timer); clearTimeout(cur.debounce); previewWatchers.delete(root); }
     return true;
   } catch { return false; }
 });
@@ -1421,6 +1821,6 @@ ipcMain.handle('video:abort', () => {
 app.on('before-quit', () => {
   for (const [, s] of previewServers) { try { s.server.close(); } catch {} }
   previewServers.clear();
-  for (const [, w] of previewWatchers) { try { clearTimeout(w.timer); } catch {} try { w.watcher.close(); } catch {} }
+  for (const [, w] of previewWatchers) { try { clearInterval(w.timer); } catch {} try { clearTimeout(w.debounce); } catch {} }
   previewWatchers.clear();
 });

@@ -87,8 +87,11 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .chat-item{padding:7px 10px;border-radius:var(--radius);cursor:pointer}
 .chat-item:hover{background:var(--surface-hover)}
 .chat-item.active{background:var(--surface-active)}
-.chat-item-title{font-size:13px;color:var(--text-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-item.streaming{background:var(--surface-active);border-left:3px solid #5b8cff}
+.chat-item-title{font-size:13px;color:var(--text-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
 .chat-item-sub{font-size:11px;color:var(--text-weaker);margin-top:1px}
+.chat-spinner{display:inline-block;width:12px;height:12px;border:2px solid #5b8cff;border-top-color:transparent;border-radius:50%;animation:chat-spin 0.8s linear infinite;flex-shrink:0}
+@keyframes chat-spin{to{transform:rotate(360deg)}}
 .chat-list-empty{font-size:12px;color:var(--text-weaker);padding:8px 10px}
 .side-bottom{border-top:1px solid var(--border-weaker);padding-top:6px;display:flex;flex-direction:column;gap:2px}
 .side-btn{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--radius);
@@ -98,10 +101,56 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 .side-ver{font-size:11px;color:var(--text-weaker);padding:4px 10px}
 
 /* ===== Main ===== */
-.main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg-base)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg-base);position:relative;overflow:hidden;
+  transition:padding-right .38s cubic-bezier(.32,.72,.24,1)}
+.main.panel-open{padding-right:min(50vw,100%)}
+/* ===== Výsuvný panel vpravo: půl monitoru, chat se zmenší, smooth slide ===== */
+.side-panel{position:absolute;top:0;right:0;bottom:0;width:min(50vw,100%);z-index:500;
+  display:flex;flex-direction:column;background:#101014f2;border-left:none;
+  box-shadow:-24px 0 60px #000000aa;transform:translateX(103%);
+  transition:transform .38s cubic-bezier(.32,.72,.24,1)}
+.side-panel.open{transform:translateX(0)}
+#panelToggle.active{background:#ffffff22}
+.sp-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #ffffff1a;
+  font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#fff}
+/* Panel je pod systémovými tlačítky okna — křížek ↻ musí být vlevo od nich. */
+body.win .sp-head{padding-right:152px}
+.sp-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sp-body{flex:1;min-height:0;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.sp-empty{margin:auto;color:var(--text-weak);font-size:13px;text-align:center;line-height:1.7}
+.sp-frame{flex:1;min-height:420px;width:100%;border:none;border-radius:10px;background:#fff}
+.sp-img{max-width:100%;border:none;border-radius:10px;background:#fff}
+/* Moderní tenký scrollbar v panelu */
+.sp-body{scrollbar-width:thin;scrollbar-color:#ffffff2e transparent}
+.sp-body::-webkit-scrollbar,.sp-code::-webkit-scrollbar{width:8px;height:8px}
+.sp-body::-webkit-scrollbar-track,.sp-code::-webkit-scrollbar-track{background:transparent}
+.sp-body::-webkit-scrollbar-thumb,.sp-code::-webkit-scrollbar-thumb{background:#ffffff2e;border-radius:8px}
+.sp-body::-webkit-scrollbar-thumb:hover,.sp-code::-webkit-scrollbar-thumb:hover{background:#ffffff4d}
+/* Záložky: víc věcí najednou, každá vlastní karta */
+.sp-tabs{display:flex;gap:6px;padding:8px 12px 0;overflow-x:auto;flex:none;scrollbar-width:none}
+.sp-tabs::-webkit-scrollbar{display:none}
+.sp-tab{display:flex;align-items:center;gap:7px;flex:none;max-width:190px;cursor:pointer;
+  background:#ffffff10;border:1px solid #ffffff22;border-radius:9px;padding:4px 6px 4px 11px;
+  font-size:12px;color:var(--text-weak);white-space:nowrap}
+.sp-tab span{overflow:hidden;text-overflow:ellipsis}
+.sp-tab:hover{color:var(--text)}
+.sp-tab.active{background:#ffffff1c;color:#fff;border-color:#ffffff44}
+.sp-tab-x{font-style:normal;font-weight:400;font-size:11px;opacity:.55;border-radius:6px;padding:1px 5px;cursor:pointer}
+.sp-tab-x:hover{opacity:1;background:#ffffff22}
+.sp-code{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Consolas,monospace;
+  font-size:12px;line-height:1.6;color:#d5dbe4;background:#ffffff08;border:1px solid #ffffff1a;
+  border-radius:10px;padding:10px 12px;margin:0;max-height:100%;overflow:auto}
+.sp-run{border:1px solid #ffffff22;border-radius:10px;padding:12px;background:#ffffff08;display:flex;flex-direction:column;gap:8px}
+.sp-run-name{font-family:ui-monospace,Consolas,monospace;font-size:13px;color:#fff;word-break:break-all}
+.sp-run-status{font-size:12px;color:var(--text-weak)}
+.sp-run-status.on{color:#30d158}
+.sp-run-row{display:flex;gap:8px;flex-wrap:wrap}
 .topbar{height:44px;min-height:44px;display:flex;align-items:center;padding:0 16px;
   border-bottom:1px solid var(--border-weaker);-webkit-app-region:drag}
 .topbar *{-webkit-app-region:no-drag}
+/* Windows kreslí minimalizovat/maximalizovat/× PŘES pravý horní roh okna.
+   Bez rezervy se pod nimi schová tlačítko Panel i terminál (vidíš jen "Connected"). */
+body.win .topbar{padding-right:152px}
 .session-title{font-size:13px;color:var(--text-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top-right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .top-status{font-size:12px;color:var(--text-weaker)}
@@ -168,7 +217,10 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
 /* ===== Tool cards: stejný rámeček jako Thinking, bílý, s logem ===== */
 .think-logo{width:14px;height:14px;border-radius:4px;flex:none}
 .think-box.tool{border-color:#ffffff40}
-.think-box.tool .think-head{color:#fff}
+.think-box.tool .think-head{color:#fff;padding:5px 10px;cursor:pointer}
+.think-box.tool .think-head:hover{background:#ffffff0a}
+.think-box.tool .think-body{padding:0 12px;max-height:260px;overflow:auto}
+.think-box.tool.open .think-body{padding:2px 12px 10px}
 .think-box.tool .t-name{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:#fff;flex-shrink:0}
 .think-box.tool .t-path{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#d7dce4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 .think-box.tool .t-chip{margin-left:auto;font-weight:700;flex:none}
@@ -186,17 +238,85 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
   background:transparent;color:var(--text);font-size:13px;cursor:pointer;text-align:center}
 .empty-suggest button:hover{background:var(--surface-hover);color:var(--text-strong);border-color:var(--border-strong)}
 
+/* ===== Prázdný stav ve stylu OpenCode: velký bledý wordmark + plovoucí composer =====
+   Když je konverzace prázdná, `.main` dostane `.is-empty`:
+     - chat-container se zmenší na výšku wordmarku a netextuje
+     - wordmark sedí těsně nad composerem
+     - composer dostane plovoucí kartu uprostřed obrazovky
+     - pod composerem se objeví stavový řádek (projekt / větev)
+   Při první zprávě třída zmizí a vše plynule přejde do normálního chatu. */
+.main.is-empty .chat-container{flex:0 0 auto;overflow:visible;padding:0 20px}
+.main.is-empty .messages{display:none}
+.main.is-empty .composer-wrap{padding:0 20px 10px}
+.main.is-empty .composer{max-width:880px;padding:6px 8px 8px;border-radius:22px;
+  box-shadow:0 18px 48px #00000066,0 0 0 1px #ffffff0a;
+  animation:emptyRise .34s cubic-bezier(.22,.72,.2,1) both}
+.main.is-empty #promptInput{min-height:52px;font-size:15.5px;padding:14px 16px 6px}
+@keyframes emptyRise{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+
+.empty-mark{width:100%;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:0 0 26px;user-select:none;pointer-events:none}
+/* bledý wordmark — jako opencode v prázdném chatu */
+.empty-word{font-size:clamp(56px,10vw,132px);line-height:.94;font-weight:700;letter-spacing:-.045em;
+  color:transparent;background:linear-gradient(180deg,#ffffff2e 0%,#ffffff12 58%,#ffffff05 100%);
+  -webkit-background-clip:text;background-clip:text;
+  filter:blur(.35px);user-select:none;max-width:100%;overflow:hidden;text-overflow:clip}
+.empty-hint{font-size:13px;color:var(--text-weaker);margin-top:14px;text-align:center;line-height:1.6;max-width:520px}
+.empty-sugg-inline{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:18px;
+  pointer-events:auto;max-width:720px}
+.empty-sugg-inline button{padding:7px 13px;border-radius:999px;border:1px solid var(--border-weak);
+  background:#ffffff08;color:var(--text-weak);font-size:12.5px;cursor:pointer;transition:.14s}
+.empty-sugg-inline button:hover{background:#ffffff14;color:var(--text-strong);border-color:var(--border-strong)}
+
+/* stavový řádek pod composerem */
+.composer-meta{display:none}
+.main.is-empty .composer-meta{display:flex;align-items:center;justify-content:center;gap:7px;
+  margin:14px auto 0;max-width:880px;animation:emptyRise .4s .04s cubic-bezier(.22,.72,.2,1) both}
+.meta-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;
+  border:1px solid var(--border-weak);background:#ffffff08;color:var(--text-weak);font-size:12.5px;
+  cursor:pointer;transition:.14s;max-width:280px}
+.meta-pill:hover{background:#ffffff14;color:var(--text-strong);border-color:var(--border-strong)}
+.meta-pill span:not(.meta-chev):not(.meta-ico){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta-ico{font-size:11px;color:var(--text-weaker);flex:none}
+.meta-chev{font-size:9px;color:var(--text-weaker);flex:none}
+.meta-sep{color:var(--text-weaker);opacity:.5;font-size:12px;user-select:none}
+.main.is-empty .composer-foot{display:none}
+
+
 /* ===== Composer (prompt-input) ===== */
 .composer-wrap{padding:0 20px 10px}
-.composer{max-width:768px;margin:0 auto;background:var(--bg-stronger);
-  border:1px solid var(--border-weak);border-radius:10px}
-.composer:focus-within{border-color:var(--border-strong)}
+/* ===== Composer: zaoblená karta jako v AI chatu (Nový design) ===== */
+.composer{max-width:820px;margin:0 auto;background:#17171a;
+  border:1px solid #ffffff14;border-radius:20px;padding:4px 6px 6px;
+  box-shadow:0 8px 28px #00000055;transition:border-color .18s,box-shadow .18s}
+.composer:focus-within{border-color:#ffffff2e;box-shadow:0 8px 32px #00000077,0 0 0 3px #8ec2fc1a}
 #promptInput{width:100%;background:transparent;border:none;outline:none;resize:none;
-  color:var(--text-strong);font-size:14px;line-height:1.55;font-family:inherit;
-  padding:12px 14px 4px;max-height:160px;min-height:44px}
-#promptInput::placeholder{color:var(--text-weaker)}
-.composer-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 8px 8px;flex-wrap:wrap;gap:6px}
-.composer-left{display:flex;align-items:center;gap:8px;position:relative;flex-wrap:wrap;min-width:0}
+  color:var(--text-strong);font-size:15px;line-height:1.6;font-family:inherit;
+  padding:12px 14px 4px;max-height:220px;min-height:46px}
+#promptInput::placeholder{color:#6b6b73}
+/* Levá strana se smí stlačit, pravá NIKDY nesmí zlomit na další řádek —
+   tokeny musí zůstat vlevo od tlačítka Send, ne nad ním. */
+.composer-bar{display:flex;align-items:center;justify-content:space-between;padding:2px 6px 4px;gap:8px;flex-wrap:nowrap}
+/* overflow:visible je NUTNÝ — dropdown modelu je absolutně pozicovaný potomek a
+   overflow:hidden by ho uřízl (5.18.2 bug: dropdown se neotevíral). Stlačení
+   řeší min-width:0 + flex-wrap, položky uvnitř mají vlastní ellipsis. */
+.composer-left{display:flex;align-items:center;gap:8px;position:relative;flex-wrap:wrap;min-width:0;flex:1 1 auto;overflow:visible}
+.composer-right{display:flex;align-items:center;gap:8px;flex:0 0 auto;flex-wrap:nowrap;margin-left:auto}
+/* + tlačítko vlevo (přiložit obrázek) */
+.add-btn{width:30px;height:30px;border-radius:50%;border:1px solid #ffffff1f;background:transparent;
+  color:#b9b9c2;font-size:17px;line-height:1;cursor:pointer;flex:none;display:flex;align-items:center;justify-content:center;
+  transition:background .15s,color .15s,border-color .15s}
+.add-btn:hover{background:#ffffff14;color:#fff;border-color:#ffffff33}
+#promptInput.drag{background:#8ec2fc14;outline:1px dashed #8ec2fc66}
+/* Přiložené obrázky nad textovým polem */
+.attach-strip{display:flex;gap:8px;flex-wrap:wrap;padding:8px 8px 2px}
+.attach-chip{position:relative;width:64px;height:64px;border-radius:10px;overflow:hidden;
+  border:1px solid #ffffff22;background:#ffffff0a}
+.attach-chip img{width:100%;height:100%;object-fit:cover;display:block}
+.attach-x{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;
+  background:#000000cc;border:none;color:#fff;font-size:11px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
+.attach-x:hover{background:#fc543a}
 /* Narrow video chat: keep every control visible, hide the Enter hint */
 .chat-view.flip.video .composer-left{gap:6px}
 .chat-view.flip.video .hint{display:none}
@@ -226,39 +346,146 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;fon
   box-shadow:0 0 0 3px #ffffff22,0 0 12px #ffffff66}
 #speedSlider::-moz-range-track{background:transparent}
 #speedSlider:focus-visible{box-shadow:0 0 0 2px #8ec2fc66}
-.composer-right{display:flex;align-items:center;gap:8px}
+/* ===== Indikátor složky: kam AI píše (klik = změna) ===== */
+.folder-pill{display:flex;align-items:center;gap:6px;max-width:220px;padding:5px 10px;border-radius:16px;
+  border:1px solid #ffffff1a;background:#ffffff0d;color:var(--text);font-size:12.5px;cursor:pointer;flex:none;
+  transition:background .15s,border-color .15s}
+.folder-pill:hover{background:#ffffff1a;border-color:#ffffff33}
+.fp-ico{font-size:12px;flex:none}
+.fp-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+.fp-chev{font-size:9px;color:var(--text-weaker);flex:none}
+
+/* ===== Settings: formulářové prvky ===== */
+.pref-select,.pref-input{width:100%;padding:7px 9px;border-radius:var(--radius);border:1px solid var(--border-weak);
+  background:var(--surface);color:var(--text);font-size:13px;font-family:inherit}
+.pref-select:focus,.pref-input:focus{outline:none;border-color:#8ec2fc66;box-shadow:0 0 0 2px #8ec2fc22}
+.pref-input[type=number]{max-width:160px}
+
+/* ===== Smooth okénko: AI chce přístup mimo složku ===== */
+.access-pop{position:absolute;left:50%;transform:translate(-50%,-14px);z-index:600;opacity:0;
+  pointer-events:none;transition:opacity .3s ease,transform .38s cubic-bezier(.32,.72,.24,1);
+  max-width:820px;width:calc(100% - 40px);margin:0 auto}
+.access-pop.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.ap-body{background:#1c1c21;border:1px solid #ffffff2e;border-radius:16px;padding:14px 16px;
+  box-shadow:0 16px 48px #000000aa,0 0 0 3px #8ec2fc14}
+.ap-title{font-size:13.5px;font-weight:600;color:#fff;margin-bottom:4px}
+.ap-path{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#8ec2fc;word-break:break-all;margin-bottom:6px}
+.ap-note{font-size:12px;color:var(--text-weak);line-height:1.55;margin-bottom:12px}
+.ap-btns{display:flex;gap:8px;justify-content:flex-end}
 .hint{font-size:11px;color:var(--text-weaker)}
-.send-btn{width:28px;height:28px;border-radius:50%;border:none;background:#ededed;color:#101010;
-  font-size:15px;font-weight:700;cursor:pointer;display:grid;place-items:center;line-height:1}
-.send-btn:hover{background:#fff}
+/* ===== Odesílací tlačítko: mírně zaoblený čtverec, ↑ nahoru =====
+   Při generování se přemění na animovaný "generating" stav — žádné tlačítko vedle. */
+.send-btn{width:34px;height:34px;border-radius:9px;border:none;background:#ededed;color:#101010;
+  font-size:16px;font-weight:700;cursor:pointer;display:grid;place-items:center;line-height:1;
+  transition:background .18s,color .18s,transform .18s}
+.send-btn:hover{background:#fff;transform:translateY(-1px)}
 .send-btn:disabled{opacity:.3;cursor:not-allowed}
+.send-btn.generating{background:#ffffff1a;color:#e6e6ee;cursor:progress;transform:none}
+.send-btn.generating:hover{background:#ffffff1a;transform:none}
+/* animovaný stav: tři pulzující body */
+.gen-dots{display:flex;gap:4px;align-items:center;justify-content:center}
+.gen-dots i{width:5px;height:5px;border-radius:50%;background:currentColor;display:block;
+  animation:genpulse 1.1s ease-in-out infinite}
+.gen-dots i:nth-child(2){animation-delay:.18s}
+.gen-dots i:nth-child(3){animation-delay:.36s}
+@keyframes genpulse{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-2px)}}
+/* kroužec kolem tlačítka, když pracuje */
+.send-btn.generating::after{content:'';position:absolute;inset:-3px;border-radius:12px;
+  border:1px solid #8ec2fc55;animation:genring 1.6s ease-out infinite;pointer-events:none}
+.send-btn{position:relative}
+@keyframes genring{0%{opacity:.9;transform:scale(.96)}100%{opacity:0;transform:scale(1.14)}}
 .stop-btn{width:28px;height:28px;border-radius:50%;border:1px solid var(--border-strong);
   background:transparent;color:var(--text);font-size:10px;cursor:pointer;display:grid;place-items:center}
 .composer-foot{max-width:768px;margin:6px auto 0;display:flex;gap:6px;font-size:11px;color:var(--text-weaker)}
 .dot-sep{opacity:.5}
 
+/* ===== Prohlížeč složek: všechny disky + celý filesystem ===== */
+.modal-content.browser{width:min(920px,92vw);max-height:84vh;display:flex;flex-direction:column;padding:0}
+.browser-actions{display:flex;gap:6px;margin-left:auto}
+.browser-path{padding:8px 16px;font-family:ui-monospace,Consolas,monospace;font-size:12px;
+  color:#8ec2fc;border-bottom:1px solid #ffffff12;word-break:break-all}
+.browser-row{display:flex;gap:0;flex:1;min-height:0}
+.browser-side{width:210px;flex:none;border-right:1px solid #ffffff12;padding:10px;overflow-y:auto;background:#ffffff05}
+.browser-side-title{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-weaker);
+  margin:6px 0 5px;font-weight:700}
+.browser-side-title:first-child{margin-top:0}
+.browser-list{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
+.browser-item{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:7px;cursor:pointer;
+  font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.browser-item:hover{background:#ffffff14}
+.browser-item.active{background:#8ec2fc22;outline:1px solid #8ec2fc55}
+.browser-item .bi-ico{font-size:13px;flex:none}
+.browser-main{flex:1;min-width:0;overflow-y:auto;padding:8px;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:4px;align-content:start}
+.browser-empty{grid-column:1/-1;padding:20px;text-align:center;color:var(--text-weaker);font-size:12.5px}
+.browser-foot{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid #ffffff12}
+
 /* ===== Model dropdown (popover) ===== */
-.model-dropdown{position:absolute;bottom:calc(100% + 8px);left:0;width:380px;max-width:calc(100vw - 24px);
-  max-height:380px;display:none;flex-direction:column;background:var(--surface-float);
-  border:1px solid var(--border-weak);border-radius:8px;overflow:hidden;z-index:30;
+.model-dropdown{position:absolute;bottom:calc(100% + 8px);left:0;width:392px;max-width:calc(100vw - 24px);
+  max-height:min(520px,72vh);display:none;flex-direction:column;background:var(--surface-float);
+  border:1px solid var(--border-weak);border-radius:10px;overflow:hidden;z-index:30;
   box-shadow:0 36px 80px 0 #00000088,0 13px 29px 0 #00000066}
 .model-dropdown.open{display:flex}
+.md-head{padding:10px 14px 8px;font-size:11px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--text-weaker);border-bottom:1px solid var(--border-weaker)}
 .dropdown-search{padding:8px;border-bottom:1px solid var(--border-weaker)}
 .dropdown-search input{width:100%;padding:7px 10px;border-radius:var(--radius);
   border:1px solid var(--border-weak);background:var(--surface);color:var(--text-strong);
   font-size:13px;outline:none}
 .dropdown-search input:focus{border-color:var(--border-strong)}
 .dropdown-search input::placeholder{color:var(--text-weaker)}
-.model-list{overflow-y:auto;padding:4px;display:flex;flex-direction:column}
-.model-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius);cursor:pointer}
+.model-list{overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:1px}
+.model-item{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:7px;cursor:pointer}
 .model-item:hover{background:var(--surface-hover)}
 .model-item.active{background:var(--surface-active)}
 .minfo{flex:1;min-width:0}
-.mname{font-size:13px;color:var(--text-strong);display:flex;align-items:center;gap:8px}
-.mcheck{margin-left:auto;color:var(--text-weak);font-size:13px;visibility:hidden}
-.model-item.active .mcheck{visibility:visible}
-.mdesc{font-size:11px;color:var(--text-weaker);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mctx{font-size:11px;color:var(--text-weaker)}
+.mname{font-size:13px;color:var(--text-strong);display:flex;align-items:center;gap:7px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mname > span:first-child{overflow:hidden;text-overflow:ellipsis}
+/* odznaky: kvalita + rychlost + kontext */
+.mtags{display:flex;align-items:center;gap:6px;flex:none}
+.mtag{font-size:10.5px;padding:1.5px 6px;border-radius:5px;border:1px solid var(--border-weaker);
+  color:var(--text-weaker);white-space:nowrap;line-height:1.5}
+.mtag.q{color:#ffd479;border-color:#ffd47940}
+.mtag.s{display:inline-flex;align-items:center;gap:4px}
+.mdot{width:7px;height:7px;border-radius:50%;flex:none;
+  box-shadow:0 0 0 2px #ffffff14 inset}
+.mdot.fast{background:#5fd18c}
+.mdot.med{background:#f0c04a}
+.mdot.slow{background:#e88b7d}
+.mcheck{color:var(--text-strong);font-size:13px;flex:none}
+.model-item:not(.active) .mcheck{visibility:hidden}
+.mdesc{font-size:11px;color:var(--text-weaker);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* ===== Úroveň uvažování (reasoning effort) ===== */
+.eff-item{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:7px;cursor:pointer}
+.eff-item:hover{background:var(--surface-hover)}
+.eff-item.active{background:var(--surface-active)}
+.eff-ico{width:20px;height:20px;border-radius:5px;flex:none;display:flex;align-items:center;
+  justify-content:center;font-size:11px;font-weight:700;color:#0d0d0d}
+.eff-ico.low{background:#8b95a5} .eff-ico.medium{background:#5fb0e8}
+.eff-ico.high{background:#f0b64a} .eff-ico.xhigh{background:#f08a4a}
+.eff-ico.max{background:#e86d7a}
+.eff-name{font-size:13px;color:var(--text-strong);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.eff-desc{font-size:11px;color:var(--text-weaker);margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.eff-bars{display:flex;align-items:flex-end;gap:2px;height:13px;flex:none}
+.eff-bars i{width:3px;background:var(--border-strong);border-radius:1px;display:block}
+.eff-item.active .eff-bars i{background:#8ec2fc}
+.eff-check{color:var(--text-strong);font-size:13px;flex:none;width:14px;text-align:center}
+.eff-item:not(.active) .eff-check{visibility:hidden}
+
+/* oddělovače + informační řádek */
+.md-sep{height:1px;background:var(--border-weaker);margin:4px 0;flex:none}
+.md-row{display:flex;align-items:center;gap:10px;padding:8px 14px;font-size:12.5px;color:var(--text-strong)}
+.md-action{cursor:pointer}
+.md-action:hover{background:var(--surface-hover)}
+.md-ico{font-size:13px;color:var(--text-weak);flex:none;width:14px;text-align:center}
+.md-row-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.md-chev{color:var(--text-weaker);font-size:15px;line-height:1;flex:none}
+.md-note{padding:2px 14px 8px;font-size:11.5px;line-height:1.45;color:var(--text-weaker)}
+.md-link{display:block;padding:0 14px 10px;font-size:11.5px;color:#8ec2fc;text-decoration:none;width:max-content;max-width:calc(100% - 28px)}
+.md-link:hover{text-decoration:underline}
 .dropdown-footer{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;
   border-top:1px solid var(--border-weaker);font-size:11px;color:var(--text-weaker)}
 .dropdown-footer a{color:#8ec2fc;text-decoration:none}
@@ -390,6 +617,12 @@ body.win .pv-topbar{padding-right:152px}
   display:flex;gap:8px;align-items:center}
 .queue-bar span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .q-dot{width:7px;height:7px;border-radius:50%;background:#8ec2fc;flex-shrink:0;animation:think-blink 1.2s infinite}
+.queue-bar{flex-wrap:wrap;row-gap:6px}
+.q-label{flex-shrink:0;font-weight:600}
+.q-bubble{background:#8ec2fc22;border:1px solid #8ec2fc55;color:var(--text);border-radius:12px;
+  padding:3px 10px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.q-bubble.pop{animation:qpop .38s cubic-bezier(.2,1.6,.4,1)}
+@keyframes qpop{0%{transform:scale(.5);opacity:0}60%{transform:scale(1.08);opacity:1}100%{transform:scale(1);opacity:1}}
 /* ===== Activity bar: what the AI is doing right now ===== */
 .activity-bar{max-width:768px;margin:0 auto 8px;padding:8px 12px;border-radius:var(--radius);
   border:1px solid var(--border-weak);background:var(--bg-stronger);font-size:12px;color:var(--text);
@@ -538,6 +771,12 @@ body.win .pv-topbar{padding-right:152px}
 
 /* ===== Build / Plan switch ===== */
 .mode-seg{display:flex;border:1px solid var(--border-weak);border-radius:var(--radius);overflow:hidden}
+/* ===== Počítadlo tokenů: ležící pruh vpravo, těsně vlevo od Send ===== */
+.tok-meter{display:flex;align-items:center;gap:7px;flex:none}
+.tok-track{width:64px;height:4px;background:#ffffff1f;border-radius:4px;overflow:hidden}
+.tok-fill{height:100%;width:0;background:#8ec2fc;border-radius:4px;transition:width .25s ease}
+.tok-fill.near{background:#fc8a3a}
+.tok-label{font-size:11px;color:var(--text-weaker);white-space:nowrap;font-variant-numeric:tabular-nums}
 .mode-seg button{border:none;background:transparent;color:var(--text-weak);font-size:12px;
   padding:5px 10px;cursor:pointer}
 .mode-seg button + button{border-left:1px solid var(--border-weak)}

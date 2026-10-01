@@ -19,12 +19,13 @@ try { conversations = JSON.parse(localStorage.getItem('nlc_convos') || '[]'); if
 // legacy data without a project → null (global), so they do not mix with project ones
 for (const c of conversations) { if (!c || c.projectPath === undefined) c.projectPath = null; }
 let activeConvoId = localStorage.getItem('nlc_active') || null;
-let isStreaming = false;
+// Per-chat streaming state — každý chat může generovat nezávisle na ostatních.
+// Klíč = conversation ID, hodnota = { stopRequested: boolean }
+const streamingChats = new Map();
+// Globální stop flag pro aktuálně aktivní chat (používá se v runAgent smyčce)
 let stopRequested = false;
-let prefs = { activeProject: null, mode: 'build', terminal: 'auto', shellBackend: 'auto', sound: true, googleSearch: true,
-  permissions: 'all', fullAccess: true, allowShell: true, allowInstall: true, allowNetwork: true, allowDelete: true, allowHeavy: true, logErrors: true };
-let mode = localStorage.getItem('nlc_mode') || 'build';
-if (mode === 'auto') { mode = 'build'; try { localStorage.setItem('nlc_mode', 'build'); } catch {} } // Auto removed — Build tells questions apart from tasks on its own
+let prefs = { activeProject: null, terminal: 'auto', shellBackend: 'auto', sound: true, googleSearch: true,
+  logErrors: true };
 let projectRegistry = [];
 try { projectRegistry = JSON.parse(localStorage.getItem('nlc_projects') || '[]'); } catch { projectRegistry = []; }
 // Plná automatika, trvale. Žádné schvalování příkazů, nic se neptá.
@@ -39,32 +40,39 @@ let envBusy = false; // scan/install in progress
 let lastUserRequest = ''; // last user input (for detecting needed tools)
 let pendingQueue = [];
 
-const SPEEDS = [
-  { id: 'fast', label: 'Fast', tokens: 1024 },
-  { id: 'medium', label: 'Medium', tokens: 4096 },
-  { id: 'high', label: 'High', tokens: 16000 }
-];
-let speedIx = parseInt(localStorage.getItem('nlc_speed') || '1', 10);
-if (!(speedIx >= 0 && speedIx <= 2)) speedIx = 1;
+// Tokenová rezerva. Předtím byl default 4096 = jediný write_file se často usekl napůl
+// a do souboru šla polovina kódu. Vyšší limit = méně vynechaných kusů.
+// Slider Fast/Medium/High je pryč — tokenový limit je pevný, maximální.
+// max_tokens = MAXIMUM, KTERÉ MODEL VYDŽÍ. Změřeno přímo proti bráně:
+//   524 288 (2^19) -> HTTP 200
+//   530 000       -> HTTP 400  (a 1 000 000 taky)
+// Brána cokoliv nad to odmítí celý požadavek, takže tady posíláme přesně strop.
+// Stejnou hodnotu používá přístupce tokenů jako jmenovatel pruhu.
+const MAX_TOKENS = 524288;
+const SEND_MAX_TOKENS = 524288;
+// Model má kontextové okno ~1M tokenů. Dřív se posílalo jen 30 zpráv a výsledky
+// nástrojů se ořezávaly na 2000 znaků — okno se využívalo na ~2 %. Teď:
+//   HIST_MESSAGES     kolik posledních zpráv se pošle
+//   PROMPT_CHAR_BUDGET bezpečný rozpočet promptu ve znacích (~4 znaky/token)
+//   TOOL_RESULT_CHARS  kolik znaků jednoho výsledku nástroje se pošle modelu
+const HIST_MESSAGES = 400;
+const PROMPT_CHAR_BUDGET = 2400000;   // ~600k tokenů, s rezervou do 1M
+const TOOL_RESULT_CHARS = 24000;
+//   TOOLS_IN_CONTEXT   kolik posledních výsledků nástrojů jde do kontextu
+const TOOLS_IN_CONTEXT = 40;
 
-const IDENTITY = 'You are NolimitCoder by NolimitCode. You have full access to the computer: files, folders, terminal and installs. Always reply in the same language the user writes in.';
-const PLAN_PROMPT = 'PLAN: text only, no actions. You only have read tools. Explore the files and write a brief plan: what changes in which files (path:line) + how to verify it. No code.';
-const BUILD_SYS = 'Work through tools, not by printing into chat. Never announce an action in text without a simultaneous tool call - the first response to a request must contain a tool-call. Always call each tool-call with COMPLETE parameters in a single call - never empty {} and never in pieces (if the response gets cut off, call again COMPLETELY); only call when you have all parameters together - if you do not know a path, find it first via list_dir (never guess blindly). Independent actions: call them together in one step, dependent ones sequentially. Files: read with read_file, ALWAYS edit an existing file via edit_file with an exact small oldString copied from read_file (must match 1x, no line numbers, no own modifications), full write_file only for new files. Terminal: shell. Relative paths = active project; just name Documents, Desktop, Downloads.'
-  + ' Before compiling/running, call env_prepare with request and heavy: true (it auto-installs every missing tool from the internet, including large toolchains like MSVC, Docker and Android Studio). NEVER ask the user for permission and never tell them to install anything manually — just do it.'
-  + ' EXE: pick a sensible technology yourself and just build it — do not ask which one. Electron: scaffold_electron, write the code, shell npm install (timeout 600000), shell npm run dist (timeout 600000), verify the exe via file_info and report the path. Web: index.html in the project root. Always verify finished work by running it. Never commit without an explicit request.'
-  + ' CSS in generated apps: NEVER use backdrop-filter or -webkit-backdrop-filter (slow and blurry) — only solid colors, gradients and shadows.'
-  + ' RESEARCH FIRST (all projects): whenever the request mentions something you do not fully know — a brand, a platform like YouTube/TikTok, a format, dimensions, current specs or rules — FIRST look it up with web_search/web_fetch (official docs, ad/creative specs, resolutions, durations, safe zones), THEN build to the researched facts. Figure out what the user means before you act; never guess specs, dimensions or platform rules from memory.'
-  + ' Verify files ALWAYS with the file_info tool ({"path": "..."}) — never invent your own powershell/cmd check one-liners for files (they break on quotes and paths with spaces).'
-  + ' YOU HAVE FULL ACCESS: you may create, overwrite, edit, move and delete files, create folders, run any shell command, install packages and build projects — nothing needs permission. NEVER reply that you "cannot" do something or that the user must do it themselves; if a tool exists, call it.'
-  + ' If the request is a task, DO IT NOW with tool calls instead of describing what you would do, and do not stop after one step — keep going until the work is actually finished and verified.'
-  + ' If no project is open yet, create a folder with create_dir and work in it; do not stall waiting for instructions.'
-  + ' VERIFY FOR REAL (mandatory for anything runnable): launch it and check it works — exe: run it, confirm the process runs via shell tasklist, walk through the main functions (open, click handlers exist in code, window closes); html: serve via preview and web_fetch the page, confirm key elements and handlers exist. You cannot move the mouse — verify through process state, fetched DOM and code inspection, never claim a click you did not make. If anything is broken (window does not close, a button does nothing), FIX it and re-test. What YOU opened for testing you MUST close afterwards with close_app (exe by name, preview by URL) — never leave test windows running for the user.'
-  + ' LANGUAGE: always reply in the SAME language the user wrote in (Czech in, Czech out).'
-  + ' LAUNCHING APPS: to open a program, just run it once — for example shell with command "start \\"\\" C:\\\\path\\\\app.exe". Do NOT append "timeout", "tasklist" or sleeps to check it; the tool returns immediately and waits are guaranteed to time out.'
-  + ' NEVER run a bare "start \\\\" or an unquoted/relative target you have NOT verified with file_info first — always the full quoted exe path.'
-  + ' The app runs as ADMINISTRATOR, so installs, services and system folders work without asking. If a command fails, read the exact error text and fix the syntax instead of retrying the same form.';
-const AGENT_NUDGE = '';
-const CHAT_SYS = 'Answer briefly and to the point, in the SAME language the user wrote in (Czech in, Czech out). You have FULL rights: all tools including writing files and running commands. Prefer a text answer for plain questions, but if the user asks you to do something, DO IT with tool calls instead of describing it or refusing. Never claim the session is read-only or that you cannot act — you can.';
+/* ---------- Nástroje, mezi které se vybírá ---------- */
+const ALL_TOOLS = [
+  'shell', 'read', 'read_file', 'write_file', 'append_file', 'edit_file', 'list_dir',
+  'glob_file', 'create_dir', 'move_file', 'copy_file', 'delete_file', 'file_info',
+  'search_files', 'open_path', 'close_app', 'show_panel', 'web_fetch', 'web_search',
+  'download_file', 'env_scan', 'env_prepare', 'env_install', 'scaffold_electron',
+  'build_exe', 'question'
+];
+const READ_TOOLS = [
+  'read', 'read_file', 'list_dir', 'glob_file', 'file_info', 'search_files',
+  'web_fetch', 'web_search', 'env_scan', 'question', 'show_panel', 'close_app'
+];
 /* ---------- Build mode: question vs. task ----------
    Build ALWAYS first recognizes what the user wants (detectIntent), and then
    either just answers with text (question/chit-chat — read tools allowed), or works
@@ -76,10 +84,35 @@ const ACT_WORDS = /(\bmake|\bcreate|\bbuild|\bwrite|\bfix|\brepair|\badd|\bupdat
 const ASK_WORDS = /^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know|can you explain|could you explain|is there|are there|should i|would you)\b/i;
 const ASK_WORDS_CS = /^(jak|co|proč|proc|kde|kdy|kdo|kolik|čí|či|jestli|vysvětli|vysvetli|řekni|rekni|popiš|popis|poradíš|poradis|jaký|jakou|jaky|jakou|smí|smi|můžeš|muzes|dokážeš|dokazes|který|ktery|kdovolákterý)\b/i;
 const ASK_MID_CS = /\b(jak|vysvětli|vysvetli|řekni|rekni|popiš|popis|poraď|porad|co znamená|co znamena|co je to|co je|jak se|jaký je|jaky je)\b/i;
+/* Stížnost / pokračování práce. Krátká věta bez otazníku ("bro je to furt stejný",
+   "zase to nefunguje") je v praxi příkaz pokračovat, ne otázka. Bez tohoto se
+   taková zpráva vyhodnotí jako `chat` → agent dostane jen čtecí nástroje →
+   nemá write_file → zapisuje soubory přes shell heredoc → parser error. */
+const CONTINUE_WORDS = /(\bfurt\b|\bfurtě\b|\bzase\b|\bpořád\b|\bporad\b|\bstále\b|\bstable\b|\bagain\b|\bsame\b|\bsame as\b|\bstejně\b|\bstejne\b|\bdál\b|\bdal\b|\bpokračuj|pokracuj|\bcontinue\b|\bfinish\b|\bdokonči|dokonci|\bnefunguje\b|\bnefunguj\b|\bnejde\b|\bnepišu\b|\bnepíše\b|\bnesmazal\b|\bneslo\b|\bmálo\b|\bnedokonč|nedokonc|\boprav\b|\bopravit\b|\bzmeni\b|\bzměň\b|\bpřepiš\b|\bprepis\b|\bpřepisuj|budu|budu to|\boprav mi\b|\bsa to\b|\bsa mi\b|\bsa mi chce\b|\bplease fix\b|\bfix it\b|\btry again\b|\bsame thing\b|\bstuck\b|\bvisí\b|\bvisi\b|\bnejede\b|\bspadne\b|\bcrash)/i;
+const WRITEISH_TOOLS = new Set(['write_file', 'append_file', 'edit_file', 'create_dir', 'move_file',
+  'copy_file', 'delete_file', 'shell', 'env_install', 'env_prepare', 'scaffold_electron', 'download_file']);
+/* Direktivy proti "model jen čte a nikdy nezapíše". Slabý modely (free tier) se zaseknou
+   v průzkumu kódu a nikdy nepřejdou k zápisu. Místo toho, abychom to zabili po 4. kole
+   a ukázali "Nedokončeno", do toho jdeme — postupně posíláme direktivy a teprve když
+   ani ta nejtvrdší nepomůže, skončíme. */
+const WRITE_DIRECTIVE_1 = '[Dost čtení. Už víš, jak kód vypadá. Teď HNED zavolej write_file nebo edit_file a udělej změnu. Žádné další read_file / list_dir / glob_file / search_files — pokud něco potřebuješ vědět, vzpomeň si na to, co jsi už přečetl.]';
+const WRITE_DIRECTIVE_2 = '[STOP. Přestaň číst. Máš všechno, co potřebuješ. Zavolej write_file nebo edit_file HNED, v tomto kole. Pokud zavoláš read_file, list_dir, glob_file nebo search_files ještě jednou, úloha selže a budeš muset začít znovu. Napiš soubor.]';
+/* Už se v této konverzaci pracovalo (zápis/spuštění něčeho)? Pak je to běh pokračující
+   práce, ne dotaz — read-only sada nástrojů by ho jen uvěznila. */
+function convoDidWork(convo) {
+  const ms = (convo && convo.messages) || [];
+  for (let i = 0; i < ms.length; i++) {
+    const m = ms[i];
+    if (m && m.role === 'tool' && !m.skipped && WRITEISH_TOOLS.has(String(m.tool || ''))) return true;
+  }
+  return false;
+}
 function detectIntent(raw) {
   const t = String(raw || '').trim();
   if (!t) return 'chat';
-  const noFill = t.replace(/^(hi|hello|hey|yo|good morning|good afternoon|good evening|please|well|so|ok|okay|ahoj|čau|cau|zdar|dobrý den|dobry den|prosím|prosim|tak|hele)\b[\s,]+/i, '').trim() || t;
+  // Stížnost na průběh práce = pokračovat, ne ptát se (viz CONTINUE_WORDS).
+  if (CONTINUE_WORDS.test(t)) return 'build';
+  const noFill = t.replace(/^(hi|hello|hey|yo|good morning|good afternoon|good evening|please|well|so|ok|okay|ahoj|čau|cau|zdar|dobrý den|dobry den|prosím|prosim|tak|hele|bro)\b[\s,]+/i, '').trim() || t;
   // Tázací začátek → otázka, ledaže je v ní i výslovný rozkaz ("jak opravit X?" = úkol).
   if (ASK_WORDS.test(noFill) || ASK_WORDS_CS.test(noFill)) {
     if (ACT_WORDS.test(t)) return 'build';
@@ -120,7 +153,7 @@ function detectCommercialIntent(raw) {
 /* ---------- Error Log: všechny chyby jdou do dist/Error Log.txt ----------
    Zachytí i chyby, o kterých se nikdo nedozví — nevyzchaná výjimka v UI,
    selhaný nástroj, chyba spojení s AI. Uživatel si ji pak otevře v
-   Settings → Permissions → Error Log. */
+   Settings → Error Log. */
 function errLog(tag, error, detail) {
   try { if (window.api && window.api.logError) window.api.logError(tag, String(error || ''), detail); } catch {}
 }
@@ -200,6 +233,13 @@ const MODEL_FALLBACK = { 'free/space-bunny-free': 'free/space-bunny-free' };
 function activeProject() { return prefs.activeProject || null; }
 function activeConvo() { return conversations.find(c => c.id === activeConvoId) || null; }
 // Chaty patří projektu: shoda musí platit oběma směry (projekt A nevidí chaty projektu B ani globální a naopak).
+// Porovnávání jako původně — doslova. (normPath je tu jen pro okénko
+// přístupu a indikátor složky, aby se cesty nerůznily v UI.)
+function normPath(p) {
+  let s = String(p == null ? '' : p).trim().replace(/[\\/]+$/, '');
+  if (!s) return '';
+  return s.replace(/\//g, '\\').toLowerCase();
+}
 function convoProject(c) { return (c && c.projectPath) || null; }
 function projectMatch(c) { return !!c && convoProject(c) === (prefs.activeProject || null); }
 function saveConvos() { try { localStorage.setItem('nlc_convos', JSON.stringify(conversations.slice(-60))); } catch {} }
@@ -228,13 +268,26 @@ function bindEls() {
   el.sendBtn = $('#sendBtn'); el.stopBtn = $('#stopBtn');
   el.chatList = $('#chatList'); el.sessionTitle = $('#sessionTitle');
   el.statusText = $('#statusText'); el.queueBar = $('#queueBar');
-  el.activityBar = $('#activityBar'); el.planHint = $('#planHint');
+  el.activityBar = $('#activityBar');
   el.planBox = $('#planBox');
   el.envSummary = $('#envSummary'); el.envList = $('#envList');
   el.envScanBtn = $('#envScanBtn'); el.envFixAllBtn = $('#envFixAllBtn'); el.envHeavyCheck = $('#envHeavyCheck');
 }
 
 /* ---------- model picker ---------- */
+// Odznaky: kvalita (kategorie modelu) a rychlost (odhad podle kategorie).
+const QUALITY_TAG = { FLASH: 'High', PRO: 'High', ULTRA: 'High', BALANCED: 'Medium', STANDARD: 'Medium', THINK: 'Thinking', REASONING: 'Thinking', LITE: 'Low', MINIMAL: 'Low', FAST: 'Low' };
+const SPEED_TAG = { FLASH: ['fast', 'Fast'], PRO: ['fast', 'Fast'], ULTRA: ['med', 'Fast'], BALANCED: ['fast', 'Fast'], STANDARD: ['med', 'Fast'], THINK: ['med', 'Fast'], REASONING: ['med', 'Fast'], LITE: ['fast', 'Fast'], MINIMAL: ['fast', 'Fast'], FAST: ['fast', 'Fast'] };
+function modelTags(m) {
+  const cat = String(m.category || 'FLASH').toUpperCase();
+  const q = QUALITY_TAG[cat] || 'Medium';
+  const sp = SPEED_TAG[cat] || ['med', 'Fast'];
+  let out = '';
+  if (m.context) out += '<span class="mtag">' + escapeHtml(m.context) + '</span>';
+  out += '<span class="mtag q">' + escapeHtml(q) + '</span>';
+  out += '<span class="mtag s"><span class="mdot ' + sp[0] + '"></span>' + escapeHtml(sp[1]) + '</span>';
+  return '<span class="mtags">' + out + '</span>';
+}
 function renderModelList() {
   const models = getModels();
   let filtered = models;
@@ -245,13 +298,46 @@ function renderModelList() {
   el.modelList.innerHTML = filtered.map(m => {
     const isActive = m.id === selectedModel;
     return '<div class="model-item ' + (isActive ? 'active' : '') + '" data-id="' + escapeHtml(m.id) + '">'
-      + '<div class="minfo"><div class="mname">' + escapeHtml(m.label) + '<span class="mcheck">✓</span></div>'
-      + '<div class="mdesc">' + escapeHtml(m.desc || '') + ' · ' + escapeHtml(m.context || '') + '</div></div></div>';
+      + '<div class="minfo"><div class="mname"><span>' + escapeHtml(m.label) + '</span>' + modelTags(m) + '</div>'
+      + (m.desc || m.context ? '<div class="mdesc">' + escapeHtml(m.desc || '') + '</div>' : '')
+      + '</div><span class="mcheck">✓</span></div>';
   }).join('') || '<div class="chat-list-empty">Nic nenalezeno</div>';
   $$('#modelList .model-item').forEach(n => n.addEventListener('click', () => {
     selectedModel = n.getAttribute('data-id');
     localStorage.setItem('nlc_model', selectedModel);
     updateModelLabel(); renderModelList(); closeModels();
+  }));
+}
+/* ---------- úroveň uvažování (reasoning effort) ---------- */
+// Změřeno proti bráně: reasoning_tokens rostou s úrovní
+// (průměr low 32 → medium 52 → high 62 → xhigh 68 → max 85).
+const EFFORT_LEVELS = [
+  { id: 'low',    name: 'Nízká',    desc: 'Rychlá odpověď, minimální přemýšlení' },
+  { id: 'medium', name: 'Střední',  desc: 'Vyvážená rychlost a kvalita' },
+  { id: 'high',   name: 'Vysoká',   desc: 'Důkladně přemýšlí — dobré na refaktor' },
+  { id: 'xhigh',  name: 'Velmi vysoká', desc: 'Pro složité úlohy, pomalejší' },
+  { id: 'max',    name: 'Maximum',  desc: 'Nejvíc přemýšlení, nejdelší čekání' }
+];
+function getEffort() {
+  const v = localStorage.getItem('nlc_effort');
+  return EFFORT_LEVELS.some(l => l.id === v) ? v : 'high';
+}
+function renderEffortList() {
+  const box = $('#effortList');
+  if (!box) return;
+  const cur = getEffort();
+  box.innerHTML = EFFORT_LEVELS.map((l, i) =>
+    '<div class="eff-item ' + (l.id === cur ? 'active' : '') + '" data-eff="' + l.id + '">'
+    + '<span class="eff-ico ' + l.id + '">' + (i + 1) + '</span>'
+    + '<div class="minfo"><div class="eff-name">' + escapeHtml(l.name) + '</div>'
+    + '<div class="eff-desc">' + escapeHtml(l.desc) + '</div></div>'
+    + '<span class="eff-bars">' + '<i style="height:' + (4 + i * 2) + 'px"></i>'.repeat(3) + '</span>'
+    + '<span class="eff-check">✓</span></div>').join('');
+  $$('#effortList .eff-item').forEach(n => n.addEventListener('click', () => {
+    localStorage.setItem('nlc_effort', n.getAttribute('data-eff'));
+    renderEffortList();
+    const l = EFFORT_LEVELS.find(x => x.id === n.getAttribute('data-eff'));
+    setFooter('Uvažování: ' + (l ? l.name : '') + ' — ' + (l ? l.desc : ''));
   }));
 }
 function updateModelLabel() {
@@ -322,9 +408,6 @@ function activeProjectType() {
   return 'universal';
 }
 function videoResWH() { return VIDEO_RESOLUTIONS[videoRes] || VIDEO_RESOLUTIONS['1920x1080']; }
-/* System prompt pro reklamní videa: jedno responzivní index.html, celé viewport,
-   animované, bez potřeby klikání (v náhledu ani klikat nejde — chová se jako video). */
-const VIDEO_ADD = ' VIDEO AD PROJECT: output a single self-contained advertising commercial as index.html in the project root (inline CSS+JS, no build). The ad fills the whole viewport at the target resolution and is ALWAYS in motion — layered CSS/JS animations (background, headline, CTA, particles) run continuously and concurrently from page load (autoplay, no interaction), looping seamlessly with no static frames. MANDATORY animation recipe: at least 3 independent @keyframes timelines (e.g. floating background shapes, staggered headline entrance, pulsing CTA + particles) PLUS a requestAnimationFrame JS loop driving something visible (parallax, progress, counters). Use only transform/opacity for motion (GPU, smooth). Structure the ad as SCENES IN TIME like a real video commercial — never one static page: e.g. scene 1 (0-3 s) logo intro with rotation/drop, scene 2 (3-7 s) product story with sliding lines and floating elements, scene 3 (7-10 s) finale with breathing CTA — driven by a JS timeline (setTimeout chain or time-based rAF state machine) that switches scenes automatically and loops seamlessly back to scene 1. Every second must show movement; no scene may sit still. Hook in the first second, persistent logo and CTA, readable typography, strong contrast — it must look like a real paid ad at every moment, never a static page. Example: Kofola brief → big Kofola logo drops in with rotation, headline slides line by line, bubbles float up forever, CTA button breathes. If the brief mentions a platform (YouTube, TikTok, Reels…), FIRST research its current ad/creative specs via web_search (resolution, duration, safe zones) and build exactly to spec. No clicks needed — the page behaves like a video (nothing must require interaction). Keep everything responsive so it looks right at any of 1920x1080, 1280x720, 1440x1080, 1080x1080, 1080x1920. The finished index.html is automatically recorded to MP4 by the app — the MP4 is the primary deliverable, index.html stays inside as its editable source.';
 
 /* ---------- projekty ---------- */
 function renderProjects() {
@@ -334,7 +417,7 @@ function renderProjects() {
     '<div class="pv-card" data-i="' + i + '"><span class="folder-ico">📁</span>'
     + '<div class="pv-card-info"><div class="pv-card-name">' + escapeHtml(p.name) + '</div>'
     + '<div class="pv-card-path">' + escapeHtml(p.path) + '</div>'
-    + '<span class="pv-type">' + escapeHtml(p.type === 'website' ? 'Website' : (p.type === 'video' ? '🎬 Video' : 'Universal')) + '</span></div>'
+    + '<span class="pv-type">' + escapeHtml(p.type === 'website' ? 'Website Studio' : (p.type === 'video' ? '🎬 Commercial Studio' : 'Coder Studio')) + '</span></div>'
     + '<div class="pv-card-act"><button class="row-btn" data-act="rename" title="Přejmenovat">✎</button>'
     + '<button class="row-btn danger" data-act="del" title="Odebrat">✕</button></div></div>'
   ).join('');
@@ -353,14 +436,22 @@ function showView(v) {
   if (vp) vp.style.display = v === 'projects' ? '' : 'none';
   if (vc) vc.style.display = v === 'chat' ? '' : 'none';
 }
+/* Návrat na výběr projektů ze stavového řádku pod composerem */
+function openProjects() {
+  try { showView('projects'); setFooter('Vyber projekt'); } catch {}
+}
 async function openProject(p) {
-  if (isStreaming) stopEverything();
+  // Zastav generaci jen v aktivním chatu, ne globálně — ostatní chaty můžou dál generovat
+  if (activeConvoId && streamingChats.has(activeConvoId)) {
+    stopEverything('Přepnuto na jiný projekt', activeConvoId);
+  }
   prefs.activeProject = p.path;
   try { await window.api.setStore({ activeProject: p.path }); } catch {}
   $('#projHeadName').textContent = p.name;
   showView('chat');
+  setFolderLabel(p.path);
   renderChatList();
-  let c = conversations.filter(x => x.projectPath === p.path).slice(-1)[0];
+  let c = conversations.filter(projectMatch).slice(-1)[0];
   if (!c) c = newConvo(true);
   else { activeConvoId = c.id; localStorage.setItem('nlc_active', c.id); renderMessages(); renderChatList(); }
   // Website + video: chat vpravo, náhled vlevo. Video navíc s rozlišením a exportem do MP4.
@@ -373,21 +464,29 @@ async function openProject(p) {
 }
 
 /* ---------- konverzace ---------- */
-/* STOP zastaví VŠECHNY generace v chatu (stream, frontu zpráv i nahrávání MP4)
-   a vyčistí všechny indikátory — po přepnutí/smazání chatu nic nevisí. */
-function stopEverything(why) {
-  stopRequested = true;
-  pendingQueue.length = 0; updateQueue();
-  try { window.api.chatStreamAbort(); } catch {}
-  try { window.api.videoAbort(); } catch {}
-  videoExporting = false;
-  setVideoProgress('');
-  setActivity(null); hidePlanBox();
-  el.sendBtn.disabled = false; el.stopBtn.style.display = 'none';
-  setFooter(why || 'Zastaveno');
+/* STOP zastaví generaci v KONKRÉTNÍM chatu (stream, frontu zpráv i nahrávání MP4).
+   Ostatní chaty můžou dál generovat — každý chat má svůj vlastní stav. */
+function stopEverything(why, convoId) {
+  const cid = convoId || activeConvoId;
+  if (cid) {
+    const st = streamingChats.get(cid);
+    if (st) st.stopRequested = true;
+  }
+  if (cid === activeConvoId) {
+    stopRequested = true;
+    pendingQueue.length = 0; updateQueue();
+    // Zastavíme jen stream tohoto chatu — ostatní chaty v pozadí jedou dál.
+    try { window.api.chatStreamAbort({ convoId: cid }); } catch { try { window.api.chatStreamAbort(); } catch {} }
+    try { window.api.videoAbort(); } catch {}
+    videoExporting = false;
+    setVideoProgress('');
+    setActivity(null); hidePlanBox();
+    setSendBusy(false);
+    setFooter(why || 'Zastaveno');
+  }
 }
 function newConvo(silent) {
-  if (isStreaming) stopEverything();
+  // Nový chat NESMÍ zastavovat generování v ostatních chatech — každý chat je nezávislý.
   const c = { id: 'c' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), projectPath: prefs.activeProject, title: 'Nová konverzace', messages: [], created: Date.now() };
   conversations.push(c); activeConvoId = c.id;
   localStorage.setItem('nlc_active', c.id); saveConvos();
@@ -398,20 +497,41 @@ function newConvo(silent) {
 function renderChatList() {
   if (!el.chatList) return;
   const list = conversations.filter(projectMatch).slice().reverse();
-  el.chatList.innerHTML = list.map(c =>
-    '<div class="chat-item ' + (c.id === activeConvoId ? 'active' : '') + '" data-id="' + c.id + '">'
-    + '<div class="chat-item-title">' + escapeHtml(c.title || 'Nová konverzace') + '</div>'
-    + '<div class="chat-item-sub">' + (c.messages ? c.messages.length : 0) + ' zpráv</div>'
-    + '<button class="chat-rename" data-a="rename" title="Přejmenovat">✎</button>'
-    + '<button class="chat-del" data-a="del" title="Smazat">✕</button></div>'
-  ).join('') || '<div class="chat-list-empty">Zatím žádný chat — vytvoř nový.</div>';
+  el.chatList.innerHTML = list.map(c => {
+    const isStreaming = streamingChats.has(c.id);
+    const isActive = c.id === activeConvoId;
+    return '<div class="chat-item ' + (isActive ? 'active' : '') + (isStreaming ? ' streaming' : '') + '" data-id="' + c.id + '">'
+      + '<div class="chat-item-title">'
+      + (isStreaming ? '<span class="chat-spinner"></span>' : '')
+      + escapeHtml(c.title || 'Nová konverzace') + '</div>'
+      + '<div class="chat-item-sub">' + (c.messages ? c.messages.length : 0) + ' zpráv' + (isStreaming ? ' · generuje…' : '') + '</div>'
+      + '<button class="chat-rename" data-a="rename" title="Přejmenovat">✎</button>'
+      + '<button class="chat-del" data-a="del" title="Smazat">✕</button></div>';
+  }).join('') || '<div class="chat-list-empty">Zatím žádný chat — vytvoř nový.</div>';
   el.chatList.querySelectorAll('.chat-item').forEach(n => n.addEventListener('click', (e) => {
     const id = n.getAttribute('data-id');
     const a = e.target.getAttribute && e.target.getAttribute('data-a');
-    if (a === 'del') { e.stopPropagation(); if (id === activeConvoId && isStreaming) stopEverything(); conversations = conversations.filter(c => c.id !== id); saveConvos(); if (activeConvoId === id) { const rest = conversations.filter(projectMatch); activeConvoId = rest.length ? rest[rest.length - 1].id : null; } renderChatList(); renderMessages(); return; }
+    if (a === 'del') {
+      e.stopPropagation();
+      // Zastav generaci v mazaném chatu, ale ne v ostatních
+      const st = streamingChats.get(id);
+      if (st) { st.stopRequested = true; streamingChats.delete(id); }
+      if (id === activeConvoId) stopEverything('Smazáno', id);
+      conversations = conversations.filter(c => c.id !== id);
+      saveConvos();
+      if (activeConvoId === id) {
+        const rest = conversations.filter(projectMatch);
+        activeConvoId = rest.length ? rest[rest.length - 1].id : null;
+        stopRequested = false;
+      }
+      renderChatList(); renderMessages();
+      return;
+    }
     if (a === 'rename') { e.stopPropagation(); const c = conversations.find(x => x.id === id); askPrompt('Přejmenovat chat', 'Nový název', c.title).then(v => { if (v) { c.title = v; saveConvos(); renderChatList(); } }); return; }
-    if (id !== activeConvoId && isStreaming) stopEverything();
-    activeConvoId = id; localStorage.setItem('nlc_active', id); renderChatList(); renderMessages();
+    // Přepnutí chatu NESMÍ zastavit generaci v jiných chatech
+    activeConvoId = id; localStorage.setItem('nlc_active', id);
+    stopRequested = false; // Reset stop flag pro nový chat
+    renderChatList(); renderMessages();
   }));
   const c = activeConvo();
   if (el.sessionTitle) el.sessionTitle.textContent = c ? (c.title || 'Nová konverzace') : 'Nová konverzace';
@@ -426,6 +546,38 @@ function setActivity(t) {
   el.activityBar.innerHTML = '<span class="q-dot"></span><span>' + escapeHtml(t) + '</span>';
 }
 function scrollBottom() { try { el.chatContainer.scrollTop = el.chatContainer.scrollHeight; } catch {} }
+/* Plynulý posun dolů — jako v OpenCode: message se objeví a chat se sjede dolů
+   plynule, ne skokem. `auto` = posun bez animace (překreslení celé historie),
+   jinak smooth. Když uživatel odroloval výrazně nahoru, necháme ho tam být —
+   jinak by mu stream šahal pod nos a nedal by se číst. */
+let smoothScrollRaf = 0;
+const SCROLL_STICK_PX = 140;   // jak blízko dna se ještě "držíme" streamu
+function scrollBottomSmooth(behavior) {
+  try {
+    const c = el.chatContainer;
+    if (!c) return;
+    const mode = behavior || 'smooth';
+    const nearBottom = (c.scrollHeight - c.scrollTop - c.clientHeight) < SCROLL_STICK_PX;
+    if (!nearBottom && mode === 'auto') return;          // uživatel čte výš — netlač
+    if (smoothScrollRaf) cancelAnimationFrame(smoothScrollRaf);
+    smoothScrollRaf = requestAnimationFrame(() => {
+      smoothScrollRaf = 0;
+      const target = Math.max(0, c.scrollHeight - c.clientHeight);
+      try { c.scrollTo({ top: target, behavior: mode }); }
+      catch { c.scrollTop = target; }
+    });
+  } catch {}
+}
+/* Během streamu text roste chunk po chunku → držíme scroll dole, dokud uživatel
+   neodroluje. Volá se po každém vykreslení, proto se neinvokuje přes RAF. */
+function scrollStick() {
+  try {
+    const c = el.chatContainer;
+    if (!c) return;
+    if ((c.scrollHeight - c.scrollTop - c.clientHeight) >= SCROLL_STICK_PX) return;
+    c.scrollTop = c.scrollHeight;
+  } catch {}
+}
 /* ---------- Plán kroku: co AI právě teď bude dělat (pod ukazatelem průběhu) ---------- */
 let planCollapsed = false;
 try { planCollapsed = localStorage.getItem('nlc_plancollapsed') === '1'; } catch {}
@@ -452,7 +604,7 @@ function renderPlanBox(trail, liveIx) {
     el.planBox.classList.toggle('collapsed', planCollapsed);
     tg.textContent = planCollapsed ? 'Zobrazit více' : 'Zobrazit méně';
   });
-  scrollBottom();
+  scrollBottomSmooth();
 }
 function hidePlanBox() { if (el.planBox) { el.planBox.style.display = 'none'; el.planBox.innerHTML = ''; } }
 function addMsg(role, html, raw) {
@@ -461,9 +613,58 @@ function addMsg(role, html, raw) {
   wrap.innerHTML = role === 'user'
     ? '<div class="bubble-user">' + escapeHtml(raw != null ? raw : html) + '</div>'
     : '<div class="bubble-assistant">' + html + '</div>';
-  el.messages.appendChild(wrap); scrollBottom();
+  el.messages.appendChild(wrap); scrollBottomSmooth();
   return wrap;
 }
+/* ---------- Prázdný stav (OpenCode styl) ---------- */
+let isEmptyState = null;
+function setEmptyState(on) {
+  if (isEmptyState === on) return;
+  isEmptyState = !!on;
+  const m = document.getElementById('mainCol');
+  if (m) m.classList.toggle('is-empty', !!on);
+  if (el.sessionTitle) el.sessionTitle.style.opacity = on ? '0.45' : '';
+}
+function renderEmptyState() {
+  const proj = (prefs.activeProject || '').split(/[\\/]/).pop() || '';
+  return '<div class="empty-mark">'
+    + '<div class="empty-word">NolimitCoder</div>'
+    + '<div class="empty-hint">Napiš, co chceš udělat. @ pro soubor v kontextu, / pro příkazy.<br>'
+    + 'AI má shell, soubory, terminál, web i preview — a pustí se do toho.</div>'
+    + '<div class="empty-sugg-inline">'
+    + '<button data-s="Projdi projekt a řekni mi, co v něm je a s čím začít">Projdi projekt</button>'
+    + '<button data-s="Vytvoř mi jednoduchou HTML stránku s tmavým designem">Nová HTML stránka</button>'
+    + '<button data-s="Najdi chybu v tomhle kódu a oprav ji">Najdi a oprav chybu</button>'
+    + '<button data-s="Připrav mi prostředí, ať je všechno co potřebuju nainstalované">Připravit prostředí</button>'
+    + '</div></div>';
+}
+/* Stavový řádek pod composerem: projekt · git větev */
+let metaBranchCache = { root: null, branch: '' };
+async function updateComposerMeta() {
+  const pn = document.getElementById('metaProjName');
+  if (pn) pn.textContent = (prefs.activeProject || '').split(/[\\/]/).pop() || 'Bez projektu';
+  const root = prefs.activeProject;
+  const bn = document.getElementById('metaBranchName');
+  if (!bn) return;
+  if (metaBranchCache.root === root) { bn.textContent = metaBranchCache.branch || '—'; return; }
+  metaBranchCache.root = root; bn.textContent = '…';
+  let branch = '';
+  try {
+    const r = await window.api.toolsExec({ tool: 'shell', args: { command: 'git rev-parse --abbrev-ref HEAD 2>nul' }, root, fullAccess: true });
+    const out = String((r && r.output) || '');
+    const m = out.match(/(?:^|\n)([A-Za-z0-9._\-\/]+)(?:\r?\n|$)/);
+    if (r && r.ok && m) branch = m[1];
+  } catch {}
+  metaBranchCache.branch = branch;
+  bn.textContent = branch || (root ? 'bez git' : '—');
+}
+function bindComposerMeta() {
+  const proj = document.getElementById('metaProj');
+  if (proj) proj.addEventListener('click', () => { try { openProjects(); } catch {} });
+  const br = document.getElementById('metaBranch');
+  if (br) br.addEventListener('click', () => { try { window.api.toolsExec({ tool: 'shell', args: { command: 'git branch --show-current' }, root: prefs.activeProject, fullAccess: true }); } catch {} });
+}
+
 function renderMessages() {
   if (!el.messages) return;
   el.messages.innerHTML = '';
@@ -478,13 +679,18 @@ function renderMessages() {
   if (el.chatEmpty) el.chatEmpty.style.display = (!c || !c.messages.length) ? '' : 'none';
   if (!c) return;
   if (el.sessionTitle) el.sessionTitle.textContent = c.title || 'Nová konverzace';
+  /* Prázdný stav ve stylu OpenCode: velký bledý wordmark, plovoucí composer,
+     stavový řádek (projekt / větev). Třída `.is-empty` na `.main`
+     přesouvá composer do středu obrazovky; při první zprávě zmizí. */
+  setEmptyState(!c.messages.length);
   if (!c.messages.length) {
-    el.chatEmpty.innerHTML = '<div class="empty-title">Na čem budeme pracovat?</div>'
-      + '<div class="empty-sub">Build sám pozná, jestli se jen ptáš, nebo chceš něco udělat. Plan jen plánuje. Nástroje: shell, soubory, web, terminál, preview.</div>'
-      + '<div class="empty-suggest"><button data-s="Vypiš soubory v projektu a navrhni, co dál">Vypiš soubory v projektu</button>'
-      + '<button data-s="Připrav mi prostředí: použij env_prepare, ať je všechno co potřebuju nainstalované">Připravit prostředí (env_prepare)</button>'
-      + '<button data-s="Vytvoř jednoduchou index.html stránku s pozdravem">Vytvoř demo stránku</button></div>';
-    el.chatEmpty.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { el.promptInput.value = b.getAttribute('data-s'); sendMessage(); }));
+    el.chatEmpty.innerHTML = renderEmptyState();
+    el.chatEmpty.querySelectorAll('button[data-s]').forEach(b => b.addEventListener('click', () => {
+      el.promptInput.value = b.getAttribute('data-s');
+      autoGrow();
+      sendMessage();
+    }));
+    updateComposerMeta();
     return;
   }
   for (const m of c.messages) {
@@ -495,7 +701,8 @@ function renderMessages() {
   }
   bindCopyButtons();
   bindThink(el.messages);
-  scrollBottom();
+  updateComposerMeta();
+  scrollBottomSmooth('auto');
 }
 function bindCopyButtons() {
   $$('#messages .cb-copy[data-copy]').forEach(b => {
@@ -540,7 +747,9 @@ function humanTool(name, args, ok) {
     case 'web_search': return 'Hledám na netu';
     case 'download_file': return 'Stahuju soubor';
     case 'scaffold_electron': return 'Stavím kostru aplikace';
+    case 'build_exe': return 'Buildím EXE (inventura → rebuild → test)';
     case 'open_path': return 'Otvírám ' + (baseName(args.path) || '');
+    case 'show_panel': return 'Otvírám v panelu ' + (baseName(args.path) || args.path || '');
     case 'close_app': return 'Zavírám ' + (baseName(args.target) || args.target || 'aplikaci');
     default: return name;
   }
@@ -583,6 +792,7 @@ function updateThink(bubble, txt, live) {
     thinkState.body.textContent = t;
     thinkState.seen = t;
     thinkState.body.scrollTop = thinkState.body.scrollHeight;
+    scrollStickSafe();   // myšlení také roste dolů → chat musí jet s ním
   }
 }
 function resetThink() { thinkState = { box: null, body: null, seen: '' }; }
@@ -590,9 +800,10 @@ function resetThink() { thinkState = { box: null, body: null, seen: '' }; }
 function renderToolCard(name, args, result, ok, diff, cached) {
   const wrap = document.createElement('div');
   wrap.className = 'msg tool';
-  const short = String((args && (args.path || args.dir || args.target || args.command || args.pattern || args.url || args.query || args.id || (args.ids && args.ids.join(', ')) || args.request)) || '').slice(0, 90);
-  // Stejný rámeček jako Thinking: logo + bílá hlavička, sbalitelné.
-  let inner = '<div class="think-box tool open" data-think>'
+  const short = String((args && (args.path || args.dir || args.target || args.command || args.pattern || args.url || args.query || args.id || args.name || (args.ids && args.ids.join(', ')) || args.request)) || '').slice(0, 90);
+  // Rámeček jako Thinking: logo + hlavička, tělo SBALENÉ (jinak je chat 3x vyšší).
+  // Klik na hlavičku rozbalí výsledek.
+  let inner = '<div class="think-box tool" data-think>'
     + '<div class="think-head"><img class="think-logo" src="./assets/logo.png" alt="">'
     + '<span class="t-name">' + escapeHtml(name) + '</span>'
     + '<span class="t-path">' + escapeHtml(short) + '</span>'
@@ -616,24 +827,327 @@ function renderToolCard(name, args, result, ok, diff, cached) {
   wrap.innerHTML = inner;
   el.messages.appendChild(wrap);
   bindThink(wrap);
-  scrollBottom();
+  scrollBottomSmooth();
   return wrap;
 }
+/* Text odpovědi přibývá po kouscích — držíme scroll dole, aby text nejel pod okraj.
+   Volá se po každém chunku, proto bez animace (jinak by se to trhalo). */
+function scrollStickSafe() { try { scrollStick(); } catch {} }
+/* ---------- Obrázky v chatu: Ctrl+V, výběr souboru, AI je vidí ----------
+   Obrázek se uloží do <projekt>/uploads/ a do zprávy se přidá jako @odkaz.
+   Prompt modelu říká, že soubor existuje a má ho otevřít/ukázat v panelu. */
+let chatImages = []; // [{ rel, abs, name, dataUrl }]
+function renderAttachStrip() {
+  const strip = $('#attachStrip');
+  if (!strip) return;
+  if (!chatImages.length) { strip.style.display = 'none'; strip.innerHTML = ''; return; }
+  strip.style.display = '';
+  strip.innerHTML = '';
+  chatImages.forEach((im, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'attach-chip';
+    const img = document.createElement('img');
+    img.src = im.dataUrl; img.alt = im.name;
+    const x = document.createElement('button');
+    x.className = 'attach-x'; x.textContent = '✕'; x.title = 'Odebrat';
+    x.addEventListener('click', () => { chatImages.splice(i, 1); renderAttachStrip(); });
+    chip.appendChild(img); chip.appendChild(x);
+    strip.appendChild(chip);
+  });
+}
+async function addImageFiles(files) {
+  const list = Array.from(files || []).filter(f => /^image\//.test(f.type || ''));
+  if (!list.length) return;
+  // Bez otevřeného projektu použijeme pracovní složku (AI si ji založí).
+  const root = prefs.activeProject || (await autoWorkspace({ messages: [] })) || '';
+  if (!prefs.activeProject && root) { prefs.activeProject = root; try { await window.api.setStore({ activeProject: root }); } catch {} }
+  if (!root) { setFooter('Nepodařilo se zjistit složku pro obrázek.'); return; }
+  for (const f of list.slice(0, 4)) {
+    try {
+      const b64 = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result || ''));
+        fr.onerror = () => rej(new Error('čtení souboru'));
+        fr.readAsDataURL(f);
+      });
+      const ext = (String(f.name || '').match(/\.([a-z0-9]+)$/i) || [, 'png'])[1];
+      const r = await window.api.saveImage({ data: b64, ext, root });
+      if (r && r.ok) {
+        chatImages.push({ rel: r.rel, abs: r.abs, name: f.name || 'obrazek', dataUrl: b64 });
+      } else if (r && r.error) { setFooter('Obrázek se nepodařilo uložit: ' + r.error); }
+    } catch (e) { errLog('attach', e && e.message); }
+  }
+  renderAttachStrip();
+  setFooter(chatImages.length ? 'Přiloženo ' + chatImages.length + ' obrázků — AI je uvidí.' : '');
+}
+// Odkazy na obrázky, které se přidají do zprávy modelu.
+function imageContext() {
+  if (!chatImages.length) return '';
+  return chatImages.map(im => '[Obrázek od uživatele: ' + im.rel + ']').join('\n') + '\n'
+    + 'Uživatel ti poslal obrázek/výběr. Zobraz ho uživateli v bočním panelu přes show_panel {"path": "'
+    + chatImages[0].rel + '"} a při práci s ním ho použij.';
+}
+
+/* ---------- Přístup mimo složku + indikátor cesty ----------
+   Když AI píše/čte mimo aktivní projekt, nad chatem smooth vyskočí okénko:
+   Povolit / Povolit vždy / Ne. "Vždy" = AI smí hledat a psát v celém počítači. */
+let askAlways = false; // uživatel povolil všechny složky natrvalo
+let askInFlight = false;
+function outsideProject(p) {
+  const target = normPath(p);
+  const proj = normPath(prefs.activeProject);
+  if (!target) return null;
+  if (!proj) return target;              // žádný projekt = vše mimo
+  if (target === proj) return null;
+  if (target.startsWith(proj + '\\')) return null; // podsložka projektu = OK
+  return target;
+}
+function askAccess(path) {
+  if (askInFlight) return Promise.resolve('always');
+  askInFlight = true;
+  return new Promise((resolve) => {
+    const pop = $('#accessPop'), lbl = $('#accessPath');
+    if (!pop) { askInFlight = false; resolve('no'); return; }
+    lbl.textContent = path;
+    pop.classList.add('show');
+    const close = (r) => {
+      pop.classList.remove('show');
+      askInFlight = false;
+      resolve(r);
+    };
+    $('#accessYes').onclick = () => close('once');
+    $('#accessAlways').onclick = () => { askAlways = true; close('always'); };
+    $('#accessNo').onclick = () => close('no');
+  });
+}
+/* Cílová složka, kam se píše — z panelu/projektu nebo z absolutní cesty v nástroji. */
+function activeFolder() { return prefs.activeProject || ''; }
+function setFolderLabel(p) {
+  const n = $('#folderName');
+  if (!n) return;
+  const f = p || activeFolder();
+  n.textContent = f ? baseName(f) : '(žádná složka)';
+  const pill = $('#folderPill');
+  if (pill) pill.title = f ? ('AI píše do: ' + f + '\nKlikni pro změnu složky') : 'Vyber složku, kam má AI psát';
+}
+function changeFolder() {
+  // Klasický systémový dialog jako v Exploreru (Tento počítač, všechny disky).
+  Promise.resolve(window.api.projectPick()).then((r) => {
+    const v = r && r.ok ? r.path : null;
+    if (!v) return;
+    prefs.activeProject = v;
+    try { window.api.setStore({ activeProject: v }); } catch {}
+    setFolderLabel(v);
+    const ex = (projectRegistry || []).find(p => normPath(p.path) === normPath(v));
+    if (!ex) { projectRegistry.push({ name: baseName(v) || 'Projekt', path: v, type: 'universal', framework: 'html' }); saveRegistry(); renderProjects(); }
+    setFooter('AI teď píše do: ' + v);
+  }).catch(() => {});
+}
+
+/* ---------- Stav odesílacího tlačítka ----------
+   Za běhu se ↑ přemění na animovaný "generating" (tři body + kroužek).
+   Kliknutím v tomto stavu se zpráva připíše do fronty (max 5). */
+function setSendBusy(busy) {
+  const b = el.sendBtn;
+  if (!b) return;
+  if (busy) {
+    if (!b.dataset.busy) { b.dataset.busy = '1'; b.dataset.label = b.textContent; }
+    b.classList.add('generating');
+    b.innerHTML = '<span class="gen-dots"><i></i><i></i><i></i></span>';
+    b.title = 'Generuje… kliknutím přidáš další úkol do fronty';
+  } else {
+    b.classList.remove('generating');
+    if (b.dataset.busy) { b.textContent = b.dataset.label || '↑'; delete b.dataset.busy; }
+    b.title = 'Send';
+  }
+}
+
+/* ---------- Počítadlo tokenů: plní se během generování ----------
+   Reálná čísla z brány (j.usage), ne odhad. Ukazuje prompt / vygenerované
+   a pruh se plní k maximu, které má tenhle běh nastavené. */
+let tokState = { in: 0, out: 0, max: 0 };
+function fmtTok(n) {
+  n = Math.max(0, parseInt(n) || 0);
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+  return String(n);
+}
+function updateTokenMeter(usage, st) {
+  const bar = $('#tokenBar'), lbl = $('#tokenLabel');
+  if (!bar || !lbl) return;
+  if (usage) {
+    tokState.in = usage.prompt || tokState.in;
+    tokState.out = usage.completion || tokState.out;
+  }
+  if (st) tokState.out = Math.max(tokState.out, Math.round(String(st.text || '').length / 3.4) + Math.round(String(st.reasoning || '').length / 3.4));
+  const lim = tokState.max || MAX_TOKENS;
+  tokState.max = lim;
+  const pct = Math.max(0, Math.min(100, Math.round((tokState.out / lim) * 100)));
+  bar.style.width = pct + '%';
+  bar.classList.toggle('near', pct > 80);
+  lbl.textContent = fmtTok(tokState.out) + ' / ' + fmtTok(lim);
+  lbl.title = 'Vygenerováno ' + tokState.out + ' z limitu ' + lim + ' tokenů'
+    + (tokState.in ? ' · prompt ' + tokState.in + ' tokenů' : '');
+}
+function resetTokenMeter() { tokState = { in: 0, out: 0, max: MAX_TOKENS }; updateTokenMeter(null, null); }
+
+/* ---------- Výsuvný panel vpravo ----------
+   Tlačítko "Panel" vpravo nahoře ho smooth vysune přes půlku chatu. AI do něj otevírá
+   výsledky přes show_panel: HTML/obrázky přes preview server, exe jako kartu
+   s ovládáním (exečko se do stránky vložit nedá — je to nativní okno). */
+function toggleSidePanel(force) {
+  const p = $('#sidePanel');
+  if (!p) return;
+  const open = force !== undefined ? !!force : !p.classList.contains('open');
+  p.classList.toggle('open', open);
+  const t = $('#panelToggle');
+  if (t) t.classList.toggle('active', open);
+  // Chat se zmenší spolu s panelem (stejná šířka i animace).
+  try { const m = document.querySelector('.main'); if (m) m.classList.toggle('panel-open', open); } catch {}
+}
+/* Záložky panelu: každé show_panel = nová karta (max 10), každá drží svůj obsah. */
+let sideTabs = [];
+let sideActive = null;
+let sideTabSeq = 0;
+const SP_EMPTY = '<div class="sp-empty">AI sem otevře výsledky — HTML náhled, spuštěný program, obrázek…<br>Tlačítkem Panel ho schováš.</div>';
+function renderSideTabs() {
+  const bar = $('#sidePanelTabs');
+  if (!bar) return;
+  if (!sideTabs.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  bar.style.display = '';
+  bar.innerHTML = '';
+  sideTabs.forEach(t => {
+    const s = document.createElement('span');
+    s.className = 'sp-tab' + (t.id === sideActive ? ' active' : '');
+    const label = document.createElement('span');
+    label.textContent = t.title;
+    const x = document.createElement('b');
+    x.textContent = '✕'; x.className = 'sp-tab-x'; x.title = 'Zavřít kartu';
+    x.addEventListener('click', (e) => { e.stopPropagation(); closeSideTab(t.id); });
+    s.appendChild(label); s.appendChild(x);
+    s.addEventListener('click', () => activateSideTab(t.id));
+    bar.appendChild(s);
+  });
+}
+function activateSideTab(id) {
+  const t = sideTabs.find(x => x.id === id);
+  if (!t) return;
+  sideActive = id;
+  sidePanelTitle(t.title);
+  renderSideTabs();
+  renderSideTab(t);
+}
+function closeSideTab(id) {
+  sideTabs = sideTabs.filter(x => x.id !== id);
+  if (sideActive === id) sideActive = sideTabs.length ? sideTabs[sideTabs.length - 1].id : null;
+  const t = sideTabs.find(x => x.id === sideActive);
+  renderSideTabs();
+  if (t) { sidePanelTitle(t.title); renderSideTab(t); }
+  else {
+    sidePanelTitle('Panel');
+    const body = $('#sidePanelBody');
+    if (body) body.innerHTML = SP_EMPTY;
+  }
+}
+function sidePanelTitle(s) { const n = $('#sidePanelTitle'); if (n) n.textContent = String(s || 'Panel').slice(0, 60); }
+function panelAbs(p) {
+  const s = String(p || '').trim();
+  if (!s) return '';
+  if (/^([a-zA-Z]:[\\/]|\\\\|\/)/.test(s)) return s;
+  return prefs.activeProject ? prefs.activeProject.replace(/[\\/]+$/, '') + '\\' + s : s;
+}
+async function openSidePanelFor(rawPath, mode) {
+  const abs = panelAbs(rawPath);
+  if (!abs) return;
+  const low = abs.toLowerCase();
+  const kind = /\.exe$/i.test(low) ? 'run' : (/\.(html?|png|jpe?g|gif|webp|svg|ico)$/i.test(low) ? 'web' : 'text');
+  const tab = { id: ++sideTabSeq, title: baseName(abs), kind, abs, mode, launched: false };
+  sideTabs.push(tab);
+  if (sideTabs.length > 10) sideTabs.shift();
+  sideActive = tab.id;
+  sidePanelTitle(tab.title);
+  toggleSidePanel(true);
+  renderSideTabs();
+  await renderSideTab(tab);
+}
+async function renderSideTab(tab) {
+  const body = $('#sidePanelBody');
+  if (!body || !tab) return;
+  const set = (h) => { body.innerHTML = h; };
+  const abs = tab.abs, low = abs.toLowerCase();
+  if (tab.kind === 'run') { renderRunCard(body, abs, tab.mode === 'run' && !tab.launched); tab.launched = true; return; }
+  if (tab.kind === 'web') {
+    set('<div class="sp-empty">Načítám…</div>');
+    try {
+      const cut = Math.max(abs.lastIndexOf('\\'), abs.lastIndexOf('/'));
+      const root = cut > 0 ? abs.slice(0, cut) : abs;
+      const r = await window.api.previewStart(root);
+      if (r && r.ok && r.url) {
+        const url = r.url.replace(/\/$/, '') + abs.slice(root.length).replace(/\\/g, '/');
+        if (/\.html?$/i.test(low)) set('<iframe class="sp-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-modals" title="preview" src="' + escapeHtml(url) + '"></iframe>');
+        else set('<img class="sp-img" src="' + escapeHtml(url) + '" alt="">');
+        return;
+      }
+    } catch (e) { errLog('panel/preview', e && e.message); }
+    try { await window.api.toolsExec({ tool: 'open_path', args: { path: abs }, root: prefs.activeProject, fullAccess: true }); } catch {}
+    set('<div class="sp-empty">Náhled se nepovedl — otevřeno v systému.</div>');
+    return;
+  }
+  try {
+    const r = await window.api.toolsExec({ tool: 'read_file', args: { path: abs }, root: prefs.activeProject, fullAccess: true });
+    const txt = String((r && r.output) || '').slice(0, 20000);
+    set('<pre class="sp-code">' + escapeHtml(txt || '(prázdný soubor)') + '</pre>');
+  } catch { set('<div class="sp-empty">Soubor se nepovedlo načíst.</div>'); }
+}
+async function renderRunCard(body, abs, autoLaunch) {
+  const name = baseName(abs);
+  const short = name.replace(/\.exe$/i, '');
+  const escRx = short.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  body.innerHTML = '<div class="sp-run"><div class="sp-run-name">' + escapeHtml(name) + '</div>'
+    + '<div class="sp-run-status" data-st>Stav: zjišťuji…</div>'
+    + '<div class="sp-run-row"><button class="primary-btn" data-a="run">Spustit</button>'
+    + '<button class="mini-btn" data-a="stop">Zastavit</button>'
+    + '<button class="mini-btn" data-a="reveal">Složka</button></div></div>';
+  const st = body.querySelector('[data-st]');
+  const refresh = async () => {
+    try {
+      const r = await window.api.toolsExec({ tool: 'shell', args: { command: 'tasklist /FI "IMAGENAME eq ' + short + '.exe"' }, root: prefs.activeProject, fullAccess: true });
+      const on = r && r.ok && new RegExp(escRx + '\\.exe', 'i').test(String(r.output || ''));
+      if (st) { st.textContent = on ? 'Stav: běží ✓' : 'Stav: neběží'; st.classList.toggle('on', !!on); }
+      return !!on;
+    } catch { if (st) st.textContent = 'Stav: neznámý'; return false; }
+  };
+  const launch = async () => {
+    if (st) st.textContent = 'Stav: spouštím…';
+    try { await window.api.toolsExec({ tool: 'shell', args: { command: 'start "" "' + abs + '"' }, root: prefs.activeProject, fullAccess: true }); } catch {}
+    setTimeout(refresh, 1500);
+  };
+  body.querySelector('[data-a="run"]').addEventListener('click', launch);
+  body.querySelector('[data-a="stop"]').addEventListener('click', async () => {
+    try { await window.api.toolsExec({ tool: 'close_app', args: { target: abs }, root: prefs.activeProject, fullAccess: true }); } catch {}
+    setTimeout(refresh, 800);
+  });
+  body.querySelector('[data-a="reveal"]').addEventListener('click', async () => {
+    try { await window.api.toolsExec({ tool: 'open_path', args: { path: abs }, root: prefs.activeProject, fullAccess: true }); } catch {}
+  });
+  refresh();
+  // Auto-spuštění jen při prvním otevření karty (ne při přepínání záložek).
+  if (autoLaunch) launch();
+}
+
 /* ---------- Prostředí: co je v PC, co chybí, Fix ALL ---------- */
 function prefsGo(section) {
   document.querySelectorAll('#prefsNav button').forEach(b => b.classList.toggle('active', b.getAttribute('data-pref') === section));
   document.querySelectorAll('#prefsPages .pref-page').forEach(s => s.style.display = s.getAttribute('data-ppage') === section ? '' : 'none');
 }
-/* ---------- Settings → Permissions + Error Log ---------- */
-// Plný přístup je trvalý a nic se nedá vypnout — UI jen zobrazuje stav.
-function syncPermUI() {
-  const a = $('#permAll'); if (a) a.checked = true;
-  const le = $('#permLogErrors'); if (le) le.checked = prefs.logErrors !== false;
+/* ---------- Settings → Error Log ---------- */
+function syncErrUI() {
+  const le = $('#errLogCheck'); if (le) le.checked = prefs.logErrors !== false;
 }
-async function savePerms(patch) {
+async function saveErrPref(patch) {
   prefs = Object.assign(prefs, patch);
   try { await window.api.setStore(patch); } catch {}
-  syncPermUI();
+  syncErrUI();
 }
 async function refreshErrLog() {
   const view = $('#errLogView'); if (!view) return;
@@ -648,7 +1162,7 @@ function openPrefs() {
   const gc = $('#googleCheck'); if (gc) gc.checked = prefs.googleSearch !== false;
   const be = prefs.shellBackend || prefs.terminal || 'auto';
   document.querySelectorAll('input[name="shellbe"]').forEach(r => r.checked = r.value === be);
-  syncPermUI();
+  syncErrUI();
   try { window.api.errPath().then(p => { const n = $('#errLogPath'); if (n && p && p.path) n.textContent = p.path; }); } catch {}
   refreshErrLog();
   if (!envData && !envBusy) runEnvScan(false);
@@ -903,7 +1417,9 @@ function activityFor(name, args) {
   if (name === 'env_check' || name === 'env_scan') return 'Skenuju počítač…';
   if (name === 'env_prepare') return 'Připravuju nástroje…';
   if (name === 'env_install') return 'Instaluju ' + (args.id || (args.ids || []).join(', ') || 'nástroje') + '…';
+  if (name === 'build_exe') return 'Buildím a testuji EXE…';
   if (name === 'question') return 'Ptám se…';
+  if (name === 'show_panel') return 'Otvírám v panelu…';
   if (name === 'close_app') return 'Zavírám ' + (baseName(args.target) || args.target || 'aplikaci') + '…';
   return 'Volám ' + name + '…';
 }
@@ -955,7 +1471,7 @@ function askShellApproval(cmd) {
       + '<div class="appr-actions"><button class="primary-btn" data-a="once">Pokračovat</button>'
       + '<button class="ghost-btn2" data-a="always">Pokračovat vždy</button>'
       + '<button class="ghost-btn2" data-a="no">Zrušit</button></div></div>';
-    el.messages.appendChild(wrap); scrollBottom();
+    el.messages.appendChild(wrap); scrollBottomSmooth();
     wrap.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
       const a = b.getAttribute('data-a');
       const note = document.createElement('div');
@@ -966,6 +1482,52 @@ function askShellApproval(cmd) {
       if (a === 'always') autoShell = true;
       resolve(a === 'once' || a === 'always' ? 'once' : null);
     }));
+  });
+}
+/* ---------- Prohlížeč složek (všechny disky) ---------- */
+let brState = { path: null, parent: null, drives: [], shortcuts: [] };
+function brRender(listEl, items, ico, onClick) {
+  if (!listEl) return;
+  if (!items.length) { listEl.innerHTML = '<div class="browser-empty">Žádné složky</div>'; return; }
+  listEl.innerHTML = items.map((it, i) => '<div class="browser-item' + (it.path === brState.path ? ' active' : '') + '" data-i="' + i + '">'
+    + '<span class="bi-ico">' + ico + '</span><span>' + escapeHtml(it.name) + '</span></div>').join('');
+  listEl.querySelectorAll('.browser-item').forEach(n => n.addEventListener('click', () => onClick(items[parseInt(n.getAttribute('data-i'), 10)])));
+}
+function brLoad(p) {
+  const list = $('#browserList'), drv = $('#browserDrives'), sh = $('#browserShortcuts'), pathEl = $('#browserPath');
+  Promise.resolve(window.api.fsBrowse(p || null)).then(r => {
+    if (!r || !r.ok) { if (list) list.innerHTML = '<div class="browser-empty">' + escapeHtml((r && r.error) || 'Chyba') + '</div>'; return; }
+    brState.path = r.path; brState.parent = r.parent || null;
+    brState.drives = r.drives || []; brState.shortcuts = r.shortcuts || [];
+    if (pathEl) pathEl.textContent = r.path || 'Tento počítač — vyber disk';
+    brRender(drv, brState.drives, '💾', (it) => brLoad(it.path));
+    brRender(sh, brState.shortcuts, '⭐', (it) => brLoad(it.path));
+    brRender(list, r.folders || [], '📁', (it) => brLoad(it.path));
+    const up = $('#browserUp');
+    if (up) up.style.display = r.parent ? '' : 'none';
+  }).catch(e => { if (list) list.innerHTML = '<div class="browser-empty">Chyba: ' + escapeHtml(e && e.message) + '</div>'; });
+}
+function pickFolder(startPath) {
+  return new Promise((resolve) => {
+    const m = $('#browserModal');
+    if (!m) { resolve(null); return; }
+    m.classList.add('open');
+    brLoad(startPath || null);
+    const done = (v) => { m.classList.remove('open'); resolve(v); };
+    const onPick = () => done(brState.path || null);
+    const onCancel = () => done(null);
+    const onUp = () => { if (brState.parent) brLoad(brState.parent); };
+    const onNew = async () => {
+      const name = ($('#browserNewName') || {}).value;
+      if (!name || !brState.path) return;
+      const r = await window.api.fsMkdir(brState.path, name);
+      if (r && r.ok) { $('#browserNewName').value = ''; brLoad(r.path); } else setFooter((r && r.error) || 'Složku se nepodařilo vytvořit');
+    };
+    const b = m.querySelector('#browserPick'), c = m.querySelector('#browserCancel');
+    const u = m.querySelector('#browserUp'), n = m.querySelector('#browserNewFolder');
+    const bd = m.querySelector('#browserBackdrop'), x = m.querySelector('#browserClose');
+    if (b) b.onclick = onPick; if (c) c.onclick = onCancel; if (u) u.onclick = onUp;
+    if (n) n.onclick = onNew; if (bd) bd.onclick = onCancel; if (x) x.onclick = onCancel;
   });
 }
 function askWhere(sub) {
@@ -1051,6 +1613,18 @@ function parseSSEBlock(b, st) {
       // --- chat completions ---
       const ch = (j.choices && j.choices[0]) || {};
       if (ch.finish_reason === 'length') st.truncated = true;
+      // usage z brány (prompt/completion/total) — základ pro počítadlo tokenů
+      if (j.usage && typeof j.usage === 'object') {
+        const u = j.usage;
+        const g = (k) => (typeof u[k] === 'number' ? u[k] : 0);
+        st.usage = {
+          prompt: g('prompt_tokens') || g('input_tokens') || (u.prompt_tokens_details ? 0 : 0),
+          completion: g('completion_tokens') || g('output_tokens'),
+          total: g('total_tokens') || (g('prompt_tokens') + g('completion_tokens'))
+        };
+        if (st.usage.total) { st.usage.prompt = st.usage.prompt || Math.max(0, st.usage.total - st.usage.completion); }
+        try { if (window.api && window.api.debugLog) window.api.debugLog('usage', st.usage); } catch {}
+      }
       const d = ch.delta || {};
       if (typeof d.content === 'string') st.text += d.content;
       // Přemýšlení modelu — chodí v delta.reasoning_content, dřív se zahazovalo.
@@ -1077,32 +1651,72 @@ function flushPending(st) {
   }
   st.pending = null;
 }
-function oneShot(messages, maxTokens, aMode, onThink) {
-  const useMode = aMode || mode;
+/* ---------- směrování streamů (paralelní chaty) ----------
+   Každý požadavek má vlastní streamId. Main ho posílá s každým chunkem,
+   tady se chunky rozdělí do správného oneShot. Dřív tu byla jediná globální
+   posluchačka, takže dvě chaty generující současně si odpovědi promíchaly. */
+const streamRoutes = new Map();
+let streamRouterBound = false;
+let streamSeq = 0;
+function newStreamId() {
+  streamSeq++;
+  return 'r' + Date.now().toString(36) + '-' + streamSeq.toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
+}
+function bindStreamRouter() {
+  if (streamRouterBound) return;
+  streamRouterBound = true;
+  // starší main posílá chunky jako prostý string (bez ID) — padá na jediný aktivní stream
+  const pick = (p) => {
+    const sid = (p && typeof p === 'object' && p.s !== undefined && p.s !== null) ? String(p.s) : '';
+    let r = sid ? streamRoutes.get(sid) : null;
+    if (!r && streamRoutes.size === 1) r = streamRoutes.values().next().value;
+    return r;
+  };
+  try { window.api.onChunk((p) => { const r = pick(p); if (!r) return; r.chunk((p && typeof p === 'object' && 'd' in p) ? p.d : p); }); } catch {}
+  try { window.api.onEnd((p) => { const r = pick(p); if (r) r.end(); }); } catch {}
+  try { window.api.onError((p) => { const r = pick(p); if (r) r.error((p && typeof p === 'object' && p.e) ? p.e : p); }); } catch {}
+}
+
+function oneShot(messages, maxTokens, onThink, onUsage, opts) {
+  opts = opts || {};
+  const convoId = opts.convoId || activeConvoId;
+  bindStreamRouter();
+  const streamId = newStreamId();
   return new Promise((resolve) => {
-    const st = { text: '', reasoning: '', toolCalls: new Map(), pending: null, error: '' };
-    const onC = (d) => { parseSSE(String(d), st); try { if (onThink) onThink(st.reasoning); } catch {} };
+    const st = { text: '', reasoning: '', toolCalls: new Map(), pending: null, error: '', usage: null };
+    const cleanup = () => { streamRoutes.delete(streamId); };
+    const onC = (d) => {
+      parseSSE(String(d), st);
+      try { if (onThink) onThink(st.reasoning); } catch {}
+      // Počítadlo tokenů se plní už během generování.
+      try { if (onUsage) onUsage(st.usage, st); } catch {}
+    };
     const onE = () => { cleanup(); flushPending(st); resolve(st); };
     const onX = (e) => {
-      st.error = e && (e.error || e.message) ? String(e.error || e.message).slice(0, 300) : (e ? String(e).slice(0, 300) : 'neznámá chyba');
+      const msg = e && (e.error || e.message) ? String(e.error || e.message) : (e ? String(e) : 'neznámá chyba');
+      st.error = msg.slice(0, 300);
       st.isRateLimit = !!(e && e.isRateLimit) || /429|rate limit|FreeUsageLimit/i.test(st.error);
       st.isRegionBlocked = !!(e && e.isRegionBlocked) || /403|RegionError|not available in your country/i.test(st.error);
       const ra = parseInt(e && e.retryAfterMs, 10);
       st.retryAfterMs = !isNaN(ra) && ra > 0 ? Math.min(ra, 300000) : 0;
-      errLog('aistream', st.error, { via: (e && e.via) || '', isRateLimit: st.isRateLimit, isRegionBlocked: st.isRegionBlocked, url: (e && e.url) || '' });
+      errLog('aistream', st.error, { via: (e && e.via) || '', isRateLimit: st.isRateLimit, isRegionBlocked: st.isRegionBlocked, url: (e && e.url) || '', convoId });
       cleanup(); flushPending(st); resolve(st);
     };
-    const cleanup = () => { try { window.api.removeListeners(); } catch {} };
-    try { window.api.removeListeners(); } catch {}
-    window.api.onChunk(onC); window.api.onEnd(onE); window.api.onError(onX);
-    window.api.chatStreamStart({
-      messages, model: zenIdOf(selectedModel), convoId: activeConvoId,
-      // Plná práva v Build módu vždy — i otázka dostane kompletní nástroje.
-      // Jen explicitní Plan mód (mode === 'plan') zůstává read-only.
-      agent: mode !== 'plan', mode: useMode, projectRoot: prefs.activeProject,
-      fullAccess: true, maxTokens: maxTokens || SPEEDS[speedIx].tokens,
-      websearch: prefs.googleSearch !== false
-    });
+    streamRoutes.set(streamId, { chunk: onC, end: onE, error: onX });
+    // Prázdný seznam nástrojů = "žádné nástroje". Důležité: brána vždy nechá v těle
+    // requestu shell+read (jinak request odmítne), takže prázdno musí jít i jako noTools.
+    const noTools = opts.noTools === true || (Array.isArray(opts.allowedTools) && opts.allowedTools.length === 0);
+    try {
+      window.api.chatStreamStart({
+        messages, model: opts.model || zenIdOf(selectedModel), convoId, streamId,
+        agent: !!opts.agent, projectRoot: prefs.activeProject,
+        fullAccess: true, maxTokens: maxTokens || SEND_MAX_TOKENS,
+        allowedTools: noTools ? [] : (opts.allowedTools || ALL_TOOLS.slice()),
+        noTools,
+        reasonEffort: getEffort(),
+        websearch: prefs.googleSearch !== false
+      });
+    } catch (e) { onX({ error: e && e.message ? e.message : String(e) }); }
   });
 }
 
@@ -1110,7 +1724,6 @@ function oneShot(messages, maxTokens, aMode, onThink) {
 async function sendMessage(overrideText) {
   // Bez přihlášení se nepíše — pojistka i kdyby brána zlobila.
   try { const lg = $('#loginGate'); if (lg && lg.style.display !== 'none') { setFooter('Nejdřív se přihlas přes Google.'); return; } } catch {}
-  if (isStreaming) { pendingQueue.push(overrideText || el.promptInput.value.trim()); updateQueue(); return; }
   let text = (overrideText != null ? overrideText : el.promptInput.value.trim());
   if (!text) return;
   // slash příkazy
@@ -1121,25 +1734,38 @@ async function sendMessage(overrideText) {
   let convo = activeConvo();
   if (!convo || !projectMatch(convo)) convo = newConvo(true);
   activeConvoId = convo.id; localStorage.setItem('nlc_active', convo.id);
-  if (convo.messages.length === 0) { convo.title = text.slice(0, 48) || 'Nová konverzace'; }
+  const firstMsg = convo.messages.length === 0;
+  if (firstMsg) { convo.title = text.slice(0, 48) || 'Nová konverzace'; }
   // Rozpoznej otázku vs. úkol ještě před @expanzí (přiložený obsah by mátl detekci) — Build podle toho odpoví, nebo maká.
   // Commercial video má vlastní detekci: popis reklamy je vždy úkol, nikdy pokec s otázkami.
   const intent = activeProjectType() === 'video' ? detectCommercialIntent(text) : detectIntent(text);
   // @ kontext: @cesta → přilož obsah souboru
   text = await expandAtRefs(text);
-  convo.messages.push({ role: 'user', content: text });
+  // Přiložené obrázky: soubory v uploads/ + instrukce pro model
+  if (chatImages.length) {
+    const ctx = imageContext();
+    if (ctx) text = text + '\n\n' + ctx;
+    convo.messages.push({ role: 'user', content: text, images: chatImages.map(i => i.rel) });
+    chatImages = [];
+    renderAttachStrip();
+  } else {
+    convo.messages.push({ role: 'user', content: text });
+  }
   lastUserRequest = text;
-  dlog('send', { textLen: text.length, textHead: text.slice(0, 200), mode, histMsgs: convo.messages.length });
+  dlog('send', { textLen: text.length, textHead: text.slice(0, 200), histMsgs: convo.messages.length });
   el.promptInput.value = ''; autoGrow();
   saveConvos(); renderMessages(); renderChatList();
   if (intent !== 'chat') await ensureForRequest(text);
+  // Každý chat generuje nezávisle — streamingChats Map drží stav per chat
   await runAgent(convo, intent);
 }
-function updateQueue() {
+function updateQueue(animateLast) {
   if (!el.queueBar) return;
-  if (!pendingQueue.length) { el.queueBar.style.display = 'none'; return; }
+  if (!pendingQueue.length) { el.queueBar.style.display = 'none'; el.queueBar.innerHTML = ''; return; }
   el.queueBar.style.display = '';
-  el.queueBar.innerHTML = '<span class="q-dot"></span><span>Ve frontě: ' + pendingQueue.length + ' — ' + escapeHtml(pendingQueue[0].slice(0, 80)) + '</span>';
+  el.queueBar.innerHTML = '<span class="q-dot"></span><span class="q-label">Fronta ' + pendingQueue.length + '/5</span>'
+    + pendingQueue.map((m, i) => '<span class="q-bubble' + (animateLast && i === pendingQueue.length - 1 ? ' pop' : '') + '">'
+      + escapeHtml(m.slice(0, 60)) + (m.length > 60 ? '…' : '') + '</span>').join('');
 }
 async function expandAtRefs(text) {
   const refs = text.match(/@([^\s@]{1,120})/g) || [];
@@ -1158,11 +1784,11 @@ async function handleSlash(text) {
   const parts = text.trim().split(/\s+/);
   const cmd = parts[0].toLowerCase();
   if (cmd === '/new') { newConvo(); return true; }
-  if (cmd === '/clear') { if (isStreaming) stopEverything(); const c = activeConvo(); if (c) { c.messages = []; saveConvos(); renderMessages(); } return true; }
+  if (cmd === '/clear') { if (activeConvoId && streamingChats.has(activeConvoId)) stopEverything('Vymazáno', activeConvoId); const c = activeConvo(); if (c) { c.messages = []; saveConvos(); renderMessages(); } return true; }
   if (cmd === '/help') {
     const c = activeConvo() || newConvo(true);
     c.messages.push({ role: 'user', content: text });
-    c.messages.push({ role: 'assistant', content: 'Příkazy: /new (nový chat), /clear (vymazat), /model <jméno> (změnit model), /build (sám pozná otázku od úkolu), /plan (jen plán), /terminal (otevřít terminál), /preview (otevřít preview), /env (sken počítače + Fix ALL v Nastavení). Kontext: @cesta/soubor.' });
+    c.messages.push({ role: 'assistant', content: 'Příkazy: /new (nový chat), /clear (vymazat), /model <jméno> (změnit model), /terminal, /preview, /env. Kontext: @cesta/soubor.' });
     saveConvos(); renderMessages(); return true;
   }
   if (cmd === '/model') {
@@ -1172,9 +1798,6 @@ async function handleSlash(text) {
     else setFooter('Model nenalezen: ' + q);
     return true;
   }
-  if (cmd === '/plan') { setMode('plan'); return true; }
-  if (cmd === '/build') { setMode('build'); return true; }
-  if (cmd === '/auto') { setMode('build'); setFooter('Auto zrušeno — Build už sám pozná otázku od úkolu.'); return true; }
   if (cmd === '/terminal') { toggleTerm(true); return true; }
   if (cmd === '/preview') { if (prefs.activeProject) startPreview(prefs.activeProject); return true; }
   if (cmd === '/env') { openPrefs(); runEnvScan(true); return true; }
@@ -1223,35 +1846,60 @@ function taskMemStore(mem, name, args, res, root) {
   } catch {}
 }
 
-/* ---------- agent smyčka (text + tool-use) ---------- */
 async function runAgent(convo, intent) {
-  isStreaming = true; stopRequested = false;
-  el.sendBtn.disabled = true; el.stopBtn.style.display = '';
-  // Build: otázka → odpovídá textem (čtecí nástroje smí), úkol → staví nástroji. Plan vždy jen plánuje.
-  const isQuestion = mode !== 'plan' && intent === 'chat';
-  const effMode = mode === 'plan' ? 'plan' : (isQuestion ? 'plan' : 'build');
-  setFooter(isQuestion ? 'Rozpoznal jsem otázku — odpovídám…' : (effMode === 'build' ? 'Rozpoznal jsem úkol — pracuji…' : 'Generuji…'));
+  // Per-chat streaming stav — každý chat generuje nezávisle
+  const chatState = { stopRequested: false };
+  streamingChats.set(convo.id, chatState);
+  if (convo.id === activeConvoId) { stopRequested = false; resetTokenMeter(); }
+  // Tlačítko send se přemění na animovaný stav "generating" — žádné druhé tlačítko.
+  setSendBusy(true);
+  /* Build automaticky rozliší otázku od úkolu: na otázku dostane jen
+     čtecí nástroje, na úkol celou sadu. */
+  /* POZOR: read-only sada nástrojů pro "otázku" se nesmí nikdy zapnout v konverzaci,
+     kde už se pracovalo. Bez `write_file` totiž model nemá jak uložit soubor a začne
+     zapisovat přes `shell` (PowerShell here-string) → "command line is too long" /
+     "missing terminator" → hotová chyba a žádný soubor. Když už v historii je
+     zápis nebo příkaz, jde o pokračování práce → běží plný build agent. */
+  const didWork = convoDidWork(convo);
+  const isQuestion = intent === 'chat' && !didWork;
+  const effMode = isQuestion ? 'chat' : 'build';
+  // u otázky běží build agent s omezenou sadou nástrojů (jen čtení + dotaz)
+  let toolSet = (effMode === 'build') ? ALL_TOOLS.slice() : READ_TOOLS.slice();
+  if (didWork && intent === 'chat') dlog('intent', { convoId: convo.id, was: 'chat', forced: 'build', why: 'conversation already has write/exec calls' });
+  setFooter(isQuestion ? 'Rozpoznal jsem otázku — odpovídám…' : 'Rozpoznal jsem úkol — pracuji…');
   const streamWrap = addMsg('assistant', '<span class="thinking">Analyzuji<span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></span><span class="stream-caret"></span>', null);
-  const bubble = streamWrap.querySelector('.bubble-assistant');
-  dlog('runstart', { convoId: convo.id, mode, effMode, intent, histMsgs: convo.messages.length });
+  const bubble = streamWrap ? streamWrap.querySelector('.bubble-assistant') : null;
+  dlog('runstart', { convoId: convo.id, effMode, intent, histMsgs: convo.messages.length });
+  /* --- guard proti křížení chatů ---
+     Když uživatel přepne na jiný chat, tenhle běží dál v pozadí. Od té chvíle
+     nesmí kreslit do otevřené konverzace (jinak by tool-karty a stavová hláška
+     patřily cizímu chatu). Stavy zapisujeme jen do vlastního DOM uzlu. */
+  const isVisible = () => convo.id === activeConvoId;
+  const paintActivity = (t) => { if (isVisible()) setActivity(t); };
+  const paintFooter = (t) => { if (isVisible()) setFooter(t); };
+  const paintTrail = (trail, idx) => { if (isVisible()) renderPlanBox(trail, idx); };
+  const paintCard = (...a) => { if (isVisible()) return renderToolCard(...a); return null; };
   try {
     let projCtx = '';
     if (prefs.activeProject) {
+      // SE SKENEM SE NECHÁVÍME NA POZDĚ — na Z: (WebDAV) trvá desítky sekund a čekání
+      // by zase zmrazilo UI. Vrátíme jen to, co už máme v cache, a sken spustíme na pozadí.
+      // Od druhé zprávy má AI soubory k dispozici.
       try {
-        const r = await window.api.projectFiles(prefs.activeProject, false);
-        if (r && r.ok) projCtx = '\n\n[Aktivní projekt: ' + prefs.activeProject + '\nSoubory (max 300):\n' + (r.tree || []).slice(0, 120).map(t => (t.dir ? t.path : t.path)).join('\n') + ']';
+        const r = await window.api.projectFiles(prefs.activeProject, false, true);
+        if (r && r.ok && (r.tree || []).length) {
+          projCtx = '\n\n[Aktivní projekt: ' + prefs.activeProject + '\nSoubory:\n' + r.tree.slice(0, 120).map(t => t.path).join('\n') + ']';
+        }
       } catch {}
+      try { window.api.projectScanAsync(prefs.activeProject); } catch {}
     }
-    const sysBase = (effMode === 'build' ? BUILD_SYS : (isQuestion ? CHAT_SYS : PLAN_PROMPT))
-      + ((effMode === 'build' && activeProjectType() === 'video') ? VIDEO_ADD : '');
     if (activeProjectType() === 'video') {
       const vr = videoResWH();
-      projCtx += '\n[Video project: target resolution ' + vr.w + 'x' + vr.h + ' (' + vr.label + '), single index.html ad.]';
+      projCtx += '\n[Video project: target resolution ' + vr.w + 'x' + vr.h + ' (' + vr.label + ')]';
     }
     let rounds = 0;
     let finalText = '';
     let lastThinking = ''; // přemýšlení modelu z posledního kola — jde do Thinking bloku
-    let planBlocked = 0; // kolikrát Plan mód odmítl zapisující nástroj (pak už model jen dopíše plán textem)
     let promiseNudge = 0; // kolikrát jsme model vrátili, když pracoval bez zápisu (max 2x)
     let emptyRounds = 0; // po sobě jdoucí kola bez textu i bez volání (po 3 konec, pak záchranné kolo)
     let lastErr = ''; // poslední chyba spojení s AI (nikdy se nesmí tiše spolknout)
@@ -1266,45 +1914,64 @@ async function runAgent(convo, intent) {
     let staleRounds = 0; // po sobě jdoucí kola BEZ skutečného postupu (žádný zápis/spuštění)
     let roundProductive = false; // tohle kolo něco skutečně udělalo
     let readNudged = false; // direktiva proti čtecí rutině (max 1x za úkol)
+    let writeDirectiveLevel = 0; // 0=žádná, 1=mírná, 2=tvrdá (čtení vypnuto)
+    let autoRetried = false; // už se jednou zkusilo znovu po "jen čtení"
     const planTrail = []; // provedené kroky úkolu (1 volání = 1 krok), pro lištu průběhu
-    const maxRounds = effMode === 'build' ? 20 : 8; // slabý model potřebuje na velký úkol víc kol
-    while (rounds < maxRounds && !stopRequested) {
+    // Počet modelových kroků. Na posledním se nástroje odstraní
+    // a model dostane jen pokyn shrnout, co udělal.
+    const maxRounds = (effMode === 'build') ? 20 : 8;
+    const stepNotice = (n) => (n >= maxRounds)
+      ? '[POSLEDNÍ KROK. Nemáš už žádné nástroje. Napiš už teď stručně, v jakém stavu práce je a kde je výsledek (cesta k souboru/exe). 2–4 věty, žádné plány.]'
+      : '';
+    while (rounds < maxRounds && !chatState.stopRequested) {
       rounds++;
-      const planRemind = (mode === 'plan' && planBlocked > 0)
-        ? ' Plan mod: zapisujici nastroje nejsou dostupne. Napis plan textem.'
-        : '';
-      const msgs = [{ role: 'system', content: sysBase + projCtx + planRemind }];
-      // Staré interní shrnutí z minulých úkolů modelu jen zahlcují kontext — posílá se jen aktuální.
+      // Poslední krok: nástroje zmizí, model jen shrňuje.
+      const lastStep = rounds >= maxRounds;
+      // System message = jen kontext projektu (prázdné se do promptu vůbec nedává).
+      const sysText = projCtx + stepNotice(rounds);
+      const msgs = sysText ? [{ role: 'system', content: sysText }] : [];
+      // Model má 1M kontextu — posíláme mu mnohem víc historie než dřív (bylo jen 30 zpráv,
+      // tedy ~2 % okna). Navíc hlídáme odhad velikosti promptu, aby se to nevešlo do limitu.
       const reqStart = currentReqStart(convo);
       const hist = convo.messages;
-      for (let hi = Math.max(0, hist.length - 30); hi < hist.length; hi++) {
+      const histStart = Math.max(0, hist.length - HIST_MESSAGES);
+      let promptChars = sysText.length;
+      for (let hi = histStart; hi < hist.length; hi++) {
         const m = hist[hi];
         if (m.role === 'user' && m.internal && hi < reqStart) continue;
-        if (m.role === 'user') msgs.push({ role: 'user', content: m.content });
-        else if (m.role === 'assistant') msgs.push({ role: 'assistant', content: m.content });
+        if (m.role !== 'user' && m.role !== 'assistant') continue;
+        const content = String(m.content || '');
+        // ~4 znaky na token; když by prompt přesáhl bezpečný podíl kontextu,
+        // odhazujeme nejstarší zprávy (aktuální požadavek musí zůstat vždy).
+        if (promptChars + content.length > PROMPT_CHAR_BUDGET && msgs.length > 2) break;
+        promptChars += content.length;
+        msgs.push({ role: m.role, content });
       }
-      setActivity(rounds > 1 ? 'Pokračuji…' : 'Analyzuji…');
-      bubble.innerHTML = '<span class="thinking">Analyzuji<span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></span><span class="stream-caret"></span>';
+      paintActivity(rounds > 1 ? 'Pokračuji…' : 'Analyzuji…');
+      if (bubble && isVisible()) bubble.innerHTML = '<span class="thinking">Analyzuji<span class="thinking-dots"><span>.</span><span>.</span><span>.</span></span></span><span class="stream-caret"></span>';
       dlog('round', {
-        round: rounds, sysChars: String(sysBase + projCtx + planRemind).length,
+        round: rounds, sysChars: sysText.length,
         msgsSent: msgs.length, promptChars: msgs.reduce((n, m) => n + String(m.content || '').length, 0),
-        maxT: SPEEDS[speedIx].tokens
+        maxT: MAX_TOKENS
       });
       const roundT0 = Date.now();
-      resetThink();
-      const onThink = (r) => { updateThink(bubble, r, true); };
-      const st = await oneShot(msgs, SPEEDS[speedIx].tokens, effMode, onThink);
-      if (stopRequested) break;
+      if (isVisible()) resetThink();
+      const onThink = (r) => { if (bubble) updateThink(bubble, r, true); };
+      const st = await oneShot(msgs, MAX_TOKENS, onThink, updateTokenMeter, {
+        convoId: convo.id, agent: true, allowedTools: lastStep ? [] : toolSet
+      });
+      // Poslední krok je souhrn — kdyby model přesto poslal volání, nevykoná se.
+      if (chatState.stopRequested) break;
       // Chyba spojení se nikdy nesmí tiše spolknout — ukázat neutrální hlášku a po 3. opakování skončit.
       // Tady je poslední záchrana: 403 se neopakuje, přetížení zkusí druhý model NolimitCoder.
       if (st.error) {
         lastErr = String(st.error).slice(0, 300);
         // 403 RegionError = zeme je blokovana → rovnou poctiva hlaska, opakovat nema smysl.
-        if (st.isRegionBlocked && !stopRequested) {
+        if (st.isRegionBlocked && !chatState.stopRequested) {
           finalText = 'Model není v této zemi dostupný — brána NolimitCoder vrátila 403. Zkus jiný model, nebo to zkus později.';
           break;
         }
-        if (st.isRateLimit && !stopRequested) {
+        if (st.isRateLimit && !chatState.stopRequested) {
           // Zkusit druhy model NolimitCoder (ma vlastni kvotu), max 1x za pozadavek. Potichu, bez zmínky o limitech.
           const other = !modelSwitched && MODEL_FALLBACK[selectedModel];
           if (other && getModels().some(m => m.id === other)) {
@@ -1312,8 +1979,8 @@ async function runAgent(convo, intent) {
             selectedModel = other;
             try { localStorage.setItem('nlc_model', selectedModel); } catch {}
             updateModelLabel(); renderModelList();
-            setActivity('Zkouším druhý model NolimitCoder…');
-            setFooter('Přepnuto na ' + modelLabel(selectedModel) + '…');
+            paintActivity('Zkouším druhý model NolimitCoder…');
+            paintFooter('Přepnuto na ' + modelLabel(selectedModel) + '…');
             dlog('ratelimit', { modelSwitch: selectedModel });
             continue;
           }
@@ -1321,8 +1988,8 @@ async function runAgent(convo, intent) {
           break;
         }
         errRounds++;
-        setActivity('');
-        setFooter('Chyba AI: ' + publicErr(lastErr).slice(0, 120));
+        paintActivity('');
+        paintFooter('Chyba AI: ' + publicErr(lastErr).slice(0, 120));
         if (errRounds >= 3) { finalText = ''; break; }
         continue;
       }
@@ -1362,7 +2029,7 @@ async function runAgent(convo, intent) {
           dlog('nudge', { promiseNudge, toolsDone, actsDone, looksFinal, textHead: text.slice(0, 150) });
           convo.messages.push({ role: 'assistant', content: text });
           convo.messages.push({ role: 'user', internal: true, content: '[Místo oznamování rovnou volej nástroje (úpravu existujícího souboru proveď přes edit_file). Odpověď musí obsahovat tool-call.]' });
-          setActivity('Upřesňuji akci…');
+          paintActivity('Upřesňuji akci…');
           continue;
         }
         if (effMode === 'build' && promiseNudge >= 2 && toolsDone > 0 && actsDone === 0 && !looksFinal && looksPromise(text) && isWorkRequest(lastUserText(convo))) {
@@ -1375,8 +2042,7 @@ async function runAgent(convo, intent) {
       if (text && calls.length) {
         // průběžné myšlení ukaž — Thinking blok musí zůstat, proto se vkládá PŘED něj
         const th = thinkState.box && thinkState.box.isConnected ? thinkState.box.outerHTML : '';
-        bubble.innerHTML = th + mdToHtml(text) + '<span class="stream-caret"></span>';
-        bindCopyButtons(); bindThink(bubble);
+        if (bubble && isVisible()) { bubble.innerHTML = th + mdToHtml(text) + '<span class="stream-caret"></span>'; bindCopyButtons(); bindThink(bubble); scrollStickSafe(); }
       }
       if (!calls.length) {
         if (text) { finalText = text; break; }
@@ -1391,16 +2057,29 @@ async function runAgent(convo, intent) {
       // Žádné omezování podle režimu — AI může psát, mazat i spouštět vždy.
       for (let ci = 0; ci < calls.length; ci++) {
         const c = calls[ci];
-        if (stopRequested) break;
+        if (chatState.stopRequested) break;
+        if (lastStep && c.name !== 'question') {
+          const msg = 'Toto je poslední krok — už nejsou dostupné žádné nástroje. Napiš rovnou souhrn, co je hotové a kde to je (cesta k souboru).';
+          convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: msg, ok: false });
+          paintCard(c.name, c.args, msg, false);
+          continue;
+        }
+        if (c.name !== 'question' && !toolSet.includes(c.name)) {
+          const msg = 'Nástroj ' + c.name + ' teď není k dispozici. Použij nástroje, které tu jsou, nebo odpověz textem.';
+          convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: msg, ok: false });
+          paintCard(c.name, c.args, msg, false);
+          dlog('perm', { tool: c.name, effect: 'no-tool' });
+          continue;
+        }
         if (c.name === 'question') {
-          setActivity('Ptám se…');
+          paintActivity('Ptám se…');
           planTrail.push({ name: c.name, args: c.args, st: 'live' });
-          renderPlanBox(planTrail, planTrail.length - 1);
+          paintTrail(planTrail, planTrail.length - 1);
           const ans = await askQuestion(c.args);
           planTrail[planTrail.length - 1].st = 'done';
-          renderPlanBox(planTrail, planTrail.length - 1);
+          paintTrail(planTrail, planTrail.length - 1);
           convo.messages.push({ role: 'tool', tool: 'question', args: c.args, result: 'Uživatel odpověděl: ' + ans, ok: true });
-          renderToolCard('question', c.args, ans, true);
+          paintCard('question', c.args, ans, true);
           msgs.push({ role: 'assistant', content: text || '' });
           continue;
         }
@@ -1410,7 +2089,7 @@ async function runAgent(convo, intent) {
             const verdict = await askShellApproval(cmdKey);
             if (!verdict) {
               convo.messages.push({ role: 'tool', tool: 'shell', args: c.args, result: 'Uživatel příkaz zamítl.', ok: false });
-              renderToolCard('shell', c.args, 'Zamítnuto uživatelem.', false);
+              paintCard('shell', c.args, 'Zamítnuto uživatelem.', false);
               continue;
             }
             approvedOnce.add(cmdKey);
@@ -1426,11 +2105,25 @@ async function runAgent(convo, intent) {
             dlog('autoproj', { path: auto });
           }
         }
-        setActivity(activityFor(c.name, c.args));
+        paintActivity(activityFor(c.name, c.args));
+        // Nástroj míří mimo aktivní složku? → smooth dotaz (pokud už nebylo "vždy").
+        if (!askAlways && ['write_file', 'append_file', 'edit_file', 'create_dir', 'delete_file', 'move_file', 'copy_file', 'download_file', 'shell', 'open_path'].includes(c.name)) {
+          const raw = String((c.args || {}).path || (c.args || {}).to || (c.args || {}).from || '').trim();
+          const outside = raw ? outsideProject(/^([a-zA-Z]:[\\/]|\\\\)/.test(raw) ? raw : null) : null;
+          if (outside) {
+            const v = await askAccess(outside);
+            if (v === 'no') {
+              convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: 'Zamítnuto uživatelem — AI nesmí do této složky.', ok: false });
+              paintCard(c.name, c.args, 'Zamítnuto uživatelem.', false);
+              paintActivity('');
+              continue;
+            }
+          }
+        }
         const emptyWhy = emptyCallReason(c.name, c.args || {}, c);
         if (!emptyWhy) {
           planTrail.push({ name: c.name, args: c.args, st: 'live' });
-          renderPlanBox(planTrail, planTrail.length - 1);
+          paintTrail(planTrail, planTrail.length - 1);
         }
         let res;
         if (emptyWhy) {
@@ -1454,16 +2147,16 @@ async function runAgent(convo, intent) {
           const missId = missingBinId(res.output, c.name === 'shell' ? String(c.args.command || '') : '');
           if (missId && !autoInstalled.has(missId)) {
             autoInstalled.add(missId);
-            setActivity('Chybí ' + missId + ' — stahuji a instaluji automaticky…');
-            renderToolCard('env_install', { id: missId }, 'Automatická instalace ' + missId + '…', true);
+            paintActivity('Chybí ' + missId + ' — stahuji a instaluji automaticky…');
+            paintCard('env_install', { id: missId }, 'Automatická instalace ' + missId + '…', true);
             let inst;
             try {
               inst = await window.api.toolsExec({ tool: 'env_install', args: { id: missId }, root: prefs.activeProject, fullAccess: true });
             } catch (e) { inst = { ok: false, output: 'Chyba: ' + (e.message || e) }; }
             convo.messages.push({ role: 'tool', tool: 'env_install', args: { id: missId }, result: String((inst && inst.output) || ''), ok: !!(inst && inst.ok) });
-            renderToolCard('env_install', { id: missId }, String((inst && inst.output) || ''), !!(inst && inst.ok));
+            paintCard('env_install', { id: missId }, String((inst && inst.output) || ''), !!(inst && inst.ok));
             if (inst && inst.ok) {
-              setActivity(activityFor(c.name, c.args) + ' (po instalaci znovu)');
+              paintActivity(activityFor(c.name, c.args) + ' (po instalaci znovu)');
               try {
                 res = await window.api.toolsExec({ tool: c.name, args: withBackend(c.name, c.args), root: prefs.activeProject, fullAccess: true });
               } catch (e) { res = { ok: false, output: 'Chyba: ' + (e.message || e) }; }
@@ -1494,17 +2187,54 @@ async function runAgent(convo, intent) {
         if (res && res.ok && ['write_file', 'append_file', 'edit_file', 'shell', 'env_install'].includes(c.name)) roundProductive = true;
         if (!emptyWhy) {
           // Stráží zachycené prázdné volání se v chatu neukazuje (nic se nestalo) — jen v logu a v kontextu modelu.
-          renderToolCard(c.name, c.args, String((res && res.output) || ''), !!(res && res.ok), res && res.diff, !!(res && res.cached));
+          paintCard(c.name, c.args, String((res && res.output) || ''), !!(res && res.ok), res && res.diff, !!(res && res.cached));
+          // show_panel: AI otevřelo výsledek do výsuvného panelu — hned ho ukaž.
+          if (c.name === 'show_panel' && res && res.ok && !emptyWhy) {
+            try { openSidePanelFor(c.args.path || c.args.target, c.args.mode); } catch (e) { errLog('panel/open', e && e.message); }
+          }
           planTrail[planTrail.length - 1].st = (res && res.ok) ? 'done' : 'bad';
-          renderPlanBox(planTrail, planTrail.length - 1);
+          paintTrail(planTrail, planTrail.length - 1);
         }
       }
-      // Zaseknutá smyčka: kola jen čtou/povídají a nic se neděje → po 4. takovém kole STOP se shrnutím.
-      // Poctivé stavby to nezasáhne (každý zápis počítadlo nuluje). Už hotové se neopakuje.
-      if (roundProductive) staleRounds = 0; else staleRounds++;
-      if (staleRounds >= 4) {
+      // Zaseknutá smyčka: kola jen čtou a nic se neděje.
+      // DŮLEŽITÉ: místo toho, abychom to zabili po 4. kole a ukázali "Nedokončeno",
+      // do toho JDEME — postupně posíláme direktivy. Model, který jen čte, potřebuje
+      // říct, ať přestane čtít a začne psát. Teprve když ani ta nejtvrdší direktiva
+      // nepomůže, skončíme. Poctivá stavba to nezasáhne (zápis vynuluje počítadlo).
+      if (roundProductive) { staleRounds = 0; writeDirectiveLevel = 0; }
+      else staleRounds++;
+      if (staleRounds >= 3 && writeDirectiveLevel < 1) {
+        writeDirectiveLevel = 1;
+        convo.messages.push({ role: 'user', internal: true, content: WRITE_DIRECTIVE_1 });
+        dlog('write-directive', { level: 1, rounds });
+        paintActivity('Tlačím k akci…');
+      }
+      if (staleRounds >= 5 && writeDirectiveLevel < 2) {
+        writeDirectiveLevel = 2;
+        convo.messages.push({ role: 'user', internal: true, content: WRITE_DIRECTIVE_2 });
+        dlog('write-directive', { level: 2, rounds });
+        paintActivity('Tlačím k akci…');
+        // Čtecí nástroje vypneme — model musí psát, ne číst. Bez toho by zase
+        // začal procházet kód a nikdy by nezačal pracovat.
+        toolSet = toolSet.filter(t => !['read_file', 'list_dir', 'glob_file', 'file_info', 'search_files'].includes(t));
+        dlog('tools', { after: 'write-directive-2', kept: toolSet.length });
+      }
+      // Teprve po 7. čtecím kole skončíme — a řekneme to poctivě
+      if (staleRounds >= 7) {
         const didWorkSoFar = runToolMsgs(convo).some(m => !m.skipped && m.ok && (['write_file', 'append_file', 'edit_file'].includes(m.tool) || m.tool === 'shell' || m.tool === 'env_install'));
-        if (didWorkSoFar || rounds >= 6) {
+        if (didWorkSoFar || rounds >= 8) {
+          /* AUTO-RETRY: když model jen čte a nezapíše nic, necháme to běžet znovu
+             s tvrdou direktivou — uživatel nemusí psát znovu. Druhé kolo už má
+             v kontextu všechno přečtené, takže model jde rovnou k zápisu. */
+          if (!autoRetried && isWorkRequest(lastUserText(convo))) {
+            autoRetried = true;
+            rounds = 0; staleRounds = 0; writeDirectiveLevel = 2;
+            toolSet = toolSet.filter(t => !['read_file', 'list_dir', 'glob_file', 'file_info', 'search_files'].includes(t));
+            convo.messages.push({ role: 'user', internal: true, content: WRITE_DIRECTIVE_2 });
+            dlog('auto-retry', { rounds, reads: runToolMsgs(convo).filter(m => ['read_file', 'list_dir', 'glob_file', 'file_info', 'search_files'].includes(m.tool)).length });
+            paintActivity('Zkouším to znovu…');
+            continue;
+          }
           const s = buildRunSummary(runToolMsgs(convo), lastErr, lastUserText(convo));
           if (s) { finalText = s; dlog('final', { kind: 'stale-break', rounds }); break; }
         }
@@ -1517,11 +2247,11 @@ async function runAgent(convo, intent) {
         for (let i = 0; i < s.length; i++) h = ((h * 31) + s.charCodeAt(i)) | 0;
         return (t.tool || '') + ':' + String(t.result || '').length + ':' + h;
       };
-      const lastTools = runToolMsgs(convo).slice(-8).map(t => {
+      const lastTools = runToolMsgs(convo).slice(-TOOLS_IN_CONTEXT).map(t => {
         const h = sumHash(t);
         if (summarized.has(h)) return '[' + t.tool + ' ' + (t.ok ? 'OK' : 'CHYBA') + ']\n(stejný výsledek jako výše — neopakuji)';
         summarized.add(h);
-        return '[' + t.tool + ' ' + ((t.ok ? 'OK' : 'CHYBA')) + ']\n' + String(t.result).slice(0, 2000);
+        return '[' + t.tool + ' ' + ((t.ok ? 'OK' : 'CHYBA')) + ']\n' + String(t.result).slice(0, TOOL_RESULT_CHARS);
       }).join('\n\n');
       convo.messages.push({ role: 'user', internal: true, content: '[Výsledky nástrojů — pokračuj v práci, nebo napiš výsledek.]\n' + lastTools });
       // Rutina: kola, která jen znovu čtou už přečtené soubory a nic nového nepřinesla.
@@ -1545,7 +2275,7 @@ async function runAgent(convo, intent) {
           readRut = 0;
           convo.messages.push({ role: 'user', internal: true, content: `[Dost čtení. Soubor ${top} už znáš nazpaměť — teď HNED zavolej edit_file nebo write_file s upraveným obsahem. Žádné další čtení, odpověď musí obsahovat tool-call.]` });
           dlog('rutbreak', { file: top });
-          setActivity('Tlačím k akci…');
+          paintActivity('Tlačím k akci…');
         }
       } else {
         for (const c of calls) {
@@ -1564,25 +2294,30 @@ async function runAgent(convo, intent) {
     }
     // Závěr bez textu modelu: shrnutí se postaví Z DAT (co se zapsalo/spustilo/selhalo),
     // neptá se modelu — ten by zase jen něco slíbil. Model se volá jen když se nestalo vůbec nic.
-    if (!finalText && !stopRequested) {
+    if (!finalText && !chatState.stopRequested) {
       const doneSummary = buildRunSummary(runToolMsgs(convo), lastErr, lastUserText(convo));
       if (doneSummary) {
         finalText = doneSummary;
         dlog('final', { kind: 'summary', finalLen: finalText.length });
       } else {
-        try {
-          setActivity('Sepisuji výsledek…');
+        // O běžné otázce ("ahoj", "diky") NEPSE stav práce — vrátilo by to
+        // "v chatu nic neproběhla…". Závěr si zaslouží jen skutečný úkol.
+        const wasWork = isWorkRequest(lastUserText(convo));
+        if (!wasWork) {
+          finalText = 'Jsem tu. Co chceš udělat?';
+          dlog('final', { kind: 'smalltalk' });
+        } else try {
+          paintActivity('Sepisuji výsledek…');
           const rec = await oneShot([
-            { role: 'system', content: sysBase },
             { role: 'user', content: '[Napiš stručně textem, v jakém stavu práce je a kde je výsledek (cesta k souboru/exe). Žádné nástroje, jen 2-4 věty.]' }
-          ], 1024, effMode);
+          ], 1024, null, null, { convoId: convo.id, noTools: true });
           if (rec && rec.text) finalText = rec.text;
           dlog('final', { kind: 'model', finalLen: finalText.length });
         } catch {}
       }
     }
     // Po práci VŽDY následuje výsledek: když text nezní hotově, shrnutí se připíše (slib se nahradí fakty).
-    if (finalText && !stopRequested) {
+    if (finalText && !chatState.stopRequested) {
       const acts = runToolMsgs(convo).filter(m => !m.skipped && (
         ['write_file', 'append_file', 'edit_file'].includes(m.tool) ||
         ((m.tool === 'shell' || m.tool === 'env_install') && m.ok)
@@ -1596,16 +2331,25 @@ async function runAgent(convo, intent) {
       }
     }
     finalText = sanitizeResponse(finalText || '');
-    if (!finalText && lastErr) finalText = 'Nedokončeno — ' + publicErr(lastErr) + ' Zkus to prosím znovu za chvíli.';
+    // Uživatel zrušil generování → žádná HTTP chyba, prosté "zastaveno".
+    if (chatState.stopRequested) {
+      if (!finalText || looksPromise(finalText) || finalText.length < 12) finalText = 'Generování bylo zastaveno.';
+    } else if (!finalText && lastErr) {
+      finalText = 'Nedokončeno — ' + publicErr(lastErr) + ' Zkus to prosím znovu za chvíli.';
+    }
+    
     dlog('final', { finalLen: finalText.length, finalHead: finalText.slice(0, 200), rounds });
     convo.messages.push({ role: 'assistant', content: finalText || 'Nedostala jsem od AI žádnou odpověď (prázdný stream). Zkus to prosím poslat znovu.', thinking: lastThinking });
-    saveConvos(); renderMessages(); renderChatList();
-    setFooter('Hotovo'); playDone();
+    saveConvos();
+    // Pozadí chat NESMÍ překreslit právě otevřenou konverzaci — šeptalo by do jiného chatu.
+    if (convo.id === activeConvoId) { renderMessages(); paintFooter('Hotovo'); }
+    renderChatList();
+    playDone();
     // Video project: primárním výstupem je MP4 — po každém zápisu reklamy ho rovnou automaticky nahraj
     // (index.html zůstává uvnitř jako zdroj, ze kterého se nahrává). index.html musí ve složce VŽDY být:
     // když ho AI jen vypsala do chatu, pojistka ho vytáhne a zapíše sama, jak bývalo zvykem.
     try {
-      if (activeProjectType() === 'video' && !stopRequested) {
+      if (activeProjectType() === 'video' && !chatState.stopRequested) {
         const writes = runToolMsgs(convo).filter(m => !m.skipped && m.ok && ['write_file', 'append_file', 'edit_file'].includes(m.tool));
         let htmlReady = writes.length > 0;
         if (!htmlReady) {
@@ -1614,56 +2358,112 @@ async function runAgent(convo, intent) {
         }
         if (htmlReady) {
           try { reloadPreviewFrame(); } catch {} // video je vidět INSTANTNĚ, MP4 se donahraje potom
-          setFooter('Nahrávám MP4…');
+          paintFooter('Nahrávám MP4…');
           await videoExportRun();
-          setFooter('Hotovo · MP4 nahráno');
+          paintFooter('Hotovo · MP4 nahráno');
         }
       }
     } catch {}
   } catch (e) {
-    bubble.innerHTML = mdToHtml('Chyba: ' + (e.message || e));
-    setFooter('Chyba');
+    if (bubble && isVisible()) bubble.innerHTML = mdToHtml('Chyba: ' + (e.message || e));
+    if (convo.id === activeConvoId) paintFooter('Chyba');
   } finally {
-    isStreaming = false; setActivity(null); hidePlanBox();
-    el.sendBtn.disabled = false; el.stopBtn.style.display = 'none';
-    try { window.api.removeListeners(); } catch {}
-    try { if (activeProjectType() === 'video') refreshVideoEmpty(); } catch {}
-    // Po Stopu se fronta maže — nic dalšího se už nespustí. Jinak jede další zpráva ve frontě.
-    if (stopRequested && pendingQueue.length) { pendingQueue.length = 0; }
-    if (pendingQueue.length) { const nx = pendingQueue.shift(); updateQueue(); sendMessage(nx); }
-    else updateQueue();
+    // Odstraň chat ze streaming stavu — ostatní chaty můžou dál generovat
+    streamingChats.delete(convo.id);
+    if (convo.id === activeConvoId) {
+      paintActivity(null); hidePlanBox();
+      setSendBusy(false);
+      try { if (activeProjectType() === 'video') refreshVideoEmpty(); } catch {}
+      // Po Stopu se fronta maže — nic dalšího se už nespustí. Jinak jede další zpráva ve frontě.
+      if (chatState.stopRequested && pendingQueue.length) { pendingQueue.length = 0; }
+      if (pendingQueue.length) { const nx = pendingQueue.shift(); updateQueue(); sendMessage(nx); }
+      else updateQueue();
+    }
+    renderChatList(); // Aktualizuj indikátory generování v seznamu chatů
   }
 }
 /* Deterministické shrnutí úkolu Z DAT (bez modelu — ten by zase jen něco slíbil) */
 function buildRunSummary(toolMsgs, lastErr, userText) {
+  /* Závěrečný souhrn běhu — vždy s emoji, co se stalo a co se udělalo,
+     každá položka na vlastním řádku. Lehce delší, lidsky, česky. */
   const ms = (toolMsgs || []).filter(m => !m.skipped);
   if (!ms.length) return '';
   const uniq = (a) => [...new Set(a)];
   const short = (p) => String(p || '').split(/[\\/]/).slice(-2).join('/');
   const writes = uniq(ms.filter(m => ['write_file', 'append_file', 'edit_file'].includes(m.tool) && m.ok)
     .map(m => short((m.args || {}).path || (m.args || {}).to)));
+  const writesBad = uniq(ms.filter(m => ['write_file', 'append_file', 'edit_file'].includes(m.tool) && !m.ok)
+    .map(m => short((m.args || {}).path || (m.args || {}).to)));
   const shellsOk = ms.filter(m => m.tool === 'shell' && m.ok).map(m => String((m.args || {}).command || '').slice(0, 80));
   const shellsBad = ms.filter(m => m.tool === 'shell' && !m.ok);
-  const envOk = ms.filter(m => m.tool === 'env_install' && m.ok).length;
+  const envOk = uniq(ms.filter(m => m.tool === 'env_install' && m.ok).map(m => String((m.args || {}).id || ((m.args || {}).ids || []).join(', ')) || 'nástroje'));
   const reads = ms.filter(m => ['read_file', 'list_dir', 'glob_file', 'file_info'].includes(m.tool)).length;
-  const didWork = writes.length > 0 || shellsOk.length > 0 || envOk > 0;
-  const lines = [shellsBad.length ? 'Nedokončeno.' : (didWork ? 'Hotovo.' : (isWorkRequest(userText)
-    ? 'Nedokončeno — nic se nezapsalo ani nespustilo, model jen četl.'
-    : 'Hotovo.'))];
-  if (writes.length) lines.push('Zapsáno: ' + writes.join(', '));
-  if (shellsOk.length) lines.push('Spuštěno: ' + shellsOk[shellsOk.length - 1] + (shellsOk.length > 1 ? ` (+${shellsOk.length - 1}×)` : ''));
-  if (envOk) lines.push('Doinstalováno nástrojů: ' + envOk);
-  if (!writes.length && !shellsOk.length && !envOk) lines.push(isWorkRequest(userText)
-    ? `Jen průzkum (čtení: ${reads}) — požadovaná změna se nestala. Zadej požadavek znovu nebo ho upřesni.`
-    : `Zatím jen průzkum (čtení: ${reads}).`);
-  if (shellsBad.length) {
+  const didWork = writes.length > 0 || shellsOk.length > 0 || envOk.length > 0;
+  const req = String(userText || '').replace(/\s+/g, ' ').trim().slice(0, 90);
+  const lines = [];
+  if (shellsBad.length && !didWork) {
+    // Selhalo driv, nez se neco povedlo
+    lines.push('❌ Nedokončeno — poslední příkaz selhal dřív, než se něco uložilo.');
+    if (req) lines.push('📩 Požadavek: "' + req + '"');
+    lines.push('');
     const last = shellsBad[shellsBad.length - 1];
     const err = String(last.result || '').split('\n').map(s => s.trim())
-      .filter(s => /chyba|error|fail|není|neni|not found|nelze|selhal|exit [1-9]|nenalezen/i.test(s))[0]
+      .filter(s => /chyba|error|fail|není|neni|not found|nelze|selhal|exit [1-9]|nenalezen|syntax/i.test(s))[0]
       || String(last.result || '').slice(0, 200);
-    lines.push(`Poslední příkaz selhal (${String((last.args || {}).command || '').slice(0, 80)}): ${err.slice(0, 220)}`);
+    lines.push('⚠️ Co se pokazilo:');
+    lines.push('• `' + String((last.args || {}).command || '').slice(0, 80) + '`');
+    lines.push('• Chyba: ' + err.slice(0, 220));
+    if (writes.length) { lines.push(''); lines.push('📝 Přesto se stihlo zapsat:'); writes.forEach(w => lines.push('• ' + w)); }
+    lines.push('');
+    lines.push('💡 Zkus to poslat znovu — nebo napiš, co má být jinak.');
+  } else if (didWork) {
+    lines.push('✅ Hotovo! ' + (req ? 'Požadavek "' + req + '" je splněný.' : 'Práce je hotová.'));
+    lines.push('');
+    if (writes.length) {
+      lines.push(writes.length === 1 ? '📝 Zapsaný soubor:' : '📝 Zapsané soubory (' + writes.length + '):');
+      writes.forEach(w => lines.push('• ' + w));
+    }
+    if (shellsOk.length) {
+      lines.push('⚙️ Spuštěné příkazy (' + shellsOk.length + '):');
+      uniq(shellsOk).slice(-5).forEach(c => lines.push('• `' + c + '`'));
+      if (uniq(shellsOk).length > 5) lines.push('• …a další (' + (uniq(shellsOk).length - 5) + '×)');
+    }
+    if (envOk.length) {
+      lines.push('📦 Doinstalované nástroje:');
+      envOk.forEach(e => lines.push('• ' + e));
+    }
+    if (writesBad.length) {
+      lines.push('⚠️ Neuložilo se (' + writesBad.length + '):');
+      writesBad.forEach(w => lines.push('• ' + w));
+    }
+    if (shellsBad.length) {
+      const last = shellsBad[shellsBad.length - 1];
+      const err = String(last.result || '').split('\n').map(s => s.trim())
+        .filter(s => /chyba|error|fail|není|neni|not found|nelze|selhal|exit [1-9]|nenalezen/i.test(s))[0]
+        || String(last.result || '').slice(0, 160);
+      lines.push('⚠️ Poslední příkaz sice selhal, ale výsledek už je uložený:');
+      lines.push('• `' + String((last.args || {}).command || '').slice(0, 80) + ': ' + err.slice(0, 160));
+    }
+    // kde je vysledek: exe / html v koreni projektu
+    const exeLike = writes.filter(w => /\.exe$/i.test(w));
+    const htmlLike = writes.filter(w => /\.html?$/i.test(w) && !/\.exe$/i.test(w));
+    if (exeLike.length || htmlLike.length) {
+      lines.push('');
+      lines.push('📂 Výsledek najdeš tady:');
+      exeLike.forEach(w => lines.push('• ' + w));
+      htmlLike.slice(0, 3).forEach(w => lines.push('• ' + w));
+    }
+  } else {
+    // Jen se cetlo, nic se neudelalo
+    lines.push('🔍 Prošel jsem kód, ale nic jsem nezapsal ani nespustil.');
+    if (req) lines.push('📩 Požadavek: "' + req + '"');
+    lines.push('');
+    lines.push(isWorkRequest(userText)
+      ? '👁️ Prohlédnutých souborů: ' + reads + ' — ale žádný jsem nezměnil.'
+      : '👁️ Jen jsem se podíval (čtení: ' + reads + ').');
+    lines.push('💡 Zkus to poslat znovu — nebo řekni přesněji, co mám udělat (třeba "oprav chybu v calc-engine.js").');
   }
-  if (lastErr) lines.push('Pozn.: ' + publicErr(lastErr).slice(0, 120));
+  if (lastErr) lines.push('ℹ️ Poznámka: ' + publicErr(lastErr).slice(0, 120));
   return lines.join('\n');
 }
 /* Přesný tvar parametrů pro eskalaci opakovaných chyb (slabý model ignoruje zdvořilou hlášku) */
@@ -1823,13 +2623,6 @@ function autoGrow() {
   el.promptInput.style.height = 'auto';
   el.promptInput.style.height = Math.min(el.promptInput.scrollHeight, 160) + 'px';
 }
-function setMode(m) {
-  if (m === 'auto') m = 'build'; // Auto zrušeno — Build už sám pozná otázku od úkolu
-  mode = m; localStorage.setItem('nlc_mode', m);
-  $$('#modeSeg button').forEach(b => b.classList.toggle('active', b.getAttribute('data-mode') === m));
-  if (el.planHint) el.planHint.style.display = m === 'plan' ? '' : 'none';
-}
-
 /* ---------- terminál ---------- */
 function toggleTerm(force) {
   const p = $('#termPane');
@@ -2084,45 +2877,78 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { localStorage.setItem('nlc_active', activeConvoId || ''); } catch {}
   }
   try { const v = await window.api.getVersion(); if ($('#sideVer')) $('#sideVer').textContent = 'NolimitCoder ' + v; } catch {}
-  mode = prefs.mode || mode || 'build';
-  if (mode === 'auto') mode = 'build'; // migrace ze zrušeného Auto
-  setMode(mode);
-  // rychlost
-  const slider = $('#speedSlider'), slabel = $('#speedLabel');
-  const speedFill = () => {
-    try {
-      const v = parseInt(slider.value, 10) || 0;
-      slider.style.setProperty('--fill', (v / 2 * 100) + '%');
-      const dot = $('#speedDot');
-      if (dot) dot.className = 'speed-dot' + (v === 2 ? ' high' : v === 1 ? ' mid' : '');
-    } catch {}
-  };
-  if (slider) {
-    slider.value = String(speedIx);
-    const names = ['Fast', 'Medium', 'High'];
-    if (slabel) slabel.textContent = names[speedIx];
-    speedFill();
-    slider.addEventListener('input', () => { speedIx = parseInt(slider.value, 10) || 0; localStorage.setItem('nlc_speed', String(speedIx)); if (slabel) slabel.textContent = names[speedIx]; speedFill(); });
-  }
-  updateModelLabel(); renderModelList(); renderProjects(); showView('projects');
+  // Očista starých klíčů (localStorage); klíče v config.json mažou main.js v getStore()
+  try { ['nlc_mode', 'nlc_agent'].forEach(k => localStorage.removeItem(k)); } catch {}
+  // Slider rychlosti je pryč — tokenový limit je pevný (MAX_TOKENS).
+  try { updateTokenMeter(null, null); } catch {}
+  updateModelLabel(); renderModelList(); renderEffortList(); renderProjects(); showView('projects');
   renderChatList(); renderMessages();
   try { const d = await window.api.projectsDir(); if ($('#projectsDirPath')) $('#projectsDirPath').textContent = d; } catch {}
   // model picker — dropdown se vždy vejde do okna (posune se doleva, když by přetekl vpravo)
   el.modelCurrent.addEventListener('click', (e) => { e.stopPropagation(); el.modelDropdown.classList.toggle('open'); if (el.modelDropdown.classList.contains('open')) { clampDropdown(); setTimeout(() => el.modelSearch.focus(), 30); } });
   window.addEventListener('resize', () => { try { clampDropdown(); } catch {} });
   document.addEventListener('click', (e) => { if (!el.modelSelector.contains(e.target)) closeModels(); });
+  bindComposerMeta();
   el.modelSearch.addEventListener('input', () => { searchQuery = el.modelSearch.value; renderModelList(); });
   $('#fetchZenBtn').addEventListener('click', (e) => { e.preventDefault(); refreshZenLive(); });
-  $$('#modeSeg button').forEach(b => b.addEventListener('click', () => setMode(b.getAttribute('data-mode'))));
-  $('#planSwitchBtn').addEventListener('click', () => setMode('build'));
-  $('#planDismissBtn').addEventListener('click', () => { if (el.planHint) el.planHint.style.display = 'none'; });
+  // Řádek "Zobrazit využití" a odkaz na plány v dropdownu modelu
+  const mdUsage = $('#mdUsage');
+  if (mdUsage) mdUsage.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation(); closeModels();
+    const i = tokState.in || 0, o = tokState.out || 0;
+    setFooter((i || o)
+      ? ('Využití posledního běhu: ' + fmtTok(i) + ' vstup + ' + fmtTok(o) + ' výstup tokenů (limit ' + fmtTok(tokState.max || MAX_TOKENS) + ')')
+      : 'Zatím žádné využití — odpověz něčím a uvidíš spotřebu.');
+  });
+  const mdPlans = $('#mdPlans');
+  if (mdPlans) mdPlans.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation(); closeModels(); openPrefs();
+  });
+  // Indikátor složky: klik = změna
+  const fpill = $('#folderPill');
+  if (fpill) fpill.addEventListener('click', changeFolder);
+  setFolderLabel();
   // composer
   el.promptInput.addEventListener('input', autoGrow);
   el.promptInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
-  el.sendBtn.addEventListener('click', () => sendMessage());
-  el.stopBtn.addEventListener('click', () => stopEverything());
+  // (listener na sendBtn je níže — sdílí funkci Stop i Send)
+  // ===== Obrázky: Ctrl+V v chatu, tlačítko +, drag&drop =====
+  const atBtn = $('#attachBtn'), atIn = $('#attachInput');
+  if (atBtn && atIn) atBtn.addEventListener('click', () => atIn.click());
+  if (atIn) atIn.addEventListener('change', async (e) => {
+    await addImageFiles(e.target.files);
+    e.target.value = '';
+  });
+  el.promptInput.addEventListener('paste', async (e) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const files = Array.from((dt.files || []));
+    if (!files.some(f => /^image\//.test(f.type || ''))) return;
+    e.preventDefault();
+    await addImageFiles(files);
+  });
+  // Drag & drop obrázku přímo do chatu
+  const drop = (e) => {
+    e.preventDefault();
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+    if (files.length) addImageFiles(files);
+  };
+  el.promptInput.addEventListener('dragover', (e) => { e.preventDefault(); el.promptInput.classList.add('drag'); });
+  el.promptInput.addEventListener('dragleave', () => el.promptInput.classList.remove('drag'));
+  el.promptInput.addEventListener('drop', (e) => { el.promptInput.classList.remove('drag'); drop(e); });
+  // Ctrl+V mimo textarea (tělo okna) — aby šlo vložit i když je fokus jinde
+  document.addEventListener('paste', async (e) => {
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+    const files = Array.from((e.clipboardData && e.clipboardData.files) || []);
+    if (!files.some(f => /^image\//.test(f.type || ''))) return;
+    e.preventDefault();
+    await addImageFiles(files);
+  });
+  // Zastavit = klik na generující tlačítko (už žádné samostatné Stop).
+  el.sendBtn.addEventListener('click', () => { if (activeConvoId && streamingChats.has(activeConvoId)) { stopEverything(); return; } sendMessage(); });
   document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); newConvo(); renderMessages(); } });
   // MP4 player shortcuts: space = play/pause, arrows = seek 5 s (only when the video is visible, never while typing)
   document.addEventListener('keydown', (e) => {
@@ -2152,6 +2978,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (show && prefs.activeProject) startPreview(prefs.activeProject);
   });
   $('#previewHide').addEventListener('click', () => { $('#previewPane').style.display = 'none'; });
+  // Výsuvný panel: tlačítko vpravo nahoře, ✕ v hlavičce, ↻ přenačte iframe.
+  const ptg = $('#panelToggle');
+  if (ptg) ptg.addEventListener('click', () => toggleSidePanel());
+  const pcl = $('#sidePanelClose');
+  if (pcl) pcl.addEventListener('click', () => toggleSidePanel(false));
+  const prl = $('#sidePanelReload');
+  if (prl) prl.addEventListener('click', () => {
+    const f = document.querySelector('#sidePanelBody iframe');
+    if (f) { try { f.contentWindow.location.reload(); } catch { try { f.src = f.src; } catch {} } }
+  });
   // video: resolution + length + export to MP4 + download
   const vres = $('#videoRes');
   if (vres) {
@@ -2296,10 +3132,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#prefsBackdrop').addEventListener('click', () => $('#prefsModal').classList.remove('open'));
   document.querySelectorAll('#prefsNav button').forEach(b => b.addEventListener('click', () => prefsGo(b.getAttribute('data-pref'))));
   $('#soundCheck').addEventListener('change', async (e) => { prefs.sound = e.target.checked; try { await window.api.setStore({ sound: prefs.sound }); } catch {} });
-  // Permissions — plný přístup je trvalý, přepínač se už nemění
-  const ple = $('#permLogErrors');
-  if (ple) ple.addEventListener('change', async (e) => { await savePerms({ logErrors: e.target.checked }); });
-  // Error Log
+  // Error Log — přepínač zápisu chyb
+  const ple = $('#errLogCheck');
+  if (ple) ple.addEventListener('change', async (e) => { await saveErrPref({ logErrors: e.target.checked }); });
   const eob = $('#errOpenBtn'); if (eob) eob.addEventListener('click', async () => { const r = await window.api.errOpen(); if (!r || !r.ok) { const v = $('#errLogView'); if (v) v.textContent = (r && r.error) || 'Log zatím neexistuje.'; } });
   const erb = $('#errRefreshBtn'); if (erb) erb.addEventListener('click', refreshErrLog);
   const ecb = $('#errCopyBtn'); if (ecb) ecb.addEventListener('click', async () => {

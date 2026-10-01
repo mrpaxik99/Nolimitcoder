@@ -97,13 +97,14 @@
       </div>
     </aside>
 
-    <main class="main">
+    <main class="main" id="mainCol">
       <div class="topbar">
         <button class="back-btn" id="backBtn" title="Back to My Projects">← My Projects</button>
         <button class="back-btn" id="previewToggle" style="display:none" title="Show preview">Preview</button>
         <div class="session-title" id="sessionTitle">New conversation</div>
         <div class="top-right">
           <span class="top-status" id="statusText">Connected</span>
+          <button class="back-btn" id="panelToggle" title="Side panel — výsledky AI (HTML, exe, …)">Panel</button>
           <button class="back-btn" id="termToggle" title="Terminal">›_</button>
         </div>
       </div>
@@ -114,45 +115,70 @@
       </div>
 
       <div class="composer-wrap">
-        <div class="plan-hint" id="planHint" style="display:none"><span>You are in <b>Plan mode</b> (planning only) — switch to Build to build.</span><span class="plan-hint-btns"><button class="primary-btn" id="planSwitchBtn">Switch to Build and run</button><button class="icon-btn" id="planDismissBtn" title="Close">✕</button></span></div>
         <div class="queue-bar" id="queueBar" style="display:none"></div>
+        <div class="access-pop" id="accessPop" style="display:none">
+          <div class="ap-body">
+            <div class="ap-title">AI chce pracovat mimo tuto složku</div>
+            <div class="ap-path" id="accessPath">—</div>
+            <div class="ap-note">Povolením dostane AI přístup k celému počítači — může číst, psát a hledat ve všech složkách.</div>
+            <div class="ap-btns">
+              <button class="ghost-btn2" id="accessNo">Ne</button>
+              <button class="mini-btn" id="accessAlways">Povolit vždy</button>
+              <button class="primary-btn" id="accessYes">Povolit</button>
+            </div>
+          </div>
+        </div>
         <div class="activity-bar" id="activityBar" style="display:none"></div>
         <div class="plan-box" id="planBox" style="display:none"></div>
-        <div class="composer">
-          <textarea id="promptInput" placeholder="Ask anything, / for commands, @ for context..." rows="1"></textarea>
+        <div class="composer" id="composer">
+          <div class="attach-strip" id="attachStrip" style="display:none"></div>
+          <textarea id="promptInput" placeholder="Ask anything, @ to mention, / for actions" rows="1"></textarea>
           <div class="composer-bar">
             <div class="composer-left">
-              <div class="mode-seg" id="modeSeg" title="Build = tells questions apart from tasks and works · Plan = only plans">
-                <button data-mode="build" class="active">Build</button>
-                <button data-mode="plan">Plan</button>
-              </div>
+              <button class="add-btn" id="attachBtn" title="Přiložit obrázek (nebo Ctrl+V)">+</button>
+              <input type="file" id="attachInput" accept="image/*" multiple style="display:none">
+              <button class="folder-pill" id="folderPill" title="Kam teď AI píše — klikni pro změnu složky">
+                <span class="fp-ico">📁</span><span class="fp-name" id="folderName">—</span><span class="fp-chev">▾</span>
+              </button>
               <div class="model-picker" id="modelSelector">
                 <button class="picker-btn" id="modelCurrent" title="Pick a model">
-                  <span id="curName">NolimitCoderV3</span>
+                  <span id="curName">NolimitCoder 1.0 Flash</span>
                   <span class="picker-chev">▾</span>
                 </button>
                 <div class="model-dropdown" id="modelDropdown">
+                  <div class="md-head">Model</div>
                   <div class="dropdown-search">
-                    <input id="modelSearch" placeholder="Search models..." autocomplete="off">
+                    <input id="modelSearch" placeholder="Hledat model…" autocomplete="off">
                   </div>
                   <div class="model-list" id="modelList"></div>
+                  <div class="md-sep"></div>
+                  <div class="md-head">Uvažování</div>
+                  <div class="model-list" id="effortList"></div>
+                  <div class="md-sep"></div>
+                  <div class="md-row md-action" id="mdUsage">
+                    <span class="md-ico">◔</span>
+                    <span class="md-row-label">Zobrazit využití</span>
+                    <span class="md-chev">›</span>
+                  </div>
+                  <div class="md-sep"></div>
+                  <div class="md-note">
+                    Tento účet momentálně nemá vyšší limity přes AI plán. Změnu získáš v Nastavení → Plán.
+                  </div>
+                  <a class="md-link" href="#" id="mdPlans">Zobrazit plány</a>
                   <div class="dropdown-footer">
                     <span>NolimitCode models</span>
-                    <a href="#" id="fetchZenBtn">Refresh list</a>
+                    <a href="#" id="fetchZenBtn">Obnovit seznam</a>
                   </div>
                 </div>
-              </div>
-              <span class="free-tag">FREE</span>
-              <div class="speed-ctl" title="Fast = short quick answers · Medium = balanced · High = most detailed">
-                <span class="speed-dot" id="speedDot"></span>
-                <input type="range" id="speedSlider" min="0" max="2" step="1" value="1">
-                <span id="speedLabel">Medium</span>
               </div>
             </div>
             <div class="composer-right">
               <span class="hint">Enter ↵</span>
+              <div class="tok-meter" id="tokMeter" title="Kolik tokenů už AI vygenerovala z limitu tohoto běhu">
+                <div class="tok-track"><div class="tok-fill" id="tokenBar"></div></div>
+                <span class="tok-label" id="tokenLabel">0 tok</span>
+              </div>
               <button class="send-btn" id="sendBtn" title="Send">↑</button>
-              <button class="stop-btn" id="stopBtn" style="display:none" title="Stop">■</button>
             </div>
           </div>
         </div>
@@ -161,7 +187,29 @@
         <span class="dot-sep">·</span>
         <span id="footerStatus">Ready</span>
       </div>
+      <!-- Stavový řádek pod composerem (viditelný jen v prázdném stavu, jako v OpenCode) -->
+      <div class="composer-meta" id="composerMeta">
+        <button class="meta-pill meta-proj" id="metaProj" title="Aktivní projekt — klikni pro změnu">
+          <span class="meta-ico">▣</span><span id="metaProjName">—</span><span class="meta-chev">▾</span>
+        </button>
+        <span class="meta-sep">/</span>
+        <button class="meta-pill meta-branch" id="metaBranch" title="Git větev">
+          <span class="meta-ico" id="metaBranchIco">⑂</span><span id="metaBranchName">—</span>
+        </button>
+      </div>
     </div>
+    <aside class="side-panel" id="sidePanel">
+      <div class="sp-head">
+        <img class="think-logo" src="./assets/logo.png" alt="">
+        <span class="sp-title" id="sidePanelTitle">Panel</span>
+        <button class="icon-btn" id="sidePanelReload" title="Reload">↻</button>
+        <button class="icon-btn" id="sidePanelClose" title="Close panel">✕</button>
+      </div>
+      <div class="sp-tabs" id="sidePanelTabs" style="display:none"></div>
+      <div class="sp-body" id="sidePanelBody">
+        <div class="sp-empty">AI sem otevře výsledky — HTML náhled, spuštěný program, obrázek…<br>Tlačítkem Panel ho schováš.</div>
+      </div>
+    </aside>
     </main>
     <aside class="term-pane" id="termPane" style="display:none">
       <div class="term-bar">
@@ -241,9 +289,9 @@
         <button class="mini-btn" id="pmPick">Pick a folder…</button>
         <div class="pref-title" style="margin-top:12px">Project type</div>
         <div class="type-cards col">
-          <label class="type-card"><input type="radio" name="ptype" value="universal" checked><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><span><b>Universal Project</b><small>Chat + files, as before</small></span></label>
-          <label class="type-card"><input type="radio" name="ptype" value="website"><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 0 18a13.5 13.5 0 0 1 0-18z"/></svg></span><span><b>Website Project</b><small>Chat on the right + live preview on the left</small></span></label>
-          <label class="type-card"><input type="radio" name="ptype" value="video"><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 10l5-3v10l-5-3z"/></svg></span><span><b>AI Commercial Video</b><small>Chat on the right + ad preview with resolution + export to MP4</small></span></label>
+          <label class="type-card"><input type="radio" name="ptype" value="universal" checked><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><span><b>Coder Studio</b><small>Chat + files, as before</small></span></label>
+          <label class="type-card"><input type="radio" name="ptype" value="website"><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 0 18a13.5 13.5 0 0 1 0-18z"/></svg></span><span><b>Website Studio</b><small>Chat on the right + live preview on the left</small></span></label>
+          <label class="type-card"><input type="radio" name="ptype" value="video"><span class="tc-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 10l5-3v10l-5-3z"/></svg></span><span><b>Commercial Studio</b><small>Chat on the right + ad preview with resolution + export to MP4</small></span></label>
         </div>
         <div class="pref-title" style="margin-top:12px">Project name</div>
         <input class="text-input" id="pmName" placeholder="My project" autocomplete="off">
@@ -275,7 +323,7 @@
     <div class="modal-body prefs-layout">
       <nav class="prefs-nav" id="prefsNav">
         <button data-pref="general" class="active">General</button>
-        <button data-pref="permissions">Permissions</button>
+        <button data-pref="permissions">Error Log</button>
         <button data-pref="terminal">Terminal</button>
         <button data-pref="env">Environment</button>
         <button data-pref="search">Search</button>
@@ -285,8 +333,8 @@
       <div class="prefs-pages" id="prefsPages">
         <section class="pref-page" data-ppage="general">
           <div class="pref-group">
-            <div class="pref-title">Mode</div>
-            <div class="settings-info" style="margin:0">The AI has <b>full access</b> by default — files, terminal and installs run on their own, no questions, no Windows popups. You can narrow it down in <b>Permissions</b>, and every error lands in the <b>Error Log</b>.</div>
+            <div class="pref-title">Access</div>
+            <div class="settings-info" style="margin:0">The AI has <b>full access</b> — files, terminal and installs run on their own, no questions, no Windows popups. Every error lands in the <b>Error Log</b>.</div>
           </div>
           <div class="pref-group">
             <div class="pref-title">Sound</div>
@@ -295,14 +343,9 @@
         </section>
         <section class="pref-page" data-ppage="permissions" style="display:none">
           <div class="pref-group">
-            <div class="pref-title">Permissions</div>
-            <div class="settings-info" style="margin:0 0 10px">The AI has <b>unlimited access</b> — this cannot be switched off. Files, folders, the terminal, installs, network and deletion are all allowed, and nothing is ever asked or confirmed.</div>
-            <label class="switch-row"><input type="checkbox" id="permAll" checked disabled><span class="switch"><span class="switch-dot"></span></span><span><b>All permissions — always on</b><small>Writes anywhere on the disk (including C:\Windows and Program Files), runs any command, installs anything, deletes anything, with no confirmation.</small></span></label>
-          </div>
-          <div class="pref-group">
             <div class="pref-title">Error Log</div>
             <div class="settings-info" style="margin:0 0 10px">Every error in the app is written to <b>Error Log.txt</b> in your user profile (path below) — AI failures, failed tools, UI exceptions. Secrets are scrubbed, never plaintext. Send that file if something breaks.</div>
-            <label class="switch-row"><input type="checkbox" id="permLogErrors" checked><span class="switch"><span class="switch-dot"></span></span><span><b>Log errors</b><small>Write every error to Error Log.txt (scrubbed).</small></span></label>
+            <label class="switch-row"><input type="checkbox" id="errLogCheck" checked><span class="switch"><span class="switch-dot"></span></span><span><b>Log errors</b><small>Write every error to Error Log.txt (scrubbed).</small></span></label>
             <div class="proj-dir-row" style="margin-top:8px"><code id="errLogPath">…</code><button class="mini-btn" id="errOpenBtn">Open</button></div>
             <div class="env-actions" style="margin-top:8px">
               <button class="mini-btn" id="errRefreshBtn">Refresh</button>
@@ -352,6 +395,36 @@
           </div>
         </section>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="browserModal">
+  <div class="modal-backdrop" id="browserBackdrop"></div>
+  <div class="modal-content browser">
+    <div class="modal-header">
+      <span>Vyber složku</span>
+      <div class="browser-actions">
+        <button class="icon-btn" id="browserUp" title="O složku výš">↑</button>
+        <button class="icon-btn" id="browserClose" title="Zavřít">✕</button>
+      </div>
+    </div>
+    <div class="browser-path" id="browserPath">Tento počítač</div>
+    <div class="browser-row">
+      <div class="browser-side">
+        <div class="browser-side-title">Disky</div>
+        <div class="browser-list" id="browserDrives"></div>
+        <div class="browser-side-title">Rychlý přístup</div>
+        <div class="browser-list" id="browserShortcuts"></div>
+      </div>
+      <div class="browser-main" id="browserList"></div>
+    </div>
+    <div class="browser-foot">
+      <button class="ghost-btn2" id="browserNewFolder">Nová složka</button>
+      <input class="text-input" id="browserNewName" placeholder="název nové složky" autocomplete="off" style="flex:1;max-width:220px">
+      <span style="flex:1"></span>
+      <button class="ghost-btn2" id="browserCancel">Zrušit</button>
+      <button class="primary-btn" id="browserPick">Vybrat tuto složku</button>
     </div>
   </div>
 </div>

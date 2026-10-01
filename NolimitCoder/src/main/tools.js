@@ -169,8 +169,51 @@ function knownFolders() {
     'home': home, 'domu': home, 'temp': os.tmpdir(), 'tmp': os.tmpdir()
   };
 }
+/* Expande systemovych promennych v cestach: %TEMP% (cmd styl), $env:TEMP (PowerShell),
+   $HOME a ~ (unix styl). BEZ TOHO vznikne v projektu literalni slozka "%TEMP%", protoze
+   AI posila %TEMP%/nolimitcoder/... i do SOUBOROVYCH nastroju (copy_file, write_file...),
+   kde cmd.exe neexpanduje nic. Po expanzi ukazuje cesta na skutecny Temp. */
+/* Zakaz zalohovaciho bordelu v projektu: .uibak/, *.bak, *-backup, *-old, *-kopie...
+   AI si pred editaci delalo "zalohy" (create_dir .uibak + copy_file), takze v projektu
+   zustaval balast. edit_file je presny a nepotrebuje zalohy. Kdyz uzivatel VYSLOVNE
+   chce zalohu, at si rekne - pak se pravidlo obejde pres shell (tenhle guard plati jen
+   pro souborove nastroje). Vraci text zamitnuti, nebo null. */
+function backupJunkGuard(absPath) {
+  const s = String(absPath || '');
+  const low = s.toLowerCase();
+  const segs = low.replace(/\\/g, '/').split('/');
+  for (const g of segs) {
+    if (!g) continue;
+    // skryte zalohovaci adresare: .uibak, .bak, .backup, .old...
+    if (/^\.(uibak|bak|backup|backups|old|orig|tmp)$/.test(g))
+      return 'Zalohovaci slozka "' + g + '" je zakazana - projekt musi zustat cisty. Edituj primo (edit_file je presny, zalohy nepotrebuje). Pokracuj bez zalohy.';
+    // slozky typu xxx-backup, xxx-old, xxx-kopie, xxx-copy, xxx-bak
+    if (/-(backup|backups|bak|old|orig|copy|copies|kopie|zaloha)$/.test(g) || /^(backup|backups|zalohy|tmp)[-_]/.test(g))
+      return 'Zalohovaci slozka "' + g + '" je zakazana - projekt musi zustat cisty. Edituj primo a pokracuj bez zalohy.';
+  }
+  const base = segs[segs.length - 1] || '';
+  if (/\.(bak|orig|rej|old)$/.test(base) || /~$/.test(base))
+    return 'Zalohovaci soubor "' + base + '" je zakazany - projekt musi zustat cisty. Edituj primo a pokracuj bez zalohy.';
+  return null;
+}
+function expandEnvVars(p) {
+  let s = String(p || '');
+  if (!s) return s;
+  // $env:NAME (PowerShell) -> hodnota
+  s = s.replace(/\$env:([A-Za-z_][A-Za-z0-9_]*)/g, (m, name) => process.env[name] !== undefined ? process.env[name] : m);
+  // %NAME% (Windows cmd) -> hodnota
+  s = s.replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (m, name) => {
+    if (process.env[name] !== undefined) return process.env[name];
+    const up = Object.keys(process.env).find(k => k.toUpperCase() === name.toUpperCase());
+    return up ? process.env[up] : m;
+  });
+  // $HOME, $HOMEPATH, ~
+  s = s.replace(/\$HOME\b/g, os.homedir());
+  if (/^~([\\/]|$)/.test(s)) s = os.homedir() + s.slice(1);
+  return s;
+}
 function resolveTarget(root, p, fullAccess) {
-  const raw = String(p || '');
+  const raw = expandEnvVars(String(p || ''));
   let abs;
   if (path.isAbsolute(raw)) {
     abs = path.normalize(raw);
@@ -241,10 +284,35 @@ function normalizeShell(cmd, light) {
   let c = String(cmd || '');
   c = c.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[–—−]/g, '-').replace(/ /g, ' ');
   if (light || process.platform !== 'win32') return c;
-  const parts = c.split(/(\s*&&\s*|\s*\|\|\s*|;\s*)/);
+/* Rozdeli prikaz na segmenty podle &&, || a ; — ale jen MIMO uvozovky.
+   `node -e "const a=1;const b=2"` se nesmi rozdelit ani prelozit (strednik patri JS).
+   Respektuje "...", '...' i `...` vcetne escapovani. */
+function splitShellSegments(cmd) {
+  const s = String(cmd || '');
+  const out = [];
+  let cur = '', quote = null, esc = false;
+  const push = () => { out.push(cur); cur = ''; };
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (esc) { cur += ch; esc = false; continue; }
+    if (ch === '\\' && quote !== "'") { cur += ch; esc = true; continue; }
+    if (quote) { cur += ch; if (ch === quote) quote = null; continue; }
+    if (ch === '"' || ch === "'" || ch === '`' ) { quote = ch; cur += ch; continue; }
+    if (ch === '&' && s[i + 1] === '&') { push(); out.push('&&'); i++; continue; }
+    if (ch === '|' && s[i + 1] === '|') { push(); out.push('||'); i++; continue; }
+    if (ch === ';') { push(); out.push(';'); continue; }
+    cur += ch;
+  }
+  push();
+  return out;
+}
+  const parts = splitShellSegments(c);
   const map1 = { pwd: 'cd', clear: 'cls', ls: 'dir', cat: 'type', cp: 'copy', mv: 'move', touch: 'type nul >' };
   return parts.map(seg => {
-    if (/^\s*(&&|\|\||;)\s*$/.test(seg)) return seg;
+    // cmd.exe `;` NENÍ oddělovač příkazů (umí ho až PowerShell) → "node -v; x" spadne
+    // jako "node: bad option: -v;". Pro cmd překládáme `;` na `&`.
+    if (/^\s*;\s*$/.test(seg)) return seg.replace(';', '&');
+    if (/^\s*(&&|\|\|)\s*$/.test(seg)) return seg;
     const m = seg.match(/^(\s*)([A-Za-z][\w.-]*)([\s\S]*)$/);
     if (!m) return seg;
     const [, pre, name, rest] = m;
@@ -274,6 +342,72 @@ function decodeConsole(buf) {
   for (const byte of b) s += byte < 0x80 ? String.fromCharCode(byte) : (OEM_CZ[byte] || String.fromCharCode(byte));
   return s;
 }
+/* Zápis obsahu souboru přes `shell` je vždy past. Na Windows to končí buď
+   "The string is missing the terminator: '@" (here-string), nebo "The command line
+   is too long." (limit cmd.exe 8191 znaků) — soubor se neuloží a model to opakuje.
+   Nástroj `write_file` existuje přesně na to. Tady příkaz odmítneme a řekneme,
+   co volat místo toho; tím se celá chybaová třída odstraní, neopakuje. */
+/* Zakaz destruktivnich prikazu na systemove cesty. AI jednou zavolalo
+   `rmdir /s /q "%TEMP%"` - v shellu se %TEMP% expanduje na SKUTECNY Windows Temp
+   a prikaz zacal mazat cely docasny adresar systemu. Tohle se nesmi stat nikdy.
+   Vraci text zamitnuti, nebo null. */
+function destructiveShellGuard(cmd) {
+  const c = String(cmd || '');
+  if (!/\b(rmdir|rd|del|erase|format|takeown|icacls)\b/i.test(c)) return null;
+  if (/\bformat\b/i.test(c)) return 'ZAMITNUTO - prikaz format je zakazany. Disky se neformatuji, nikdy.';
+  // expanduj %VAR% pro kontrolu (shell by je expandoval taky)
+  let x = c;
+  try { x = expandEnvVars(c); } catch {}
+  const low = x.toLowerCase();
+  const home = os.homedir().toLowerCase();
+  const windir = (process.env.WINDIR || process.env.SYSTEMROOT || 'C:\\Windows').toLowerCase();
+  const tmp = (process.env.TEMP || process.env.TMP || '').toLowerCase();
+  const sysRoots = [windir, tmp, home, 'c:', 'c:/', 'c:\\windows', 'c:/windows',
+    'c:\\program files', 'c:/program files', 'c:\\program files (x86)', 'c:/program files (x86)'];
+  // rmdir/rd/del s /s /q na koren systemu, Windows, profil nebo cely Temp = stop
+  const delRe = /\b(rmdir|rd)\b[^&|]*?\/s|\bdel\b[^&|]*?\/s/i;
+  if (!delRe.test(c)) return null;
+  const norm = (p) => p.replace(/\//g, '\\').replace(/\\+$/, '');
+  // najdi cil: text v uvozovkach nebo posledni parametr bez prepinacu
+  const quoted = [...c.matchAll(/"([^"]+)"/g)].map(m => m[1]);
+  const bare = c.split(/[&|]/).map(s => s.trim().split(/\s+/).pop()).filter(Boolean);
+  const cands = [...quoted, ...bare].map(s => { try { return norm(expandEnvVars(s).toLowerCase()); } catch { return norm(s.toLowerCase()); } });
+  for (const cand of cands) {
+    for (const r of sysRoots) {
+      if (!r) continue;
+      const rn = norm(r);
+      if (cand === rn || cand === rn + '\\*'
+        || cand.startsWith(rn + '\\') || cand.startsWith(rn + '/')) return 'ZAMITNUTO - mazani systemove cesty "' + cand + '" je zakazano (rmdir/del /s /q na Windows, profil, Temp nebo disk). Pracuj jen uvnitr projektu.';
+    }
+  }
+  return null;
+}
+function shellFileWriteGuard(cmd) {
+  const c = String(cmd || '');
+  if (!c.trim()) return null;
+  const has = (re) => re.test(c);
+  // 1) PowerShell here-string  @' … '@   (musí být na vlastních řádcích)
+  if (has(/@'/)) {
+    return "PowerShell here-string (@' … '@) nepoužívej — cmd.exe má limit 8191 znaků a '@ musí být na začátku řádku. Použij nástroj write_file.";
+  }
+  if (has(/Set-Content|Out-File|Add-Content/i)) {
+    return 'Zapisování souborů přes Set-Content/Out-File je křehké (limity, kódování, uvozovky). Použij nástroj write_file.';
+  }
+  // 2) bash heredoc  cat <<EOF … EOF
+  if (has(/<<-?\s*['"]?[A-Za-z_]/)) {
+    return 'Bash heredoc (<<EOF) na Windows nefunguje. Použij nástroj write_file.';
+  }
+  // 3) přesměrování do souboru:  > file  /  >> file  (2>nul a /dev/null jsou OK)
+  const redirects = c.match(/(?:^|[^0-9<>])>>?\s*("[^"]+"|'[^']+'|[^\s>|&]+)/g) || [];
+  const realTargets = redirects
+    .map(s => s.replace(/^(?:^|[^0-9<>])>>?\s*/, '').replace(/^["']|["']$/g, ''))
+    .filter(t => t && !/^(nul|null|\/dev\/null|&[12])$/i.test(t));
+  if (realTargets.length && (c.length > 500 || has(/@'|<<|Set-Content/i))) {
+    return 'Přesměrování (' + realTargets.slice(0, 2).join(', ') + ') je nebezpečné pro dlouhý obsah — cmd.exe zkrátí příkaz na 8191 znaků. Použij nástroj write_file.';
+  }
+  return null;
+}
+
 // Spuštění okenní aplikace (start "" app.exe nebo app.exe) čekáním na výstup navěky
 // visí — okno běží dál a dědí si stdout. Takový příkaz pustíme odpojeně a hned vrátíme.
 function isGuiLaunch(cmd) {
@@ -416,6 +550,21 @@ function runArgv(exe, args, cwd, timeoutMs) {
     void child;
   });
 }
+/* Odhad, kterým shellem příkaz myslel. cmd.exe nebere `;` jako oddělovač příkazů,
+   bere `&&`/`||`/`&` a `%VAR%`, `if exist`. PowerShell bere `;`, `$env:`, `$()`,
+   `` ` ``, `if (…)`, `| Select-Object`. Bez toho se mixed příkaz spustí v cmd,
+   `;` zůstane v argumentu a program dostane "bad option: -v;". */
+const PS_ONLY = /(^|[^\\])\$env:|\$\(|\bSelect-Object\b|\bWhere-Object\b|\bForEach-Object\b|\bWrite-Host\b|\bNew-Object\b|\bGet-ChildItem\b|\bGet-Content\b|\bSet-Location\b|\bTest-Path\b|\bRemove-Item\b|`|\bif\s*\(/i;
+const CMD_ONLY = /\bif\s+exist\b|\bif\s+errorlevel\b|%[A-Za-z_][A-Za-z0-9_]*%|&&|\|\||\bdel\s+\/|\bdir\s+\/b\b|\btaskkill\s+\/|\bstart\s+""/i;
+function preferredShellOrder(cmd) {
+  const c = String(cmd || '');
+  const ps = PS_ONLY.test(c);
+  const cm = CMD_ONLY.test(c);
+  if (ps && !cm) return ['powershell', 'pwsh', 'cmd'];
+  if (cm && !ps) return ['cmd', 'powershell', 'pwsh'];
+  return ['cmd', 'powershell', 'pwsh'];
+}
+
 function runCmdKind(kind, cmd, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const lite = kind === "powershell" || kind === "pwsh";
@@ -462,6 +611,31 @@ function isAlwaysBlocked(cmd) {
   if (ALWAYS_BLOCKED_RE.test(String(cmd))) return true;
   return ALWAYS_BLOCKED_NAMES.has(firstToken(cmd));
 }
+// Je tenhle kód useknutý? (stream skončil dřív, než se zavřely závorky)
+// Slehlý kód = do souboru jde jen půlka a AI to považuje za hotovo.
+function truncatedCodeReason(s) {
+  const t = String(s || '');
+  if (!t.trim()) return 'prázdný obsah';
+  const opens = { '{': 0, '[': 0, '(': 0 };
+  const pairs = { '}': '{', ']': '[', ')': '(' };
+  let q = null, esc = false, tmpl = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (esc) { esc = false; continue; }
+    if (c === '\\') { esc = true; continue; }
+    if (q) { if (c === q) q = null; continue; }
+    if (c === '"' || c === "'") { q = c; continue; }
+    if (c === '`') { tmpl = !tmpl; continue; }
+    if (tmpl) continue;
+    if (opens[c] !== undefined) opens[c]++;
+    else if (pairs[c]) opens[pairs[c]]--;
+  }
+  if (q) return 'neukončený řetězec';
+  if (tmpl) return 'neukončená šablona';
+  for (const k of Object.keys(opens)) if (opens[k] > 0) return 'nezavřená ' + k + ' (' + opens[k] + ')';
+  if (/\b(function|class|if|for|while|switch|try)\b[^{;]*$/.test(t.replace(/\s+$/, ''))) return 'useknutá na nedokončeném bloku';
+  return '';
+}
 // Příkazy, které reálně potřebují administrátora. Ty jdou do elevovaného helperu.
 function needsElevation(cmd) {
   const c = String(cmd || '').toLowerCase();
@@ -478,7 +652,9 @@ function readTextFile(abs) {
     try { return new TextDecoder('windows-1250').decode(buf); } catch { return buf.toString('utf-8'); }
   }
 }
-function globWalk(root, pattern, fullAccess) {
+// ASYNCHRONNÍ — na síťovém disku (Z: WebDAV) trvá readdir stovky ms až sekundy.
+// Synchronní verze blokovala hlavní proces a Windows ukázal "neodpovídá".
+async function globWalk(root, pattern, fullAccess) {
   const pat = String(pattern || '**').replace(/\\/g, '/');
   const segs = pat.split('/').filter(s => s.length);
   const out = [];
@@ -490,10 +666,10 @@ function globWalk(root, pattern, fullAccess) {
     }
     return rxCache.get(s);
   };
-  (function walk(dir, si, rel) {
+  const walk = async (dir, si, rel) => {
     if (out.length >= 200) return;
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     const last = si === segs.length - 1;
     for (const e of entries) {
       if (out.length >= 200) return;
@@ -504,12 +680,12 @@ function globWalk(root, pattern, fullAccess) {
         if (e.isDirectory()) {
           if (SKIP_DIRS.has(e.name)) continue;
           if (segs[si] === '**') {
-            walk(full, si, rp); // ** eats arbitrarily deep
-            if (si + 1 < segs.length) walk(full, si + 1, rp);
+            await walk(full, si, rp); // ** eats arbitrarily deep
+            if (si + 1 < segs.length) await walk(full, si + 1, rp);
             else out.push(rp + '/');
           } else if (segRx(segs[si]).test(e.name)) {
             if (last) out.push(rp + '/');
-            else walk(full, si + 1, rp);
+            else await walk(full, si + 1, rp);
           }
         } else if (e.isFile()) {
           const seg = segs[si];
@@ -534,12 +710,13 @@ function globWalk(root, pattern, fullAccess) {
         if (out.length >= 200) return;
         try {
           if (e.isDirectory() && !e.name.startsWith('.') && !SKIP_DIRS.has(e.name)) {
-            walk(path.join(dir, e.name), si, rel ? rel + '/' + e.name : e.name);
+            await walk(path.join(dir, e.name), si, rel ? rel + '/' + e.name : e.name);
           }
         } catch {}
       }
     }
-  })(root, 0, '');
+  };
+  await walk(root, 0, '');
   return [...new Set(out)].slice(0, 200);
 }
 function fetchText(url, timeoutMs) {
@@ -569,7 +746,7 @@ function fetchText(url, timeoutMs) {
 
 // Portable tools (when winget fails): download from the web into userData/tools and add to PATH,
 // so the shell finds them right away — no admin rights needed.
-function toolsBinDirs(userDataDir) {
+async function toolsBinDirs(userDataDir) {
   const out = [];
   if (!userDataDir) return out;
   const base = path.join(String(userDataDir), 'tools');
@@ -578,10 +755,10 @@ function toolsBinDirs(userDataDir) {
     const reg = JSON.parse(fs.readFileSync(regFile, 'utf-8'));
     for (const id of Object.keys(reg || {})) for (const d of reg[id] || []) if (fs.existsSync(d)) out.push(d);
   } catch {}
-  const walk = (dir, depth) => {
+  const walk = async (dir, depth) => {
     if (depth > 3) return;
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       try {
         const full = path.join(dir, e.name);
@@ -590,7 +767,7 @@ function toolsBinDirs(userDataDir) {
           if (fs.existsSync(path.join(full, 'cmd', 'git.exe'))) { out.push(path.join(full, 'cmd')); continue; }
           if (fs.existsSync(path.join(full, 'git.exe'))) { out.push(full); continue; }
           if (/^python-/i.test(e.name) && fs.existsSync(path.join(full, 'python.exe'))) { out.push(full); continue; }
-          walk(full, depth + 1);
+          await walk(full, depth + 1);
         }
       } catch {}
     }
@@ -611,11 +788,11 @@ function rememberToolDir(userDataDir, id, dir) {
     fs.writeFileSync(regFile, JSON.stringify(reg, null, 2), 'utf-8');
   } catch {}
 }
-function prependPortableBins(userDataDir) {
+async function prependPortableBins(userDataDir) {
   try {
     const sep = path.delimiter;
     const cur = String(process.env.PATH || '').split(sep);
-    for (const d of toolsBinDirs(userDataDir)) {
+    for (const d of await toolsBinDirs(userDataDir)) {
       if (!cur.some(p => p.toLowerCase() === d.toLowerCase())) cur.unshift(d);
     }
     process.env.PATH = cur.join(sep);
@@ -870,7 +1047,7 @@ async function installPortableNode(userDataDir) {
   const ver = (lts && lts.version) || 'v22.14.0';
   const existing = path.join(toolsDir, `node-${ver}-win-x64`, 'node.exe');
   if (fs.existsSync(existing)) {
-    prependPortableBins(userDataDir);
+    await prependPortableBins(userDataDir);
     return { ok: true, output: `Node.js ${ver} is already downloaded in ${path.dirname(existing)} and is in PATH.` };
   }
   const zipUrl = `https://nodejs.org/dist/${ver}/node-${ver}-win-x64.zip`;
@@ -883,7 +1060,7 @@ async function installPortableNode(userDataDir) {
   const ps = await runCmd(`powershell -NoProfile -Command "Expand-Archive -Force '${zipDest}' '${toolsDir}'"`, toolsDir, 300000);
   try { fs.rmSync(zipDest, { force: true }); } catch {}
   if (!fs.existsSync(existing)) throw new Error(`Extraction failed (${ps.output.slice(-300)}). Manual: https://nodejs.org/`);
-  prependPortableBins(userDataDir);
+  await prependPortableBins(userDataDir);
   return { ok: true, output: `Node.js ${ver} downloaded from the internet to ${path.dirname(existing)} and added to PATH.` };
 }
 // Portable Git (MinGit) — when winget fails: find the latest version via the GitHub API,
@@ -893,7 +1070,7 @@ async function installPortableGit(userDataDir) {
   dlContext = 'Git';
   const toolsDir = path.join(String(userDataDir), 'tools');
   fs.mkdirSync(toolsDir, { recursive: true });
-  const already = toolsBinDirs(userDataDir).some(() => true);
+  const already = (await toolsBinDirs(userDataDir)).some(() => true);
   if (already) {
     const probe = await new Promise((resolve) => {
       execFile('git', ['--version'], { timeout: 10000, windowsHide: true }, (err, stdout) => {
@@ -918,7 +1095,7 @@ async function installPortableGit(userDataDir) {
   try { fs.rmSync(zipDest, { force: true }); } catch {}
   const gitExe = path.join(destDir, 'cmd', 'git.exe');
   if (!fs.existsSync(gitExe)) throw new Error('Extraction failed. Manual: https://git-scm.com/downloads');
-  prependPortableBins(userDataDir);
+  await prependPortableBins(userDataDir);
   return { ok: true, output: `Git (${mg.name}) downloaded from the internet to ${destDir} and added to PATH.` };
 }
 
@@ -1075,20 +1252,20 @@ const EXT_NEEDS = {
   '.ts': ['node'], '.tsx': ['node'], '.jsx': ['node'], '.vue': ['node'], '.svelte': ['node']
 };
 
-function detectProject(root) {
+async function detectProject(root) {
   const out = { root: root || '', kind: 'no project', needs: [], files: [] };
   if (!root || !fs.existsSync(String(root))) return out;
   const needs = [];
   const add = (ids) => { for (const i of ids || []) if (!needs.includes(i)) needs.push(i); };
   const files = [];
-  const walk = (dir, depth) => {
+  const walk = async (dir, depth) => {
     if (depth > 2 || files.length > 500) return;
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       if (e.name.startsWith('.') && e.name !== '.github') continue;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name) && e.name !== 'assets') walk(full, depth + 1); continue; }
+      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name) && e.name !== 'assets') await walk(full, depth + 1); continue; }
       const low = e.name.toLowerCase();
       if (files.length < 200) files.push(path.relative(root, full).replace(/\\/g, '/'));
       if (MANIFEST_NEEDS[low]) add(MANIFEST_NEEDS[low]);
@@ -1097,12 +1274,12 @@ function detectProject(root) {
       if (EXT_NEEDS[ext]) add(EXT_NEEDS[ext]);
     }
   };
-  walk(String(root), 0);
+  await walk(String(root), 0);
   const names = files.map(f => path.basename(f).toLowerCase());
   let kind = '';
   if (names.includes('package.json')) {
     let pkgTxt = '';
-    try { pkgTxt = fs.readFileSync(path.join(String(root), 'package.json'), 'utf-8').slice(0, 20000).toLowerCase(); } catch {}
+    try { pkgTxt = (await fs.promises.readFile(path.join(String(root), 'package.json'), 'utf-8')).slice(0, 20000).toLowerCase(); } catch {}
     kind = /electron-builder|"electron"/.test(pkgTxt) ? 'Electron app'
       : /"next"/.test(pkgTxt) ? 'Next.js web'
       : /"vite"/.test(pkgTxt) ? 'Vite web'
@@ -1217,7 +1394,7 @@ function applyDiscoveredPaths(paths) {
 async function scanEnv(opts) {
   const o = opts || {};
   const tools = await detectAllTools(!!o.force);
-  const project = detectProject(o.root);
+  const project = await detectProject(o.root);
   const intent = detectIntent(o.request);
   const needed = [];
   for (const raw of [...project.needs, ...intent.needs]) {
@@ -1331,17 +1508,17 @@ async function sevenZTo(seven, dest) {
   const r = await runArgv(hit.path, ['x', '-y', '-o' + dest, seven], dest, 900000);
   return !!r.ok && nonEmptyDir(dest);
 }
-function findFileRe(root, re, maxDepth) {
+async function findFileRe(root, re, maxDepth) {
   const rx = re instanceof RegExp ? re : new RegExp(re, 'i');
   let best = '';
-  const walk = (dir, depth) => {
+  const walk = async (dir, depth) => {
     if (depth > (maxDepth || 4) || best) return;
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) { if (best) return; if (e.isFile() && rx.test(e.name)) { best = path.join(dir, e.name); return; } }
     for (const e of entries) { if (best) return; if (e.isDirectory()) walk(path.join(dir, e.name), depth + 1); }
   };
-  walk(root, 0);
+  await walk(root, 0);
   return best;
 }
 const PORTABLE_INSTALLERS = {
@@ -1357,11 +1534,11 @@ const PORTABLE_INSTALLERS = {
     const out = path.join(d, 'python');
     await untarTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
-    const exe = findFileRe(out, /^python\.exe$/i, 4);
+    const exe = await findFileRe(out, /^python\.exe$/i, 4);
     if (!exe) throw new Error('Python extraction failed.');
     rememberToolDir(ud, 'python', path.dirname(exe));
     rememberToolDir(ud, 'python', path.join(path.dirname(exe), 'Scripts'));
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: `Python downloaded from the internet (${a.name}).` };
   },
   async gcc(ud) {
@@ -1378,10 +1555,10 @@ const PORTABLE_INSTALLERS = {
     const okx = has7z ? await sevenZTo(f, out) : await unzipTo(f, out);
     if (!okx) throw new Error('GCC extraction failed.');
     try { fs.rmSync(f, { force: true }); } catch {}
-    const exe = findFileRe(out, /^(gcc|g\+\+)\.exe$/i, 5);
+    const exe = await findFileRe(out, /^(gcc|g\+\+)\.exe$/i, 5);
     if (!exe) throw new Error('GCC extraction failed.');
     rememberToolDir(ud, 'gcc', path.dirname(exe));
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: `GCC downloaded from the internet (${a.name}).` };
   },
   async cmake(ud) {
@@ -1394,10 +1571,10 @@ const PORTABLE_INSTALLERS = {
     const out = path.join(d, 'cmake');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
-    const exe = findFileRe(out, /^cmake\.exe$/i, 4);
+    const exe = await findFileRe(out, /^cmake\.exe$/i, 4);
     if (!exe) throw new Error('CMake extraction failed.');
     rememberToolDir(ud, 'cmake', path.dirname(exe));
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: `CMake downloaded from the internet (${a.name}).` };
   },
   async go(ud) {
@@ -1413,10 +1590,10 @@ const PORTABLE_INSTALLERS = {
     const out = path.join(d, 'go');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
-    const exe = findFileRe(out, /^go\.exe$/i, 4);
+    const exe = await findFileRe(out, /^go\.exe$/i, 4);
     if (!exe) throw new Error('Go extraction failed.');
     rememberToolDir(ud, 'go', path.dirname(exe));
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: `Go ${rel.version} downloaded from the internet.` };
   },
   async java(ud) {
@@ -1427,10 +1604,10 @@ const PORTABLE_INSTALLERS = {
     const out = path.join(d, 'java');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
-    const exe = findFileRe(out, /^javac\.exe$/i, 4);
+    const exe = await findFileRe(out, /^javac\.exe$/i, 4);
     if (!exe) throw new Error('JDK extraction failed.');
     rememberToolDir(ud, 'java', path.dirname(exe));
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: 'JDK 21 downloaded from the internet (Adoptium).' };
   },
   async dotnet(ud) {
@@ -1442,7 +1619,7 @@ const PORTABLE_INSTALLERS = {
     const r = await runCmd(`powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}" -Channel 9.0 -InstallDir "${target}" -NoPath`, d, 900000);
     if (!r.ok || !fs.existsSync(path.join(target, 'dotnet.exe'))) throw new Error('.NET SDK installation failed: ' + r.output.slice(-300));
     rememberToolDir(ud, 'dotnet', target);
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: '.NET SDK 9 downloaded from the internet into the app.' };
   },
   async rust(ud) {
@@ -1454,7 +1631,7 @@ const PORTABLE_INSTALLERS = {
     const cargoDir = path.join(os.homedir(), '.cargo', 'bin');
     if (!r.ok || !fs.existsSync(path.join(cargoDir, 'cargo.exe'))) throw new Error('Rust installation failed: ' + r.output.slice(-300));
     rememberToolDir(ud, 'rust', cargoDir);
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: 'Rust (cargo) downloaded from the internet (rustup).' };
   },
   async bun(ud) {
@@ -1467,10 +1644,10 @@ const PORTABLE_INSTALLERS = {
     const out = path.join(d, 'bun');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
-    const exe = findFileRe(out, /^bun\.exe$/i, 4);
+    const exe = await findFileRe(out, /^bun\.exe$/i, 4);
     if (!exe) throw new Error('Bun extraction failed.');
     rememberToolDir(ud, 'bun', path.dirname(exe));
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: `Bun downloaded from the internet (${a.name}).` };
   },
   async deno(ud) {
@@ -1483,10 +1660,10 @@ const PORTABLE_INSTALLERS = {
     const out = path.join(d, 'deno');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
-    const exe = findFileRe(out, /^deno\.exe$/i, 4);
+    const exe = await findFileRe(out, /^deno\.exe$/i, 4);
     if (!exe) throw new Error('Deno extraction failed.');
     rememberToolDir(ud, 'deno', path.dirname(exe));
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: `Deno downloaded from the internet (${a.name}).` };
   },
   async php(ud) {
@@ -1497,10 +1674,10 @@ const PORTABLE_INSTALLERS = {
     const out = path.join(d, 'php');
     await unzipTo(f, out);
     try { fs.rmSync(f, { force: true }); } catch {}
-    const exe = findFileRe(out, /^php\.exe$/i, 4);
+    const exe = await findFileRe(out, /^php\.exe$/i, 4);
     if (!exe) throw new Error('PHP extraction failed.');
     rememberToolDir(ud, 'php', path.dirname(exe));
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: 'PHP 8.4 downloaded from the internet.' };
   },
   async sevenzip(ud) {
@@ -1512,7 +1689,7 @@ const PORTABLE_INSTALLERS = {
     if (!dl.ok) throw new Error('Download failed: ' + dl.error);
     try { fs.copyFileSync(exe, path.join(sub, '7z.exe')); } catch {}
     rememberToolDir(ud, 'sevenzip', sub);
-    prependPortableBins(ud);
+    await prependPortableBins(ud);
     return { output: '7-Zip downloaded from the internet.' };
   }
 };
@@ -1543,7 +1720,7 @@ async function installTool(id, opts) {
     const det = await detectTool(id);
     if (det.ok) {
       rememberToolDir(o.userDataDir, id, det.dir);
-      prependPortableBins(o.userDataDir);
+      await prependPortableBins(o.userDataDir);
       dlContext = '';
       dlEvent({ kind: 'dl', id: 'pkg:' + id + ':' + a.how, label: def.label, phase: 'done', percent: 100, how: a.how, ok: true });
       return { ok: true, how: a.how, output: `${def.label} installed via ${a.how} (${a.pkg}): ${det.version || 'done'}${det.dir ? ' \u2192 ' + det.dir : ''}. Available in subsequent commands.` };
@@ -1560,7 +1737,7 @@ async function installTool(id, opts) {
       const det = await detectTool(id);
       if (det.ok) {
         rememberToolDir(o.userDataDir, id, det.dir);
-        prependPortableBins(o.userDataDir);
+        await prependPortableBins(o.userDataDir);
         dlContext = '';
         dlEvent({ kind: 'dl', id: 'portable:' + id, label: def.label, phase: 'done', percent: 100, how: 'portable', ok: true });
         return { ok: true, how: 'portable', output: `${def.label} downloaded from the internet into the app: ${det.version || 'done'}${det.dir ? ' \u2192 ' + det.dir : ''}.${p && p.output ? ' ' + p.output : ''}` };
@@ -1703,6 +1880,370 @@ function diffLines(a, b) {
   while (j < m) out.push({ t: '+', s: B[j++] });
   return out.slice(0, 120);
 }
+/* ===== build_exe: kompletni pipeline EXE aplikace (100% zaruka) =====
+   1) inventura: package.json + vsechny lokalni soubory, na ktere odkazuje index.html
+   2) auto-oprava package.json: scripts.dist, devDependencies, build.files (vzdy kompletni)
+   3) npm install, kdyz chybi node_modules nebo je starsi nez package.json
+   4) PLNY rebuild (npm run dist / electron-builder) - nikdy se nic nepreskakuje
+   5) verifikace: exe existuje a je cerstve, asar obsahuje vsechny soubory
+   6) launch-test: exe se spusti, 4 s musi bezet, pak se zabije - report PASS/FAIL */
+function collectHtmlRefs(html) {
+  const s = String(html || '');
+  const refs = [];
+  const push = (v) => {
+    v = String(v || '').trim();
+    if (!v) return;
+    if (/^(https?:|data:|blob:|file:|#)/i.test(v)) return;
+    v = v.split(/[?#]/)[0].trim();
+    if (!v || /^[a-zA-Z]+:/.test(v)) return;
+    refs.push(v.replace(/^\.\//, ''));
+  };
+  const tagRe = /<(script|link|img|audio|video|source|track|embed)\b[^>]*?\b(?:src|href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
+  let m;
+  while ((m = tagRe.exec(s))) push(m[2].replace(/^["']|["']$/g, ''));
+  const cssRe = /url\(\s*("[^"]*"|'[^']*'|[^)]+?)\s*\)/gi;
+  while ((m = cssRe.exec(s))) {
+    const v = m[1].replace(/^["']|["']$/g, '');
+    if (!/^data:/i.test(v)) push(v);
+  }
+  return [...new Set(refs)];
+}
+function findHtmlDuplicates(html) {
+  const s = String(html || '');
+  const seen = new Map(), dups = [];
+  const tagRe = /<(script|link)\b[^>]*?\b(?:src|href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
+  let m;
+  while ((m = tagRe.exec(s))) {
+    const v = m[2].replace(/^["']|["']$/g, '').trim();
+    if (!v || /^(https?:|data:)/i.test(v)) continue;
+    const n = (seen.get(v) || 0) + 1;
+    seen.set(v, n);
+    if (n === 2) dups.push(v);
+  }
+  return dups;
+}
+function runCmdLong(cmd, cwd, timeoutMs) {
+  return new Promise((resolve) => {
+    const child = execFile(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+      process.platform === 'win32' ? ['/d', '/s', '/c', cmd] : ['-c', cmd],
+      { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true, encoding: 'buffer' },
+      (err, stdout, stderr) => {
+        let out = decodeConsole(stdout);
+        const errS = decodeConsole(stderr);
+        if (errS) out += (out ? '\n[stderr]\n' : '') + errS;
+        if (out.length > 12000) out = out.slice(-12000);
+        if (err) {
+          const code = typeof err.code === 'number' ? `exit ${err.code}` : String(err.code || 'error');
+          resolve({ ok: false, code, output: `${out}\n[${code}${err.killed ? ', timeout' : ''}]`.trim() });
+        } else {
+          resolve({ ok: true, code: 'exit 0', output: (out.trim() || '(no output)').slice(-12000) });
+        }
+      });
+    void child;
+  });
+}
+function listExeFiles(distDir) {
+  const out = [];
+  try {
+    for (const f of fs.readdirSync(distDir)) {
+      if (/\.exe$/i.test(f)) {
+        const full = path.join(distDir, f);
+        try { const st = fs.statSync(full); if (st.isFile()) out.push({ path: full, size: st.size, mtime: st.mtimeMs }); } catch {}
+      }
+    }
+  } catch {}
+  try {
+    const unp = path.join(distDir, 'win-unpacked');
+    for (const f of fs.readdirSync(unp)) {
+      if (/\.exe$/i.test(f)) {
+        const full = path.join(unp, f);
+        try { const st = fs.statSync(full); if (st.isFile()) out.push({ path: full, size: st.size, mtime: st.mtimeMs, unpacked: true }); } catch {}
+      }
+    }
+  } catch {}
+  return out;
+}
+/* Launch-test: exe se spusti a 4 s musi bezet. Nevydrzi = FAIL s exit kodem.
+   Instalacni Setup.exe se nikdy netestuje spustenim (to by rozjelo instalator). */
+async function launchTestExe(exePath) {
+  const name = path.basename(exePath);
+  if (/setup|uninstall/i.test(name)) return { tested: false, reason: 'installer (Setup/Uninstall) se spoustenim netestuje' };
+  try { await runCmdLong(`taskkill /IM "${name}" /F`, path.dirname(exePath), 10000); } catch {}
+  await new Promise(r => setTimeout(r, 600));
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = require('child_process').spawn(exePath, [], { detached: false, stdio: 'ignore', windowsHide: false });
+    } catch (e) {
+      resolve({ tested: true, ok: false, output: 'Nespustilo se: ' + (e && e.message) });
+      return;
+    }
+    let done = false;
+    const finish = async (ok, output) => {
+      if (done) return;
+      done = true;
+      try { await runCmdLong(`taskkill /PID ${child.pid} /T /F`, path.dirname(exePath), 10000); } catch {}
+      resolve({ tested: true, ok, output });
+    };
+    child.on('error', (e) => finish(false, 'Chyba spusteni: ' + (e && e.message)));
+    child.on('exit', (code) => finish(false, `Aplikace se SAMA ukoncila po <4 s (exit ${code}). Hlavni proces spadl - zkontroluj main.js (uncaught exception, loadFile na neexistujici soubor).`));
+    setTimeout(() => finish(true, 'Aplikace bezi (4 s test OK).'), 4000);
+  });
+}
+/* Hash stavu projektu pro preskoceni zbytecneho rebuildu. Kdyz se od posledniho
+   uspesneho buildu nic nezmenilo, build_exe vrati existujici exe okamzite misto
+   10minutoveho npm install + electron-builder naprazdno. */
+function hashProjectState(dir, pkgText, extraFiles, target) {
+  const crypto = require('crypto');
+  const h = crypto.createHash('sha256');
+  h.update('target:' + String(target || '') + '\n');
+  h.update('package.json:\n' + String(pkgText || '') + '\n');
+  const files = [...new Set(extraFiles || [])];
+  for (const rel of files) {
+    try {
+      const abs = path.join(dir, rel);
+      const st = fs.statSync(abs);
+      if (!st.isFile()) continue;
+      h.update('file:' + rel + ':' + st.size + ':' + st.mtimeMs + '\n');
+      if (st.size > 0 && st.size <= 1048576) h.update(fs.readFileSync(abs));
+    } catch {}
+  }
+  for (const sub of ['src', 'vendor', 'assets', 'public']) {
+    try {
+      const walk = (d) => {
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+          const p = path.join(d, e.name);
+          if (e.isDirectory()) { walk(p); continue; }
+          try {
+            const st = fs.statSync(p);
+            h.update('tree:' + path.relative(dir, p) + ':' + st.size + ':' + st.mtimeMs + '\n');
+          } catch {}
+        }
+      };
+      const sd = path.join(dir, sub);
+      if (fs.existsSync(sd)) walk(sd);
+    } catch {}
+  }
+  return h.digest('hex').slice(0, 32);
+}
+/* Test zamku souboru: otevreni pro zapis selze (EBUSY/EPERM), kdyz soubor drzi
+   bezici aplikace, Explorer (nahledy) nebo antivirus. Levne - zadne prejmenovani. */
+function isFileLocked(p) {
+  try {
+    if (!fs.existsSync(p)) return false;
+    const fd = fs.openSync(p, 'r+');
+    try { fs.closeSync(fd); } catch {}
+    return false;
+  } catch { return true; }
+}
+async function execBuildExe(dir, opts) {
+  opts = opts || {};
+  const log = [];
+  const step = (name, ok, detail) => {
+    log.push((ok ? '[OK] ' : '[FAIL] ') + name + (detail ? ' - ' + detail : ''));
+    return ok;
+  };
+  const fail = (msg) => ({ ok: false, output: log.join('\n') + '\n\nBUILD SELHAL: ' + msg });
+  if (!fs.existsSync(dir)) return fail('Slozka neexistuje: ' + dir);
+  const pkgFile = path.join(dir, 'package.json');
+  if (!fs.existsSync(pkgFile)) return fail('Chybi package.json - nejdriv scaffold_electron nebo napis package.json (main.js + index.html).');
+  let pkg;
+  try { pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8')); }
+  catch (e) { return fail('package.json je rozbity JSON: ' + e.message); }
+  const entry = String(pkg.main || 'main.js');
+  const entryAbs = path.join(dir, entry);
+  if (!fs.existsSync(entryAbs)) return fail('Chybi vstupni soubor ' + entry + ' (package.json -> main).');
+  const htmlAbs = path.join(dir, 'index.html');
+  if (!fs.existsSync(htmlAbs)) return fail('Chybi index.html.');
+  // --- inventura odkazu z index.html ---
+  let refs = [];
+  try { refs = collectHtmlRefs(fs.readFileSync(htmlAbs, 'utf8')); } catch {}
+  step('Inventura odkazu', true, refs.length ? refs.join(', ') : 'zadne lokalni (vse inline)');
+  const missing = refs.filter(r => !fs.existsSync(path.join(dir, r)));
+  if (missing.length) return fail('Chybi soubory, na ktere odkazuje index.html: ' + missing.join(', ') + '. Napis je (write_file) a zavolej build_exe znovu.');
+  step('Vsechny odkazovane soubory existuji', true);
+  let dups = [];
+  try { dups = findHtmlDuplicates(fs.readFileSync(htmlAbs, 'utf8')); } catch {}
+  // --- auto-oprava package.json ---
+  const fixed = [];
+  pkg.scripts = pkg.scripts || {};
+  if (!pkg.scripts.dist) { pkg.scripts.dist = 'electron-builder --win nsis'; fixed.push('scripts.dist'); }
+  if (!pkg.scripts.start) { pkg.scripts.start = 'electron .'; fixed.push('scripts.start'); }
+  pkg.devDependencies = pkg.devDependencies || {};
+  if (!pkg.devDependencies.electron) { pkg.devDependencies.electron = '^33.0.0'; fixed.push('dev electron'); }
+  if (!pkg.devDependencies['electron-builder']) { pkg.devDependencies['electron-builder'] = '^25.0.0'; fixed.push('dev electron-builder'); }
+  pkg.build = pkg.build || {};
+  pkg.build.directories = pkg.build.directories || {};
+  if (!pkg.build.directories.output) { pkg.build.directories.output = 'dist'; fixed.push('directories.output'); }
+  const wantFiles = new Set([entry, 'index.html', ...refs]);
+  try { if (fs.existsSync(path.join(dir, 'preload.js'))) wantFiles.add('preload.js'); } catch {}
+  for (const extra of ['src', 'vendor', 'assets', 'public']) {
+    try {
+      const st = fs.statSync(path.join(dir, extra));
+      if (st.isDirectory()) wantFiles.add(extra + '/**/*');
+    } catch {}
+  }
+  try { if (fs.existsSync(path.join(dir, 'styles.css'))) wantFiles.add('styles.css'); } catch {}
+  const haveFiles = Array.isArray(pkg.build.files) ? pkg.build.files.slice() : [];
+  for (const w of wantFiles) if (!haveFiles.includes(w)) { haveFiles.push(w); fixed.push('files +' + w); }
+  if (haveFiles.length) pkg.build.files = haveFiles;
+  if (!pkg.build.win) { pkg.build.win = { target: ['nsis'] }; fixed.push('win.target nsis'); }
+  if (fixed.length) {
+    fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2), 'utf8');
+    step('package.json opraveno', true, fixed.join(', '));
+  } else {
+    step('package.json v poradku', true);
+  }
+  // --- BEZE ZMENY? Preskocit zbytecny 10minutovy rebuild ---
+  // Kdyz se od posledniho uspesneho buildu nic nezmenilo, vratime existujici exe
+  // okamzite. Zadny npm install, zadny electron-builder, zadny launch-test.
+  const BUILD_STATE = '.nlc-build.json';
+  let pkgTextNow = '';
+  try { pkgTextNow = fs.readFileSync(pkgFile, 'utf8'); } catch {}
+  const stateFiles = [entry, 'index.html', ...refs];
+  try { if (fs.existsSync(path.join(dir, 'preload.js'))) stateFiles.push('preload.js'); } catch {}
+  const curHash = hashProjectState(dir, pkgTextNow, stateFiles, opts.target || '');
+  const distDirEarly = path.join(dir, 'dist');
+  let skipBuild = false, skipExe = null;
+  try {
+    const stRaw = fs.readFileSync(path.join(distDirEarly, BUILD_STATE), 'utf8');
+    const st = JSON.parse(stRaw);
+    if (st && st.hash === curHash && st.exe && fs.existsSync(st.exe)) {
+      const est = fs.statSync(st.exe);
+      if (est.isFile() && Math.abs(est.size - (st.size || 0)) < 2 && Math.abs(est.mtimeMs - (st.mtime || 0)) < 2000) {
+        skipBuild = true; skipExe = st.exe;
+      }
+    }
+  } catch {}
+  if (skipBuild) {
+    step('Beze zmeny', true, 'projekt je stejny jako pri poslednim buildu - rebuild preskocen');
+    step('EXE aktualni', true, skipExe + ' (' + (fs.statSync(skipExe).size / 1048576).toFixed(1) + ' MB)');
+    if (dups.length) log.push('[WARN] Duplicitni odkazy v index.html (soubor se nacte 2x): ' + dups.join(', '));
+    log.push('');
+    log.push('HOTOVO - 100% (bez rebuildu, usetreno ~10 min): ' + skipExe);
+    return { ok: true, output: log.join('\n') };
+  }
+  // --- npm install, kdyz je potreba (dist se bez nej nevytvori) ---
+  const nmDir = path.join(dir, 'node_modules');
+  let needInstall = !fs.existsSync(path.join(nmDir, 'electron', 'package.json')) || !fs.existsSync(path.join(nmDir, 'electron-builder', 'package.json'));
+  try {
+    if (!needInstall) {
+      const pkgT = fs.statSync(pkgFile).mtimeMs;
+      const nmT = fs.statSync(nmDir).mtimeMs;
+      if (pkgT > nmT) needInstall = true;
+    }
+  } catch {}
+  if (needInstall) {
+    step('npm install potreba', true, 'node_modules chybi nebo je starsi nez package.json');
+    const ins = await runCmdLong('npm install', dir, 600000);
+    if (!ins.ok) return fail('npm install selhal:\n' + ins.output);
+    step('npm install', true);
+  } else {
+    step('node_modules OK', true, 'instalace se nepreskakuje, jen neni potreba');
+  }
+  // --- Zabij bezici instance aplikace (builder jinak neprepise app.asar: "file is used by another process") ---
+  try {
+    const killBeforeBuild = new Set();
+    try { for (const e of listExeFiles(path.join(dir, 'dist'))) killBeforeBuild.add(path.basename(e.path)); } catch {}
+    const prodName = String((pkg.build && pkg.build.productName) || pkg.productName || pkg.name || '').trim();
+    if (prodName) { killBeforeBuild.add(prodName + '.exe'); killBeforeBuild.add(prodName.replace(/[^A-Za-z0-9]+/g, '') + '.exe'); }
+    for (const kn of killBeforeBuild) {
+      try { await runCmdLong(`taskkill /IM "${kn}" /F`, dir, 10000); } catch {}
+    }
+    if (killBeforeBuild.size) step('Bezici instance ukonceny', true, [...killBeforeBuild].join(', '));
+    await new Promise(r => setTimeout(r, 800));
+  } catch {}
+  // --- Pockat na odemceni app.asar (Explorer nahled / antivirus / dobihajici proces) ---
+  // Slepy build do zamku jen plytva minutami. Nejdriv probe, pak teprve builder.
+  try {
+    const lockProbe = [
+      path.join(dir, 'dist', 'win-unpacked', 'resources', 'app.asar')
+    ];
+    for (let li = 0; li < 6; li++) {
+      const locked = lockProbe.filter(p => isFileLocked(p));
+      if (!locked.length) break;
+      step('Soubor zamcen', true, path.basename(locked[0]) + ' drzi jiny proces - cekam ' + ((li + 1) * 10) + ' s (pokus ' + (li + 1) + '/6)');
+      try { for (const e of listExeFiles(path.join(dir, 'dist'))) { try { await runCmdLong(`taskkill /IM "${path.basename(e.path)}" /F`, dir, 10000); } catch {} } } catch {}
+      await new Promise(r => setTimeout(r, 10000));
+      if (li === 5 && lockProbe.some(p => isFileLocked(p))) {
+        return fail('Soubor je po 60 s porad zamceny: ' + locked.join(', ') + '. Zavri aplikaci a okno Exploreru se slozkou dist a spust build_exe znovu.');
+      }
+    }
+  } catch (e) { if (String((e && e.message) || '').includes('BUILD SELHAL')) throw e; }
+  // --- PLNY rebuild ---
+  const target = String(opts.target || '').toLowerCase();
+  const distCmd = target && ['nsis', 'portable', 'dir'].includes(target)
+    ? `npx electron-builder --win ${target}`
+    : 'npm run dist';
+  const t0 = Date.now();
+  // Retry pri zamku souboru: kdyz builder nemuze prepsat app.asar, protoze stara
+  // instance jeste bezi (uzivatel nebo AI ji prave spustila), ukoncime a zkusime znovu.
+  let bld = null, bldAttempt = 0;
+  while (bldAttempt < 3) {
+    bldAttempt++;
+    bld = await runCmdLong(distCmd, dir, 900000);
+    if (bld.ok) break;
+    const lockErr = /used by another process|EBUSY|EPERM|app\.asar|cannot access|nemá přístup/i.test(String(bld.output || ''));
+    if (!lockErr || bldAttempt >= 3) break;
+    step('Build zamcen (bezi stara instance)', true, 'pokus ' + bldAttempt + '/3 - ukoncuji a zkousim znovu');
+    try {
+      try { for (const e of listExeFiles(path.join(dir, 'dist'))) { try { await runCmdLong(`taskkill /IM "${path.basename(e.path)}" /F`, dir, 10000); } catch {} } } catch {}
+      const pn2 = String((pkg.build && pkg.build.productName) || pkg.productName || pkg.name || '').trim();
+      if (pn2) { try { await runCmdLong(`taskkill /IM "${pn2}.exe" /F`, dir, 10000); } catch {} }
+    } catch {}
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  // (původní volání nahrazeno retry smyčkou výše)
+  if (!bld.ok) return fail('Build selhal (' + distCmd + '):\n' + bld.output);
+  step('Build (' + distCmd + ')', true, Math.round((Date.now() - t0) / 1000) + ' s');
+  // --- verifikace vystupu ---
+  const distDir = path.join(dir, 'dist');
+  if (!fs.existsSync(distDir)) return fail('Build dobehl, ale slozka dist/ nevznikla.');
+  const exes = listExeFiles(distDir);
+  if (!exes.length) return fail('V dist/ neni zadne .exe. Vystup buildu:\n' + String(bld.output).slice(-2000));
+  const fresh = exes.filter(e => e.mtime >= t0 - 120000);
+  if (!fresh.length) return fail('EXE v dist/ je STARE (build nic noveho nevytvoril).');
+  for (const e of fresh) step('EXE cerstve', true, path.basename(e.path) + ' (' + (e.size / 1048576).toFixed(1) + ' MB)');
+  // --- asar obsahuje vsechny soubory? (Electron umi cist asar primo pres fs) ---
+  const canAsar = !!(process.versions && process.versions.electron);
+  const asarBase = path.join(distDir, 'win-unpacked', 'resources', 'app.asar');
+  if (canAsar && fs.existsSync(asarBase)) {
+    const need = [entry, 'index.html', ...refs].filter((v, i, a) => a.indexOf(v) === i);
+    try { if (fs.existsSync(path.join(dir, 'preload.js'))) need.push('preload.js'); } catch {}
+    const missingAsar = [];
+    for (const r of need) {
+      try { if (!fs.existsSync(path.join(asarBase, r))) missingAsar.push(r); } catch { missingAsar.push(r); }
+    }
+    if (missingAsar.length) return fail('V app.asar chybi: ' + missingAsar.join(', ') + ' (build.files v package.json je neuplny - opraveno, spust build_exe znovu).');
+    step('app.asar kompletni', true, need.length + ' souboru overeno');
+  } else {
+    step('app.asar kontrola preskocena', true, canAsar ? 'asar nenalezen' : 'mimo Electron');
+  }
+  // --- launch-test ---
+  const testExe = fresh.filter(e => e.unpacked && !/setup|uninstall/i.test(path.basename(e.path)))[0]
+    || fresh.filter(e => !/setup|uninstall/i.test(path.basename(e.path)))[0];
+  if (testExe) {
+    step('Launch-test', true, path.basename(testExe.path) + ' se spousti na 4 s...');
+    const lt = await launchTestExe(testExe.path);
+    if (!lt.tested) log.push('[WARN] Launch-test preskocen: ' + lt.reason);
+    else if (!lt.ok) return fail('Aplikace se sama zavrela hned po startu:\n' + lt.output + '\nOprav main.js a spust build_exe znovu.');
+    else log.push('[OK] Launch-test: ' + lt.output);
+  } else {
+    log.push('[WARN] Launch-test preskocen - je jen instalator (Setup.exe). Over win-unpacked rucne.');
+  }
+  if (dups.length) log.push('[WARN] Duplicitni odkazy v index.html (soubor se nacte 2x): ' + dups.join(', '));
+  const main = fresh.filter(e => !/setup/i.test(path.basename(e.path)))[0] || fresh[0];
+  try {
+    const stExe = (main && main.path) || '';
+    let stSize = 0, stMtime = 0;
+    try { const sst = fs.statSync(stExe); stSize = sst.size; stMtime = sst.mtimeMs; } catch {}
+    fs.writeFileSync(path.join(distDir, BUILD_STATE), JSON.stringify({ hash: curHash, exe: stExe, size: stSize, mtime: stMtime, time: new Date().toISOString() }), 'utf8');
+  } catch {}
+  log.push('');
+  log.push('HOTOVO - 100%: ' + main.path + ' (' + (main.size / 1048576).toFixed(1) + ' MB)');
+  return { ok: true, output: log.join('\n') };
+}
+
 async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPathFn, timeoutMs, userDataDir, helperExe, helperArgs }) {
   tool = normToolName(tool);
   // shell = ALWAYS administrator (no prompting in the app; the Windows UAC window pops up by itself)
@@ -1728,7 +2269,7 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
   }
   // Portable tools from previous sessions belong in PATH on EVERY call (even after an app restart),
   // otherwise a scan after restart would report previously installed tools as missing.
-  prependPortableBins(userDataDir);
+  await prependPortableBins(userDataDir);
   dlContext = '';
   try {
     if (tool === 'shell') {
@@ -1736,6 +2277,19 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       // Approval happens only in the app (Continue / Always continue buttons).
       const rawCmd = String(args.command ?? '').trim();
       if (!rawCmd) throw new Error('Empty command \u2014 call shell AGAIN with a filled-in command.');
+      // Destruktivni mazani systemu (rmdir /s /q na Temp/Windows/profil) = nikdy.
+      const dguard = destructiveShellGuard(rawCmd);
+      if (dguard) return { ok: false, output: dguard };
+      // Zápis obsahu souboru přes shell = jistá chyba (limit 8191 zn., here-string terminátor).
+      const guard = shellFileWriteGuard(rawCmd);
+      if (guard) {
+        return {
+          ok: false,
+          output: 'ZAMÍTNUTO — ' + guard + '\n\n'
+            + 'Správně: write_file { "path": "index.html", "content": "<!DOCTYPE html>…" }\n'
+            + 'shell používej jen na spuštění příkazů (npm, git, dir, mkdir…).'
+        };
+      }
       const cmd = rawCmd; // normalization per backend happens in runCmdKind
       let cwd = base;
       if (args.workdir) {
@@ -1761,7 +2315,11 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       }
       let be = String(args.backend || 'auto').toLowerCase();
       if (!['cmd', 'powershell', 'pwsh', 'auto'].includes(be)) be = 'auto';
-      const order = be === 'auto' ? ['cmd', 'powershell', 'pwsh'] : [be];
+      /* Auto = hádat dialekt podle syntaxe. cmd.exe NEROZUMÍ `;` jako oddělovači příkazů
+         (to umí PowerShell) → "node -v; if exist …" spadne jako "node: bad option: -v;",
+         protože `;` zůstane v argumentu. Stejně `if (…)` je PowerShell a `if exist` je cmd.
+         Když příkaz vypadá na jiný shell, dáme mu přednost; jinak zkusí všechny. */
+      const order = be === 'auto' ? preferredShellOrder(cmd) : [be];
       const tried = [];
       let last = null;
       for (const kind of order) {
@@ -1816,16 +2374,24 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
     }
     if (tool === 'write_file') {
       const abs = resolveTarget(base, need('path', '{"path": "file.txt", "content": "..."}'), fullAccess);
+      const bjw = backupJunkGuard(abs); if (bjw) return { ok: false, output: 'ZAMÍTNUTO — ' + bjw };
       if (typeof args.content !== 'string') throw new Error('Missing content');
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.writeFileSync(abs, args.content, 'utf-8');
+      await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+      await fs.promises.writeFile(abs, args.content, 'utf-8');
+      // Ochrana proti useknutému streamu: kód s nezavřenými závorkami je nedokončený.
+      const cut = truncatedCodeReason(args.content);
+      if (cut) {
+        return { ok: false, output: 'POZOR: soubor byl NEDOKONČENÝ (' + cut + '). Zapsáno, ale je to useknuté —'
+          + ' doplň chybějící závorky/závěrečný blok a přepiš soubor ZNOVU celý, najednou a bez useknutí.' };
+      }
       return { ok: true, output: `OK: wrote ${args.content.length} chars \u2192 ${abs}` };
     }
     if (tool === 'append_file') {
       const abs = resolveTarget(base, need('path'), fullAccess);
+      const bja = backupJunkGuard(abs); if (bja) return { ok: false, output: 'ZAMÍTNUTO — ' + bja };
       if (typeof args.content !== 'string') throw new Error('Missing content');
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
-      fs.appendFileSync(abs, args.content, 'utf-8');
+      await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+      await fs.promises.appendFile(abs, args.content, 'utf-8');
       return { ok: true, output: `OK: appended ${args.content.length} chars \u2192 ${abs}` };
     }
     if (tool === 'edit_file') {
@@ -1833,61 +2399,66 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       const abs = resolveTarget(base, need('path'), fullAccess);
       const oldS = need('oldString', '{"path": "...", "oldString": "...", "newString": "..."}');
       if (typeof args.newString !== 'string') throw new Error('Missing newString');
-      const txt = fs.readFileSync(abs, 'utf-8');
+      const txt = await fs.promises.readFile(abs, 'utf-8');
       const count = txt.split(oldS).length - 1;
       if (count === 0) throw new Error('oldString not found in the file.');
       if (count > 1 && !args.replaceAll) throw new Error(`oldString found ${count}x \u2014 send more context, or replaceAll: true.`);
       const next = args.replaceAll ? txt.split(oldS).join(args.newString) : txt.replace(oldS, args.newString);
-      fs.writeFileSync(abs, next, 'utf-8');
+      await fs.promises.writeFile(abs, next, 'utf-8');
       return { ok: true, output: `OK: edited (${args.replaceAll ? count + ' occurrences' : '1 occurrence'}) \u2192 ${abs}`, diff: diffLines(txt, next) };
     }
     if (tool === 'read_file') {
       const abs = resolveTarget(base, need('path'), fullAccess);
-      const st = fs.statSync(abs);
+      const st = await fs.promises.stat(abs);
       if (st.size > 40000) throw new Error('File is too large (40 KB limit)');
-      return { ok: true, output: readTextFile(abs).slice(0, 40000) };
+      const content = await fs.promises.readFile(abs, 'utf-8');
+      return { ok: true, output: content.slice(0, 40000) };
     }
     if (tool === 'list_dir') {
       const abs = resolveTarget(base, args.path || '.', fullAccess);
-      const out = fs.readdirSync(abs, { withFileTypes: true }).slice(0, 200)
+      const entries = await fs.promises.readdir(abs, { withFileTypes: true });
+      const out = entries.slice(0, 200)
         .map(e => (e.isDirectory() ? e.name + '/' : e.name)).join('\n');
       return { ok: true, output: out || '(empty folder)' };
     }
     if (tool === 'glob_file') {
       const rx = resolveTarget(base, args.dir || '.', fullAccess);
-      const hits = globWalk(rx, args.pattern || '**', fullAccess);
+      const hits = await globWalk(rx, args.pattern || '**', fullAccess);
       return { ok: true, output: hits.length ? hits.join('\n') : '(nothing found)' };
     }
     if (tool === 'create_dir') {
       const abs = resolveTarget(base, need('path'), fullAccess);
-      fs.mkdirSync(abs, { recursive: true });
+      const bjc = backupJunkGuard(abs); if (bjc) return { ok: false, output: 'ZAMÍTNUTO — ' + bjc };
+      await fs.promises.mkdir(abs, { recursive: true });
       return { ok: true, output: `OK: folder created \u2192 ${abs}` };
     }
     if (tool === 'move_file') {
       const from = resolveTarget(base, need('from'), fullAccess);
       const to = resolveTarget(base, need('to'), fullAccess);
+      const bjcm = backupJunkGuard(to); if (bjcm) return { ok: false, output: 'ZAMÍTNUTO — ' + bjcm };
       if (!fs.existsSync(from)) throw new Error('Source does not exist: ' + from);
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.renameSync(from, to);
+      await fs.promises.mkdir(path.dirname(to), { recursive: true });
+      const bjcp = backupJunkGuard(to); if (bjcp) return { ok: false, output: 'ZAMÍTNUTO — ' + bjcp };
+      await fs.promises.rename(from, to);
       return { ok: true, output: `OK: moved ${from} \u2192 ${to}` };
     }
     if (tool === 'copy_file') {
       const from = resolveTarget(base, need('from'), fullAccess);
       const to = resolveTarget(base, need('to'), fullAccess);
       if (!fs.existsSync(from)) throw new Error('Source does not exist: ' + from);
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
+      await fs.promises.mkdir(path.dirname(to), { recursive: true });
+      await fs.promises.copyFile(from, to);
       return { ok: true, output: `OK: copied ${from} \u2192 ${to}` };
     }
     if (tool === 'delete_file') {
       const abs = resolveTarget(base, need('path'), fullAccess);
       if (!fs.existsSync(abs)) throw new Error('Does not exist: ' + abs);
-      fs.rmSync(abs, { recursive: false, force: true });
+      await fs.promises.rm(abs, { recursive: false, force: true });
       return { ok: true, output: `OK: deleted ${abs}` };
     }
     if (tool === 'file_info') {
       const abs = resolveTarget(base, need('path'), fullAccess);
-      const st = fs.statSync(abs);
+      const st = await fs.promises.stat(abs);
       return { ok: true, output: `${abs}\ntype: ${st.isDirectory() ? 'folder' : 'file'}\nsize: ${st.size} B\nmodified: ${st.mtime.toLocaleString('en-US')}` };
     }
     if (tool === 'search_files') {
@@ -1896,10 +2467,10 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       const ext = args.ext ? '.' + String(args.ext).replace(/^\./, '').toLowerCase() : null;
       const hits = [];
       let scanned = 0;
-      (function walk(dir) {
+      const walk = async (dir) => {
         if (hits.length > 40 || scanned > 300) return;
         let entries;
-        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
         for (const e of entries) {
           if (hits.length > 40 || scanned > 300) return;
           if (e.name.startsWith('.')) continue;
@@ -1907,15 +2478,17 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
           try {
             if (e.isDirectory()) {
               if (SKIP_DIRS.has(e.name)) continue;
-              walk(full);
+              await walk(full);
             } else if (e.isFile()) {
               if (ext && path.extname(e.name).toLowerCase() !== ext) continue;
               if (!TEXT_EXT.has(path.extname(e.name).toLowerCase())) continue;
-              const st = fs.statSync(full);
+              // ASYNC — na sitovem disku (Z: WebDAV) syncRead souboru = stovky ms.
+              // 300 souboru po synchronnim cteni = 39 sekund zamrzleho okna.
+              const st = await fs.promises.stat(full);
               if (st.size > 100000) continue;
               scanned++;
-              const lines = fs.readFileSync(full, 'utf-8').split('\n');
-              lines.forEach((ln, i) => {
+              const txt = await fs.promises.readFile(full, 'utf-8');
+              txt.split('\n').forEach((ln, i) => {
                 if (hits.length < 40 && ln.toLowerCase().includes(pat.toLowerCase())) {
                   hits.push(`${path.relative(start, full)}:${i + 1}: ${ln.trim().slice(0, 160)}`);
                 }
@@ -1923,7 +2496,8 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
             }
           } catch {}
         }
-      })(start);
+      };
+      await walk(start);
       return { ok: true, output: hits.length ? hits.join('\n') : '(nothing found)' };
     }
     if (tool === 'open_path') {
@@ -1931,6 +2505,11 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       if (!fs.existsSync(abs)) throw new Error('Does not exist: ' + abs);
       if (openPathFn) openPathFn(abs);
       return { ok: true, output: `OK: opened in system \u2192 ${abs}` };
+    }
+    if (tool === 'show_panel') {
+      const abs = resolveTarget(base, need('path'), fullAccess);
+      if (!fs.existsSync(abs)) throw new Error('Does not exist: ' + abs);
+      return { ok: true, output: `OK: show in side panel \u2192 ${abs}` };
     }
     if (tool === 'scaffold_electron') {
       // A reliable Electron project start: a working FRAMELESS skeleton (package.json + main.js + preload.js + index.html).
@@ -1955,7 +2534,15 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
         `<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><title>${name}</title><style>\n.titlebar{-webkit-app-region:drag;display:flex;align-items:center;gap:8px;padding:8px 8px 8px 14px;background:#0b0b0e;color:#eee;font:600 12px sans-serif;letter-spacing:.08em}\n.titlebar .sp{flex:1}\n.titlebar button{-webkit-app-region:no-drag;background:transparent;border:none;color:#eee;font-size:13px;width:34px;height:26px;border-radius:6px;cursor:pointer}\n.titlebar button:hover{background:#ffffff22}\n</style></head>\n<body style="background:#101010;color:#eee;font-family:sans-serif;margin:0">\n<div class="titlebar"><span>${name}</span><span class="sp"></span><button id="tbMin">_</button><button id="tbMax">\u25a1</button><button id="tbClose">\u2715</button></div>\n<div style="padding:16px"><h1>${name}</h1>\n<p>App ready.</p></div>\n<script>\ntbMin.onclick=()=>window.win.min();tbMax.onclick=()=>window.win.max();tbClose.onclick=()=>window.win.close();\n</script>\n</body>\n</html>\n`, 'utf-8');
       return { ok: true, output: `OK: frameless skeleton "${name}" in ${dir}\nFiles: package.json, main.js, preload.js, index.html (no native Windows frame, custom titlebar)\nNext step: shell "npm install" (timeout 600000), then "npm run dist" (timeout 600000).` };
     }
-    if (tool === 'web_fetch') {
+    if (tool === 'build_exe') {
+      // Kompletni pipeline EXE: inventura -> oprava package.json -> npm install -> PLNY rebuild -> verifikace -> launch-test.
+      // Vzdy se vsechno prebuildi, dist se vytvori automaticky, kdyz chybi.
+      const dir = base;
+      const target = String(args.target || '').toLowerCase();
+      if (target && !['nsis', 'portable', 'dir'].includes(target)) throw new Error('target musi byt nsis, portable nebo dir (nebo vynechat).');
+      return await execBuildExe(dir, { target });
+    }
+if (tool === 'web_fetch') {
       if (!/^https?:\/\//i.test(String(args.url || ''))) throw new Error('URL must start with http(s)://');
       return await fetchText(args.url, timeoutMs || 15000);
     }
@@ -1981,6 +2568,7 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       if (!/^https?:\/\//i.test(url)) throw new Error('URL must start with http(s)://');
       const toRaw = args.to || args.path || ('downloaded-' + Date.now() + '.bin');
       const abs = resolveTarget(base, toRaw, fullAccess);
+      const bjdl = backupJunkGuard(abs); if (bjdl) return { ok: false, output: 'ZAMÍTNUTO — ' + bjdl };
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       const dl = await downloadFile(url, abs, 300000);
       if (!dl.ok) {
@@ -2023,7 +2611,7 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       const failed = results.filter(r => !r.ok && !r.already && !r.manual);
       return { ok: failed.length === 0, output: (args.dryRun ? 'PLAN (preview only, nothing is installed):\n' : '') + envActionReport(after, results), data: { results, tools: after.tools, missing: after.missing } };
     }
-    return { ok: false, output: `I do not have this tool. Use: shell, write_file, append_file, edit_file, read_file, list_dir, glob_file, create_dir, move_file, copy_file, delete_file, file_info, search_files, open_path, close_app, web_fetch, env_scan, env_prepare, env_install.` };
+    return { ok: false, output: `I do not have this tool. Use: shell, write_file, append_file, edit_file, read_file, list_dir, glob_file, create_dir, move_file, copy_file, delete_file, file_info, search_files, open_path, show_panel, close_app, web_fetch, env_scan, env_prepare, env_install.` };
   } catch (e) {
     return { ok: false, output: `Error: ${e.message}` };
   }
@@ -2128,5 +2716,6 @@ module.exports = {
   runCmd, runArgv, runCmdAdmin, globWalk, fetchText, diffLines, execTool,
   scanEnv, envReport, ensureTools, ensureForShell, detectProject, detectIntent, requiredForCommand, resolveNeed, installTool,
   setProgressHook, cancelDownload, dbgLog,
+  execBuildExe, collectHtmlRefs, findHtmlDuplicates, launchTestExe, listExeFiles, runCmdLong,
   ensureElevatedHelper, elevRun, runShellSmart, helperState
 };

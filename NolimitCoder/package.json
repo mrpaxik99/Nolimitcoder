@@ -1,6 +1,6 @@
 {
     "name":  "nolimit-coder-v2",
-    "version":  "5.7.0",
+    "version":  "5.22.0",
     "description":  "Ultra modern Electron chat with NolimitCoder models - everything local, offline after download",
     "main":  "src/main/main.js",
     "type":  "commonjs",
@@ -26,7 +26,6 @@
                                   },
                   "files":  [
                                 "src/**/*",
-                                "!src/main/google-secret.json",
                                 "proxies/**/*",
                                 "package.json"
                             ],
