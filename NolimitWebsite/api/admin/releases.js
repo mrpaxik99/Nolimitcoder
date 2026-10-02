@@ -1,8 +1,8 @@
 import { requireAdmin } from '../_auth.js';
 import { listFiles, currentRelease, folderUrl } from '../_releases.js';
 
-// Co je zrovna ve složce NolimitWebsite/Downloads Updates (GitHub) — jen pro čtení.
-// Instalátory se do složky neposílají přes admin, ale zkopírováním + gitem.
+// Co je zrovna v repu mrpaxik99/NolimitCoder-Download (GitHub) — jen pro čtení.
+// Instalátory se tam nedostávají přes admin, ale přes auto-push z distu.
 export default async function handler(req, res) {
   const a = await requireAdmin(req);
   if (!a.ok) return res.status(a.status).json({ ok: false, error: a.error });

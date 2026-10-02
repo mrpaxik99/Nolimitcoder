@@ -15,7 +15,7 @@ Ultra modern Electron app by **NolimitCoder** — **chat at the bottom**, **Noli
   - Google: Gemini 3.8/3.7/3.6/3.5 Flash, Gemini 3.1 Pro
   - xAI Grok 4.7/4.6/4.5, Muse Spark 1.3/1.2
   - Qwen, DeepSeek V4.1/V4, MiniMax M3/M2.7, GLM 5.3/5.2, Kimi K3/K2.7
-  - **FREE models** (🎁 no API key needed): Big Pickle, Space Bunny, MiMo, Ling, Nemotron, Muse Spark Free
+  - **FREE models** (🎁 no API key needed): **NolimitCoder Pro**, Big Pickle, Ling, Nemotron, Muse Spark Free
   - **LOCAL models** (💻 offline): Ollama, LM Studio, vLLM — auto-detection on `127.0.0.1:11434/1234/8000`
 - **Ultra design** — glassmorphism, neon gradients, blur, mesh background, 1440p ready
 - **Offline first** — downloaded models (Ollama) run without internet, without a key, without limits

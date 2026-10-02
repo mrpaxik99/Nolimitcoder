@@ -1,21 +1,24 @@
 import https from 'https';
 
-// ===== Složka s instalátory: NolimitWebsite/Downloads Updates =====
+// ===== Instalátory: github.com/mrpaxik99/NolimitCoder-Download =====
 // Repozitář je veřejný, takže odkazy fungují pro kohokoliv. Jediný zdroj pravdy:
-// co je v téhle složce, to se stahuje přes /api/download a to jediné v aplikaci
-// funguje. Nová verze = zkopíruješ .exe do složky a pushneš na GitHub — nic víc.
+// co je v kořeni tohoto repa, to se stahuje přes /api/download a to jediné
+// v aplikaci funguje. Nová verze = auto-push zkopíruje .exe z distu do
+// D:\DEVELOPER\Download New Version a pushne ho — nic víc.
 //   nejvyšší číslo verze v názvu .exe = verze, která jede
 const OWNER = 'mrpaxik99';
-const REPO = 'Nolimitcoder';
+const REPO = 'NolimitCoder-Download';
 const REF = 'main';
-const DIR = 'NolimitWebsite/Downloads Updates';
-const DIR_ENC = DIR.split('/').map(encodeURIComponent).join('/');
-const API_URL = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/' + DIR_ENC + '?ref=' + REF;
-const RAW_BASE = 'https://raw.githubusercontent.com/' + OWNER + '/' + REPO + '/' + REF + '/' + DIR_ENC + '/';
-const FOLDER_URL = 'https://github.com/' + OWNER + '/' + REPO + '/tree/' + REF + '/' + DIR_ENC;
+const DIR = ''; // kořen repa
+const DIR_ENC = DIR ? DIR.split('/').map(encodeURIComponent).join('/') : '';
+const API_URL = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents' + (DIR_ENC ? '/' + DIR_ENC : '') + '?ref=' + REF;
+const RAW_BASE = 'https://raw.githubusercontent.com/' + OWNER + '/' + REPO + '/' + REF + '/' + (DIR_ENC ? DIR_ENC + '/' : '');
+const FOLDER_URL = 'https://github.com/' + OWNER + '/' + REPO + '/tree/' + REF + (DIR_ENC ? '/' + DIR_ENC : '');
 
-const CACHE_MS = 5 * 60 * 1000; // GitHub API má limit 60 požadavků/hodinu — cache + ETag (304 se nepočítá)
+const CACHE_MS = 60 * 1000; // LIVE: hlida se prubezne. GitHub limit 60 req/h se necerpa diky ETag (304 se nepocita)
 let cache = { at: 0, etag: '', files: null };
+let warnCache = { at: 0, text: '' };
+const WARN_FILES = ['WARNING.md', 'warning.md', 'WARNING.txt', 'warning.txt'];
 
 function get(url, headers) {
   return new Promise((resolve, reject) => {
@@ -40,7 +43,7 @@ function get(url, headers) {
   });
 }
 
-// "NolimitCoder Clean Setup 1.0.0.exe" → "1.0.0" (poslední číslo v názvu)
+// "NolimitCoder New Setup 1.0.0.exe" → "1.0.0" (poslední číslo v názvu)
 export function verOf(name) {
   const m = String(name || '').match(/\d+(?:\.\d+)+/g);
   return m ? m[m.length - 1] : '';
@@ -88,6 +91,31 @@ export async function currentRelease() {
     if (!best || cmpVer(f.version, best.version) > 0) best = f;
   }
   return best || files[0];
+}
+
+// Vsechny verze v repu (pro live kontrolu: je moje verze vubec zverejnena?)
+export async function listVersions() {
+  const files = await listFiles();
+  const out = [];
+  for (const f of files) if (f.version) out.push(f.version);
+  return out;
+}
+
+// LIVE warning z GitHubu: text ze souboru WARNING.md v koreni repa.
+// Kdyz tam neni, vrati ''. Cte se pres raw, s vlastni 60s cache.
+export async function liveWarning() {
+  if (warnCache.text && Date.now() - warnCache.at < CACHE_MS) return warnCache.text;
+  for (const name of WARN_FILES) {
+    try {
+      const r = await get(RAW_BASE + encodeURIComponent(name), { 'User-Agent': 'nolimitcoder-site' });
+      if (r.status === 200 && r.body) {
+        const t = String(r.body).replace(/\r/g, '').trim().slice(0, 500);
+        if (t) { warnCache = { at: Date.now(), text: t }; return t; }
+      }
+    } catch {}
+  }
+  warnCache = { at: Date.now(), text: '' };
+  return '';
 }
 
 export function folderUrl() {

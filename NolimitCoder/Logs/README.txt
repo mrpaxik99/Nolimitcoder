@@ -5,7 +5,9 @@ Sem se ukládají všechny chyby a diagnostika aplikace ( denní textové soubor
 
   errors-2026-10-01.txt   Error Log — každá chyba aplikace (AI stream, selhaný
                           nástroj, výjimka v UI, hlavní proces). Tajemství
-                          (tokeny, hesla) se před zápisem mažou.
+                          (tokeny, hesla) se před zápisem mažou a dlouhé hodnoty
+                          (typicky obsah zapisovaného souboru) se zkracují —
+                          do logu se kopíruje jen krátký náhled.
   ai-debug.log            Diagnostika agenta — každé kolo, každé volání nástroje,
                           každý požadavek na AI. Rotace na 8 MB (.old).
 

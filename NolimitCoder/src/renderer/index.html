@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NolimitCoder Clean</title>
+<title>NolimitCoder</title>
 <link rel="icon" type="image/png" href="./assets/logo.png">
 <link rel="stylesheet" href="./style.css">
 </head>
@@ -17,8 +17,9 @@
     <div class="lg-logos">
       <img class="lg-app" src="./assets/logo.png" alt="NolimitCoder">
     </div>
-    <div class="lg-title">Update required</div>
+    <div class="lg-title" id="blockTitle">Update required</div>
     <div class="lg-sub" id="blockReason">A newer version is required. Please download the latest version.</div>
+    <div class="blk-warn" id="blockWarn" style="display:none"></div>
     <button class="google-btn lg-btn" id="blockUpdate"><span>Aktualizovat software</span></button>
     <div class="blk-prog" id="blockProg"><div id="blockFill"></div></div>
     <div class="blk-status" id="blockStatus"></div>
@@ -142,7 +143,7 @@
               </button>
               <div class="model-picker" id="modelSelector">
                 <button class="picker-btn" id="modelCurrent" title="Pick a model">
-                  <span id="curName">NolimitCoder 1.0 Flash</span>
+                  <span id="curName">NolimitCoder Pro</span>
                   <span class="picker-chev">▾</span>
                 </button>
                 <div class="model-dropdown" id="modelDropdown">
@@ -151,9 +152,6 @@
                     <input id="modelSearch" placeholder="Hledat model…" autocomplete="off">
                   </div>
                   <div class="model-list" id="modelList"></div>
-                  <div class="md-sep"></div>
-                  <div class="md-head">Uvažování</div>
-                  <div class="model-list" id="effortList"></div>
                   <div class="md-sep"></div>
                   <div class="md-row md-action" id="mdUsage">
                     <span class="md-ico">◔</span>
@@ -183,7 +181,7 @@
           </div>
         </div>
       <div class="composer-foot">
-        <span id="footerModel">NolimitCoderV3</span>
+        <span id="footerModel">NolimitCoder Pro</span>
         <span class="dot-sep">·</span>
         <span id="footerStatus">Ready</span>
       </div>

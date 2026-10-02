@@ -1,8 +1,10 @@
 {
+  "updated": "2026-10-02T15:48:04.857Z",
+  "source": "proxyscrape-v4",
   "counts": {
-    "http": 387,
-    "socks4": 245,
-    "socks5": 1583
-  },
-  "total": 2215
+    "http": 286,
+    "socks4": 252,
+    "socks5": 1349,
+    "total": 1887
+  }
 }

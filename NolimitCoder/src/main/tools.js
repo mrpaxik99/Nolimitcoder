@@ -625,29 +625,187 @@ function isAlwaysBlocked(cmd) {
   if (ALWAYS_BLOCKED_RE.test(String(cmd))) return true;
   return ALWAYS_BLOCKED_NAMES.has(firstToken(cmd));
 }
-// Je tenhle kód useknutý? (stream skončil dřív, než se zavřely závorky)
-// Slehlý kód = do souboru jde jen půlka a AI to považuje za hotovo.
-function truncatedCodeReason(s) {
-  const t = String(s || '');
-  if (!t.trim()) return 'prázdný obsah';
+// ============================================================================
+// Je obsah useknutý? (stream/model skončil dřív, než se dopsal soubor)
+//
+// Stará verze počítala závorky přes celý text naslepo — a hlásila useknutí i na
+// HOTOVÝCH souborech: HTML končící </html> (poslední "class" bez ; nebo {),
+// apostrofy a komentáře v JS. AI pak přepisovala celé soubory nanovo a Error Log
+// se plnil jejich obsahem (errors-2026-10-01.txt — 5x falešný poplach).
+//
+// Teď: kontrola podle typu souboru, komentáře/řetězce/regex se PŘESKAKUJÍ
+// a hlásí se jen vysoce jisté signály, které skoro vždy znamenají useknutí na
+// konci obsahu. Co se neví jistě, se NEHLÁSÍ — lepší propuštěný usekl než
+// odmítnutý hotový soubor.
+// ============================================================================
+function fileExtOf(f) {
+  try { return path.extname(String(f || '')).toLowerCase(); } catch { return ''; }
+}
+// Konec řetězce: index za uzavírací uvozovkou, -1 = narazilo na nový řádek
+// (bývá to apostrof v textu, ne řetězec — nechceme falešný poplach),
+// -2 = konec obsahu uvnitř řetězce (to je jisté useknutí).
+function strEnd(t, i, ch, multi) {
+  const n = t.length;
+  let j = i + 1;
+  while (j < n) {
+    const c = t[j];
+    if (c === '\\') { j += 2; continue; }
+    if (c === ch) return j + 1;
+    if (!multi && c === '\n') return -1;
+    j++;
+  }
+  return -2;
+}
+// Může tady začínat regulární výraz? (jinak je to dělení)
+function regexAllowed(sig, word) {
+  if (!sig) return true;
+  if ('(,=:[!&|?{};+-*%~^<>'.indexOf(sig) >= 0) return true;
+  return /^(return|typeof|instanceof|in|of|new|delete|void|case|do|else|yield|await|throw)$/.test(word);
+}
+// Konec regulárního výrazu (nebo -1, když to výraz není).
+function regexEnd(t, i) {
+  const n = t.length;
+  let j = i + 1, inCls = false;
+  while (j < n) {
+    const c = t[j];
+    if (c === '\\') { j += 2; continue; }
+    if (c === '\n') return -1;
+    if (inCls) { if (c === ']') inCls = false; }
+    else if (c === '[') inCls = true;
+    else if (c === '/') { j++; while (j < n && /[a-z]/i.test(t[j])) j++; return j; }
+    j++;
+  }
+  return -1;
+}
+// V CSS/SCSS je "// komentář" jen na začátku řádku nebo po ; { } , —
+// jinak by "url(//cdn…) " shodilo závorky a vznikl by falešný poplach.
+function styleLineComment(t, i) {
+  const ls = t.lastIndexOf('\n', i - 1) + 1;
+  const prefix = t.slice(ls, i).replace(/\s+$/, '');
+  return prefix === '' || /[;{},]$/.test(prefix);
+}
+// Skenování kódu: přeskakuje komentáře, řetězce, šablony a regexy,
+// počítá jen závorky mimo ně. mode: 'js' | 'style' | 'hash' | 'json'.
+// Vrací důvod (prázdný řetězec = obsah vypadá kompletně).
+function scanCode(t, mode) {
+  const n = t.length;
+  const out = t.split('');                      // kopie pro maskování (pro pátý krok)
+  const mask = (a, b) => { for (let k = Math.max(0, a); k < b && k < n; k++) if (t[k] !== '\n') out[k] = ' '; };
   const opens = { '{': 0, '[': 0, '(': 0 };
   const pairs = { '}': '{', ']': '[', ')': '(' };
-  let q = null, esc = false, tmpl = false;
-  for (let i = 0; i < t.length; i++) {
-    const c = t[i];
-    if (esc) { esc = false; continue; }
-    if (c === '\\') { esc = true; continue; }
-    if (q) { if (c === q) q = null; continue; }
-    if (c === '"' || c === "'") { q = c; continue; }
-    if (c === '`') { tmpl = !tmpl; continue; }
-    if (tmpl) continue;
-    if (opens[c] !== undefined) opens[c]++;
-    else if (pairs[c]) opens[pairs[c]]--;
+  let i = 0, prevSig = '', prevWord = '';
+  const lineComment = (a) => {
+    const e = t.indexOf('\n', a);
+    const end = e < 0 ? n : e;
+    mask(a, end);
+    return end;
+  };
+  while (i < n) {
+    const c = t[i], c2 = t[i + 1];
+    // ---- komentáře ----
+    if (c === '/' && c2 === '*') {
+      const e = t.indexOf('*/', i + 2);
+      if (e < 0) return 'neuzavřený komentář /*';
+      mask(i, e + 2); i = e + 2; prevSig = ')'; prevWord = ''; continue;
+    }
+    if (c === '/' && c2 === '/' && (mode === 'js' || mode === 'json' || (mode === 'style' && styleLineComment(t, i)))) {
+      i = lineComment(i); continue;
+    }
+    if (mode === 'hash' && c === '#') { i = lineComment(i); continue; }
+    // ---- řetězce ----
+    if (c === '"' || c === "'") {
+      // Python: trojité uvozovky = docstring (může být přes víc řádků)
+      if (mode === 'hash' && (t.startsWith('"""', i) || t.startsWith("'''", i))) {
+        const q3 = t.substr(i, 3);
+        const e = t.indexOf(q3, i + 3);
+        if (e < 0) return 'neuzavřený docstring';
+        mask(i, e + 3); i = e + 3; prevSig = ')'; prevWord = ''; continue;
+      }
+      const e = strEnd(t, i, c, false);
+      if (e === -2) return 'neukončený řetězec';
+      if (e === -1) { i++; prevSig = c; prevWord = ''; continue; }  // není to řetězec
+      mask(i, e); i = e; prevSig = ')'; prevWord = ''; continue;
+    }
+    // ---- šablona `…${…}…` ----
+    if (mode === 'js' && c === '`') {
+      const e = strEnd(t, i, '`', true);
+      if (e === -2) return 'neukončená šablona `';
+      mask(i, e); i = e; prevSig = ')'; prevWord = ''; continue;
+    }
+    // ---- regulární výraz vs. dělení ----
+    if (mode === 'js' && c === '/' && regexAllowed(prevSig, prevWord)) {
+      const r = regexEnd(t, i);
+      if (r > 0) { mask(i, r); i = r; prevSig = ')'; prevWord = ''; continue; }
+    }
+    // ---- závorky (jen mimo řetězce/komentáře) ----
+    if (opens[c] !== undefined) { opens[c]++; prevSig = c; prevWord = ''; i++; continue; }
+    if (pairs[c]) { opens[pairs[c]]--; prevSig = c; prevWord = ''; i++; continue; }
+    if (/\s/.test(c)) { i++; continue; }
+    if (/[A-Za-z0-9_$À-ž]/.test(c)) {
+      let j = i;
+      while (j < n && /[A-Za-z0-9_$À-ž]/.test(t[j])) j++;
+      prevWord = t.slice(i, j); prevSig = t[j - 1]; i = j; continue;
+    }
+    prevSig = c; prevWord = ''; i++;
   }
-  if (q) return 'neukončený řetězec';
-  if (tmpl) return 'neukončená šablona';
   for (const k of Object.keys(opens)) if (opens[k] > 0) return 'nezavřená ' + k + ' (' + opens[k] + ')';
-  if (/\b(function|class|if|for|while|switch|try)\b[^{;]*$/.test(t.replace(/\s+$/, ''))) return 'useknutá na nedokončeném bloku';
+  // Poslední slovo příkazu bez "{" a ";" — začátek bloku, který se nedopsal.
+  // Testuje se na maskovaném textu, aby řetězce a komentáře nevadily.
+  if (mode !== 'json' && /\b(function|class|if|for|while|switch|try)\b[^{;]*$/.test(out.join('').replace(/\s+$/, ''))) {
+    return 'useknutá na nedokončeném bloku';
+  }
+  return '';
+}
+// HTML/XML: neuzavřený komentář, neuzavřený <script>/<style>,
+// obsah končící uprostřed značky a useknutý skript uvnitř.
+function scanHtml(t) {
+  const lo = t.toLowerCase();
+  // 1) neuzavřený HTML komentář = jisté useknutí
+  for (let p = t.indexOf('<!--'); p >= 0; p = t.indexOf('<!--', p + 4)) {
+    if (t.indexOf('-->', p + 4) < 0) return 'neuzavřený komentář <!--';
+  }
+  // 2) poslední <script>/<style> musí být uzavřený
+  for (const tag of ['script', 'style']) {
+    const open = lo.lastIndexOf('<' + tag);
+    if (open >= 0 && lo.indexOf('</' + tag + '>', open) < 0) return 'neuzavřený <' + tag + '> blok';
+  }
+  // 3) obsah končí uprostřed značky? ("<circle …" bez uzavíracího ">")
+  const tail = t.replace(/\s+$/, '');
+  if (tail && !tail.endsWith('>') && tail.lastIndexOf('<') > tail.lastIndexOf('>')) {
+    return 'useknutá HTML značka (obsah končí uprostřed <…)';
+  }
+  // 4) obsah posledního <script>/<style> zkontrolujeme jako kód
+  for (const [tag, mode] of [['script', 'js'], ['style', 'style']]) {
+    const open = lo.lastIndexOf('<' + tag);
+    if (open < 0) continue;
+    const gt = lo.indexOf('>', open);
+    const close = lo.indexOf('</' + tag + '>', open);
+    if (gt >= 0 && close > gt) {
+      const r = scanCode(t.slice(gt + 1, close), mode);
+      if (r) return 'v <' + tag + '>: ' + r;
+    }
+  }
+  return '';
+}
+// Je tenhle obsah useknutý? file = cílový soubor (kvůli příponě).
+function truncatedCodeReason(s, file) {
+  const t = String(s || '');
+  if (!t.trim()) return 'prázdný obsah';
+  const ext = fileExtOf(file);
+  const head = t.slice(0, 600);
+  if (/^\.(html?|xhtml|xml|svg|vue|svelte)$/.test(ext)
+    || /^\s*(<!doctype\s+html|<\?xml|<svg[\s>]|<html[\s>])/i.test(head)) return scanHtml(t);
+  // Textové soubory, kde závorky nic neznamenají — žádná kontrola
+  // (dřív to dělalo falešné poplachy třeba u README.md).
+  if (/^\.(md|markdown|txt|text|log|csv|tsv|yml|yaml|ini|cfg|conf|rst|adoc|lock|gitignore)$/.test(ext)) return '';
+  if (/^\.(json|jsonc)$/.test(ext)) return scanCode(t, 'json');
+  if (/^\.(css|scss|less|sass)$/.test(ext)) return scanCode(t, 'style');
+  if (/^\.(js|mjs|cjs|jsx|ts|tsx|mts|cts|java|c|h|cpp|hpp|cc|cs|go)$/.test(ext)) return scanCode(t, 'js');
+  if (/^\.(py|rb|sh|bash|zsh|ps1|pl)$/.test(ext)) return scanCode(t, 'hash');
+  // Neznámý typ: radši nic nehlásit (falešný poplach = odmítnutí hotového
+  // souboru). Rozpoznáme jen JSON podle obsahu.
+  const trimmed = t.replace(/^\s+/, '');
+  if (trimmed[0] === '{' || trimmed[0] === '[') return scanCode(t, 'json');
   return '';
 }
 // Příkazy, které reálně potřebují administrátora. Ty jdou do elevovaného helperu.
@@ -2390,14 +2548,24 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       const abs = resolveTarget(base, need('path', '{"path": "file.txt", "content": "..."}'), fullAccess);
       const bjw = backupJunkGuard(abs); if (bjw) return { ok: false, output: 'ZAMÍTNUTO — ' + bjw };
       if (typeof args.content !== 'string') throw new Error('Missing content');
+      // Ochrana proti useknutému streamu — KONTROLA PŘED ZÁPISEM:
+      // hotový soubor se nesmí přepsat půlkou obsahu (dřív se obsah nejdřív
+      // napsal a pak teprve hlásil, takže vznikl rozbitý soubor).
+      const cut = truncatedCodeReason(args.content, abs);
+      if (cut) {
+        const exists = await fs.promises.stat(abs).then(() => true).catch(() => false);
+        if (exists) {
+          return { ok: false, output: 'ODMÍTNUTO — obsah je NEDOKONČENÝ (' + cut + ') a soubor už existuje, ' +
+            'takže původní verze zůstala zachována. Pošli celý obsah ZNOVU, najednou a s uzavřenými ' +
+            'závorkami/bloky (v případě HTML s uzavřenou poslední značkou).' };
+        }
+        await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+        await fs.promises.writeFile(abs, args.content, 'utf-8');
+        return { ok: false, output: 'POZOR: soubor byl NEDOKONČENÝ (' + cut + '). Zapsáno jako rozpracované — ' +
+          'doplň chybějící závorky/závěrečný blok a přepiš soubor ZNOVU celý, najednou a bez useknutí.' };
+      }
       await fs.promises.mkdir(path.dirname(abs), { recursive: true });
       await fs.promises.writeFile(abs, args.content, 'utf-8');
-      // Ochrana proti useknutému streamu: kód s nezavřenými závorkami je nedokončený.
-      const cut = truncatedCodeReason(args.content);
-      if (cut) {
-        return { ok: false, output: 'POZOR: soubor byl NEDOKONČENÝ (' + cut + '). Zapsáno, ale je to useknuté —'
-          + ' doplň chybějící závorky/závěrečný blok a přepiš soubor ZNOVU celý, najednou a bez useknutí.' };
-      }
       return { ok: true, output: `OK: wrote ${args.content.length} chars \u2192 ${abs}` };
     }
     if (tool === 'append_file') {
@@ -2731,5 +2899,5 @@ module.exports = {
   scanEnv, envReport, ensureTools, ensureForShell, detectProject, detectIntent, requiredForCommand, resolveNeed, installTool,
   setProgressHook, cancelDownload, dbgLog,
   execBuildExe, collectHtmlRefs, findHtmlDuplicates, launchTestExe, listExeFiles, runCmdLong,
-  ensureElevatedHelper, elevRun, runShellSmart, helperState
+  ensureElevatedHelper, elevRun, runShellSmart, helperState, truncatedCodeReason
 };

@@ -1,5 +1,7 @@
 # NolimitCoderV2 auto-push + auto-build — pri kazde zmene automaticky commit + push
-# na GitHub, a pokud se zmenil kod, i novy build do dist + web Downloads (max 1x za 15 min).
+# na GitHub, a pokud se zmenil kod, i novy build do dist (max 1x za 15 min).
+# Instalator z distu ve 2x do jineho repa (mrpaxik99/NolimitCoder-Download) —
+# to dela publish.ps1 v D:\DEVELOPER\Download New Version.
 # Bezi skryte na pozadi (spoustec po prihlaseni: Startup\NolimitCoderV2-AutoPush.bat).
 # Log: $env:TEMP\nolimit-autopush.log
 $ErrorActionPreference = 'Continue'
@@ -70,13 +72,14 @@ function Try-Build {
     $proc = Start-Process -FilePath "$env:ComSpec" -ArgumentList @('/c', 'npm', 'run', 'build:win') -WorkingDirectory $appDir -WindowStyle Hidden -Wait -PassThru
     if (!$proc -or $proc.ExitCode -ne 0) { Log ('auto-build FAIL, exit=' + ($proc.ExitCode)); return }
     $distDir = Join-Path $appDir 'dist'
-    # Instalátor se jmenuje podle verze (NolimitCoder Clean Setup 1.0.0.exe) — beru nejnovější
+    # Instalátor se jmenuje podle verze (NolimitCoder Setup 1.1.0.exe) — beru nejnovější
     $exe = Get-ChildItem -LiteralPath $distDir -Filter '*Setup*.exe' -ErrorAction SilentlyContinue |
       Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (!$exe) { Log 'auto-build FAIL (exe nevzniklo)'; return }
-    # Instalator se distribuuje pres Updates v adminu (Vercel Blob) — do repa se nekopiruje.
+    # Publikace instalátoru má na starosti publish.ps1 v D:\DEVELOPER\Download New Version
+    # (sleduje dist a pushne do mrpaxik99/NolimitCoder-Download). Tady se nic nekopíruje.
     Set-Content -LiteralPath $BuildMarker -Value "$head|$(Get-Date -Format o)"
-    Log 'auto-build OK'
+    Log ('auto-build OK — ' + $exe.Name + ' (publikuje publish.ps1)')
   } catch {
     Log ('auto-build ERROR: ' + $_.Exception.Message)
   }

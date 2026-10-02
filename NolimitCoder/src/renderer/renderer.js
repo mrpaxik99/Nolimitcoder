@@ -12,7 +12,9 @@ function escapeHtml(s) {
 /* ---------- state ---------- */
 // Staré uložené modely (longcat…) už nejsou v bráně dostupné → vždy začni aktuálním.
 const SAVED_MODEL = localStorage.getItem('nlc_model');
-let selectedModel = (SAVED_MODEL && !/longcat/i.test(SAVED_MODEL)) ? SAVED_MODEL : 'free/space-bunny-free';
+// Staré uložené volby modelu už brána nemá — padnou na aktuální free model.
+const MODEL_DEFAULT = 'free/mimo-v2.6-flash-free';
+let selectedModel = (SAVED_MODEL && !/longcat|space[-_]?bunny/i.test(SAVED_MODEL)) ? SAVED_MODEL : MODEL_DEFAULT;
 let searchQuery = '';
 let conversations = [];
 try { conversations = JSON.parse(localStorage.getItem('nlc_convos') || '[]'); if (!Array.isArray(conversations)) conversations = []; } catch { conversations = []; }
@@ -211,8 +213,8 @@ function sanitizeResponse(text) {
 /* Uživateli se nikdy neukazuje nic o quotě, limitech ani proxy — rotace běží potichu na pozadí.
    Jakákoliv chyba vonící přetížením se přepíše na neutrální hlášku. */
 function publicErr(s) {
-  const t = String(s || '');
-  if (/quota|rate[\s_-]*limit|free[\s_-]*usage|429|proxy|too many|capacity|overloaded|try again later|usage[\s_-]*exceeded|limit[\s_-]*exceeded/i.test(t))
+  const t = scrubName(String(s || ''));
+  if (/quota|kv[oó]t|rate[\s_-]*limit|free[\s_-]*usage|429|proxy|too many|capacity|overloaded|try again later|usage[\s_-]*exceeded|limit[\s_-]*exceeded/i.test(t))
     return 'AI je teď přetížená — zkus to prosím za chvíli znovu.';
   return t.slice(0, 300);
 }
@@ -226,10 +228,22 @@ function getModels() {
   }
   return base;
 }
-function modelLabel(id) { const m = getModels().find(x => x.id === id); return m ? m.label : String(id || '').split('/').pop(); }
+// Název modelu se nesmí nikde propasnout v raw podobě — ani když je id staré,
+// neznámé nebo přišlo z uložených prefů. Tady se čistí i to, co modelLabel vrátí
+// jako fallback (dřív to padalo na surové "mimo-v2.6-flash-free").
+// POZOR: nepatternovat holé /mimo/ — český text v UI obsahuje "mimo".
+function scrubName(s) {
+  return String(s == null ? '' : s)
+    .replace(/mimo[-\s]*v?2\.6[-\s]*flash(?:[-\s]*free)?/gi, 'NolimitCoder Pro')
+    .replace(/\bmimo[-\s]+(?:v?2\.6[-\s]*)?(?:flash|pro|mini|turbo)\b/gi, 'NolimitCoder Pro');
+}
+function modelLabel(id) {
+  const m = getModels().find(x => x.id === id);
+  return scrubName(m ? m.label : String(id || '').split('/').pop());
+}
 function zenIdOf(id) { const m = getModels().find(x => x.id === id); return (m && m.zenId) || String(id || '').split('/').pop(); }
 // Pri vycerpane kvote (429) se zkusi druhy model. Jen mezi temito dvema.
-const MODEL_FALLBACK = { 'free/space-bunny-free': 'free/space-bunny-free' };
+const MODEL_FALLBACK = { 'free/mimo-v2.6-flash-free': 'free/mimo-v2.6-flash-free' };
 function activeProject() { return prefs.activeProject || null; }
 function activeConvo() { return conversations.find(c => c.id === activeConvoId) || null; }
 // Chaty patří projektu: shoda musí platit oběma směry (projekt A nevidí chaty projektu B ani globální a naopak).
@@ -308,38 +322,6 @@ function renderModelList() {
     updateModelLabel(); renderModelList(); closeModels();
   }));
 }
-/* ---------- úroveň uvažování (reasoning effort) ---------- */
-// Změřeno proti bráně: reasoning_tokens rostou s úrovní
-// (průměr low 32 → medium 52 → high 62 → xhigh 68 → max 85).
-const EFFORT_LEVELS = [
-  { id: 'low',    name: 'Nízká',    desc: 'Rychlá odpověď, minimální přemýšlení' },
-  { id: 'medium', name: 'Střední',  desc: 'Vyvážená rychlost a kvalita' },
-  { id: 'high',   name: 'Vysoká',   desc: 'Důkladně přemýšlí — dobré na refaktor' },
-  { id: 'xhigh',  name: 'Velmi vysoká', desc: 'Pro složité úlohy, pomalejší' },
-  { id: 'max',    name: 'Maximum',  desc: 'Nejvíc přemýšlení, nejdelší čekání' }
-];
-function getEffort() {
-  const v = localStorage.getItem('nlc_effort');
-  return EFFORT_LEVELS.some(l => l.id === v) ? v : 'high';
-}
-function renderEffortList() {
-  const box = $('#effortList');
-  if (!box) return;
-  const cur = getEffort();
-  box.innerHTML = EFFORT_LEVELS.map((l, i) =>
-    '<div class="eff-item ' + (l.id === cur ? 'active' : '') + '" data-eff="' + l.id + '">'
-    + '<span class="eff-ico ' + l.id + '">' + (i + 1) + '</span>'
-    + '<div class="minfo"><div class="eff-name">' + escapeHtml(l.name) + '</div>'
-    + '<div class="eff-desc">' + escapeHtml(l.desc) + '</div></div>'
-    + '<span class="eff-bars">' + '<i style="height:' + (4 + i * 2) + 'px"></i>'.repeat(3) + '</span>'
-    + '<span class="eff-check">✓</span></div>').join('');
-  $$('#effortList .eff-item').forEach(n => n.addEventListener('click', () => {
-    localStorage.setItem('nlc_effort', n.getAttribute('data-eff'));
-    renderEffortList();
-    const l = EFFORT_LEVELS.find(x => x.id === n.getAttribute('data-eff'));
-    setFooter('Uvažování: ' + (l ? l.name : '') + ' — ' + (l ? l.desc : ''));
-  }));
-}
 function updateModelLabel() {
   const l = modelLabel(selectedModel);
   if (el.curName) el.curName.textContent = l;
@@ -364,8 +346,8 @@ async function refreshZenLive() {
       const arr = Array.isArray(r.data) ? r.data : (r.data.data || r.data.models || []);
       const free = arr.filter(m => {
         const id = String(m.id || m.name || '');
-        // Jen modely, o kterých je víme, že brána reálně obsluhuje (ostatní vrací 403/500).
-        return /space[-_]?bunny/i.test(id);
+        // Jen modely, o kterých je víme, že reálně obsluží (ostatní vrací 403/500).
+        return /^(mimo-v2\.6-flash-free)$/i.test(id);
       }).slice(0, 30).map(m => ({
         id: 'live/' + (m.id || m.name), zenId: (m.id || m.name),
         label: String(m.name || m.id || '').slice(0, 40) || String(m.id),
@@ -1713,7 +1695,6 @@ function oneShot(messages, maxTokens, onThink, onUsage, opts) {
         fullAccess: true, maxTokens: maxTokens || SEND_MAX_TOKENS,
         allowedTools: noTools ? [] : (opts.allowedTools || ALL_TOOLS.slice()),
         noTools,
-        reasonEffort: getEffort(),
         websearch: prefs.googleSearch !== false
       });
     } catch (e) { onX({ error: e && e.message ? e.message : String(e) }); }
@@ -1794,7 +1775,7 @@ async function handleSlash(text) {
   if (cmd === '/model') {
     const q = parts.slice(1).join(' ').toLowerCase();
     const hit = getModels().find(m => m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
-    if (hit) { selectedModel = hit.id; localStorage.setItem('nlc_model', selectedModel); updateModelLabel(); renderModelList(); setFooter('Model: ' + hit.label); }
+    if (hit) { selectedModel = hit.id; localStorage.setItem('nlc_model', selectedModel); updateModelLabel(); renderModelList(); setFooter('Model: ' + scrubName(hit.label)); }
     else setFooter('Model nenalezen: ' + q);
     return true;
   }
@@ -2879,7 +2860,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { ['nlc_mode', 'nlc_agent'].forEach(k => localStorage.removeItem(k)); } catch {}
   // Slider rychlosti je pryč — tokenový limit je pevný (MAX_TOKENS).
   try { updateTokenMeter(null, null); } catch {}
-  updateModelLabel(); renderModelList(); renderEffortList(); renderProjects(); showView('projects');
+  updateModelLabel(); renderModelList(); renderProjects(); showView('projects');
   renderChatList(); renderMessages();
   try { const d = await window.api.projectsDir(); if ($('#projectsDirPath')) $('#projectsDirPath').textContent = d; } catch {}
   // model picker — dropdown se vždy vejde do okna (posune se doleva, když by přetekl vpravo)
@@ -3214,7 +3195,11 @@ function initLoginGate() {
   try { window.api.onAuthChanged((p) => settle(!!p)); } catch {}
 }
 
-// ---------- Blokace nepovolené verze (funguje jen verze z Downloads) ----------
+// ---------- Blokace nepovolené verze (LIVE z repa NolimitCoder-Download) ----------
+// Kazdou minutu prijde bud app:blocked (ukaže se okno), nebo app:unblocked
+// (okno se samo schova — verze se mezitim stala aktualni). Kdyz v repu neni
+// vubec nic, ukazuje se "nedostupna" misto "update". Warning je live text
+// z WARNING.md v repu.
 function initBlockGate() {
   try {
     if (!window.api || !window.api.onAppBlocked) return;
@@ -3249,9 +3234,20 @@ function initBlockGate() {
       try {
         const g = $('#blockGate');
         if (!g) return;
+        // Nedostupna (v repu nic neni) vs zastarala (je tam novejsi).
+        const unav = !!(d && d.unavailable);
+        const t = $('#blockTitle');
+        if (t) t.textContent = unav ? 'Aplikace je momentálně nedostupná' : 'Update required';
         if (d && d.reason) {
           const r = $('#blockReason');
           if (r) r.textContent = String(d.reason);
+        }
+        // Live warning z GitHubu (WARNING.md). Pryc, kdyz zadny neni.
+        const w = $('#blockWarn');
+        if (w) {
+          const wt = String((d && d.warning) || '').trim().slice(0, 500);
+          if (wt) { w.textContent = '⚠ ' + wt; w.style.display = ''; }
+          else { w.textContent = ''; w.style.display = 'none'; }
         }
         const url = d && d.latest && d.latest.download_url;
         const dl = $('#blockDownload');
@@ -3285,6 +3281,12 @@ function initBlockGate() {
         g.style.display = 'flex';
       } catch {}
     });
+    // Verze se mezitim stala aktualni (pribyla do repa) -> okno samo zmizi.
+    if (window.api.onAppUnblocked) {
+      window.api.onAppUnblocked(() => {
+        try { const g = $('#blockGate'); if (g) g.style.display = 'none'; } catch {}
+      });
+    }
   } catch {}
 }
 

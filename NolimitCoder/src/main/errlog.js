@@ -107,6 +107,32 @@ function scrubSecrets(s) {
   return t;
 }
 
+// Detail nesmí do logu kopírovat celé soubory — tool volání posílá své argumenty
+// (u write_file je v nich obsah souboru klidně za 15 kB) a z Error Logu pak
+// byla jen hromada kódu místo čitelné chyby. Dlouhé hodnoty se zkrátí.
+function shrink(v, d) {
+  if (typeof v === 'string') {
+    return v.length > 300 ? v.slice(0, 300) + ' …[+' + (v.length - 300) + ' znaků]' : v;
+  }
+  if (Array.isArray(v)) {
+    if (d >= 4) return '[… ' + v.length + ' položek]';
+    const a = v.slice(0, 20).map((x) => shrink(x, d + 1));
+    if (v.length > 20) a.push('…');
+    return a;
+  }
+  if (v && typeof v === 'object') {
+    if (d >= 4) return '[…]';
+    const o = {};
+    let n = 0;
+    for (const k of Object.keys(v)) {
+      if (++n > 40) { o['…'] = 'další klíče'; break; }
+      try { o[k] = shrink(v[k], d + 1); } catch { o[k] = '[…]'; }
+    }
+    return o;
+  }
+  return v;
+}
+
 function header() {
   return '='.repeat(78) + '\r\n'
     + 'NolimitCoder — Error Log\r\n'
@@ -124,15 +150,16 @@ function logError(where, err, extra) {
     try {
       if (!fs.existsSync(f) || fs.statSync(f).size === 0) fs.writeFileSync(f, header(), 'utf8');
     } catch {}
-    if (++writes % 25 === 0) {
-      try {
-        if (fs.statSync(f).size > 5 * 1048576) {
-          try { fs.rmSync(f + '.old', { force: true }); } catch {}
-          try { fs.renameSync(f, f + '.old'); } catch {}
-          try { fs.writeFileSync(f, header(), 'utf8'); } catch {}
-        }
-      } catch {}
-    }
+    // Rotace: 5 MB. Hlídáme pokaždé (zápisů není moc a statSync je levný) —
+    // dřív se kontrolovalo jen každý 25. zápis, takže soubor mohl růst dál.
+    writes++;
+    try {
+      if (fs.statSync(f).size > 5 * 1048576) {
+        try { fs.rmSync(f + '.old', { force: true }); } catch {}
+        try { fs.renameSync(f, f + '.old'); } catch {}
+        try { fs.writeFileSync(f, header(), 'utf8'); } catch {}
+      }
+    } catch {}
     const msg = (() => {
       if (!err) return 'neznámá chyba';
       if (typeof err === 'string') return err;
@@ -141,9 +168,12 @@ function logError(where, err, extra) {
     })();
     const stack = (err && err.stack) ? String(err.stack) : '';
     let block = '\r\n[' + new Date().toISOString() + '] [' + String(where || 'error') + ']\r\n';
-    block += '  Chyba:  ' + String(msg).replace(/\r?\n/g, '\n          ') + '\r\n';
+    block += '  Chyba:  ' + String(msg).slice(0, 2000).replace(/\r?\n/g, '\n          ') + '\r\n';
     if (extra) {
-      const ex = typeof extra === 'string' ? extra : (() => { try { return JSON.stringify(extra); } catch { return String(extra); } })();
+      // Objekt (typicky argumenty nástroje) se zkrátí — do logu se nedostane
+      // obsah celého souboru, jen jeho popis (viz shrink).
+      const ex = typeof extra === 'string' ? extra
+        : (() => { try { return JSON.stringify(shrink(extra, 0)); } catch { return String(extra); } })();
       block += '  Detail: ' + String(ex).slice(0, 3000).replace(/\r?\n/g, '\n          ') + '\r\n';
     }
     if (stack) block += '  Stack:\r\n          ' + stack.slice(0, 3000).replace(/\r?\n/g, '\r\n          ') + '\r\n';

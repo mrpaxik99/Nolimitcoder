@@ -74,12 +74,15 @@ function downloadFile(url, dest, onProg) {
   });
 }
 
-// ===== Kontrola povolené verze =====
-// Aplikace se při startu (a každých 5 minut) zeptá /api/app-status?version=X.
-// Server povolí jen verzi, která je právě v Downloads — jinak se aplikace
-// zablokuje a nabídne tlačítko Aktualizovat (tiše přeinstaluje novou verzi).
-// Fail-open: při výpadku sítě se aplikace nezastaví, blokuje jen odpověď serveru.
+// ===== Kontrola povolené verze (LIVE) =====
+// Aplikace se pri startu a pak kazdou minutu zepta /api/app-status?version=X.
+// Server cte live repo mrpaxik99/NolimitCoder-Download (60s cache + ETag):
+//  - moje verze je nejvyssi v repu -> jede, pripadna stara blokace se schova
+//  - v repu nic neni / moje verze tam neni -> zablokuje se + duvod + live warning
+//  - warning se snima z WARNING.md v repu a ukazuje se v okne spolu s duvodem
+// Vypadek site = nikdo se neblokuje (fail-open).
 const APP_STATUS_URL = process.env.NLC_STATUS_URL || 'https://nolimitcoder.vercel.app/api/app-status';
+const APP_STATUS_EVERY_MS = 60 * 1000;
 async function checkAppBlocked() {
   try {
     const u = new URL(APP_STATUS_URL);
@@ -94,14 +97,15 @@ async function checkAppBlocked() {
       req.on('error', () => resolve(null));
       req.on('timeout', () => { try { req.destroy(); } catch {} resolve(null); });
     });
-    if (data && data.blocked) {
-      const payload = {
-        reason: data.reason || 'A newer version is required. Please download the latest version.',
-        latest: data.latest || null
-      };
-      for (const w of BrowserWindow.getAllWindows()) {
-        try { w.webContents.send('app:blocked', payload); } catch {}
-      }
+    if (!data) return; // bez odpovedi se nic nemeni (ani se neodhlašuje blokace)
+    const payload = {
+      reason: data.reason || 'A newer version is required. Please download the latest version.',
+      unavailable: data.unavailable === true,
+      warning: String(data.warning || '').slice(0, 500),
+      latest: data.latest || null
+    };
+    for (const w of BrowserWindow.getAllWindows()) {
+      try { w.webContents.send(data.blocked ? 'app:blocked' : 'app:unblocked', payload); } catch {}
     }
   } catch {}
 }
@@ -121,8 +125,11 @@ function getStore() {
 
   };
   // Staré klíče (agent systém / pravidla oprávnění) se ze savefile mažou.
+  // geminiCookie/geminiTemporary se taky uklízí — zbyly by v configu jen jako
+  // mrtvý balast po odstraněném Gemini Web backendu.
   const LEGACY_KEYS = ['permissions', 'fullAccess', 'allowShell', 'allowInstall', 'allowNetwork', 'allowDelete', 'allowHeavy',
-    'mode', 'defaultAgent', 'aiPermissions', 'aiAgents', 'aiCommands', 'aiCompaction'];
+    'mode', 'defaultAgent', 'aiPermissions', 'aiAgents', 'aiCommands', 'aiCompaction',
+    'geminiCookie', 'geminiTemporary'];
   try {
     if (fs.existsSync(STORE_PATH)) {
       const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
@@ -168,7 +175,7 @@ function createWindow() {
     mainWindow.show();
     mainWindow.focus();
     try { checkAppBlocked(); } catch {}
-    setInterval(() => { try { checkAppBlocked(); } catch {} }, 5 * 60 * 1000);
+    setInterval(() => { try { checkAppBlocked(); } catch {} }, APP_STATUS_EVERY_MS);
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -1092,33 +1099,27 @@ ipcMain.on('chat:stream-abort', (ev, payload) => {
   for (const [, f] of streamAborts) { try { f.abort(); } catch {} }
 });
 ipcMain.on('chat:stream-start', async (event, payload) => {
-  const { messages, model, convoId, agent, projectRoot, fullAccess, inputItems, maxTokens, websearch, reasonEffort: reasonEffortRaw, allowedTools, noTools } = payload || {};
+  const { messages, model, convoId, agent, projectRoot, fullAccess, inputItems, maxTokens, websearch, allowedTools, noTools } = payload || {};
   // max_tokens: strop změřený proti bráně = 524 288 (2^19). Nad to (530 000, 1M) vrací
   // HTTP 400 a zahazuje celý požadavek. Proto tady držíme tvrdý strop a pošleme přesně
   // maximum, co model snese. Hodnota 0/nezadaná = parametr se vůbec nepošle (pak model
   // použije vlastní výchozí).
-  const GW_MAX_TOKENS_CEIL = 524288;
+  const MAX_TOKENS_CEIL = 524288;
   const wantMaxT = parseInt(maxTokens);
   const maxT = (wantMaxT > 0)
-    ? Math.min(Math.max(wantMaxT, 256), GW_MAX_TOKENS_CEIL)
+    ? Math.min(Math.max(wantMaxT, 256), MAX_TOKENS_CEIL)
     : 0; // 0 = parametr se v požadavku vůbec neobjeví
   const omitMaxTokens = maxT === 0;
-  // Úroveň uvažování (reasoning effort). Změřeno proti bráně: brána parametr přijímá
-  // a reasoning_tokens rostou s úrovní (průměr low 32 → medium 52 → high 62 → xhigh 68 → max 85).
-  // Neplatné hodnoty se neposílají, nechá se výchozí chování modelu.
-  const REASON_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
-  const reasonEffort = String(reasonEffortRaw || '').toLowerCase();
-  const eff = REASON_LEVELS.has(reasonEffort) ? reasonEffort : '';
   const sender = event.sender;
   abortFlag = false;
   try {
     const rawId = String(model || '');
     let mId = rawId.includes('/') ? rawId.split('/').pop() : rawId;
-    // Staré modely (longcat…) brána už neobsluhuje (403/500). Kdyz renderer posle
-    // ulozenej starej hodnotu, presmerujeme ji na aktualni free model, jinak by
+    // Uložené staré volby modelu brána už neobsluhuje (403/500). Kdyz renderer posle
+    // ulozenej starej hodnotu, presmerujeme ji na aktualni free model (MiMo V2.6 Flash), jinak by
     // uzivatel dostal jen chybu bez sance ji respit. Lokalni modely se nedotykame.
-    if (!/^(local|ollama|lmstudio|vllm)[:/]/i.test(rawId) && !/^space[-_]?bunny-free$/i.test(mId)) {
-      mId = 'space-bunny-free';
+    if (!/^(local|ollama|lmstudio|vllm)[:/]/i.test(rawId) && !/^(mimo-v2\.6-flash-free)$/i.test(mId)) {
+      mId = 'mimo-v2.6-flash-free';
     }
     const sid = getSessionId(convoId || mId);
     const reqId = 'req_' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
@@ -1138,9 +1139,15 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
       'x-session-id': sid
     };
 
-    // The real model name must never leak out — only NolimitCoder Free
+    // The real model name must never leak out — only NolimitCoder Pro.
+    // Tahle funkce je jediné místo, kde se jméno směňuje, takže se v chybě,
+    // logu i ve streamu jmenuje VŽDY stejně.
     const scrubModels = (s) => String(s || '')
-      .replace(/space[-_]?bunny-free/gi, 'NolimitCoder Free')
+      // Řazení od nejspecifičtějšího. POZOR: nepatternuj holé /mimo/ — český text
+      // v UI obsahuje "mimo" ("pracovat mimo tuto složku") a pokaždé by se to
+      // přepsalo na název modelu. Jen řetězce, kde je "mimo" součástí názvu.
+      .replace(/mimo[-\s]*v?2\.6[-\s]*flash(?:[-\s]*free)?/gi, 'NolimitCoder Pro')
+      .replace(/\bmimo[-\s]+(?:v?2\.6[-\s]*)?(?:flash|pro|mini|turbo)\b/gi, 'NolimitCoder Pro')
       .replace(/longcat-2\.5-preview-free/gi, 'NolimitCoder Free');
     const agentOn = agent === true; // renderer sends tools only for the working (non-hidden) run
     // LOCAL models (Ollama / LM Studio / vLLM, OpenAI-compatible)
@@ -1192,7 +1199,6 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         messages,
         stream: true,
         ...(omitMaxTokens ? {} : { max_tokens: maxT }),
-        ...(eff ? { reasoning_effort: eff } : {}),
         tools: chatTools,
         ...(noToolsMode ? { tool_choice: 'none' } : {}),
         prompt_cache_key: sid
@@ -1232,7 +1238,7 @@ ipcMain.on('chat:stream-start', async (event, payload) => {
         mode: agentOn ? 'build' : 'chat',
         tools: tls.map(t => (t.function || t).name),
         inputChars: String(parsed.input || JSON.stringify(parsed.messages || '')).length,
-        maxT: omitMaxTokens ? 'omit' : maxT, effort: eff || 'default', websearch: websearch !== false
+        maxT: omitMaxTokens ? 'omit' : maxT, websearch: websearch !== false
       });
     } catch {}
 

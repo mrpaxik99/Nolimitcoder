@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('api', {
   onEnd: (cb) => ipcRenderer.on('chat:stream-end', (_, d) => cb(d || {})),
   onError: (cb) => ipcRenderer.on('chat:stream-error', (_, d) => cb(d || {})),
   onAppBlocked: (cb) => ipcRenderer.on('app:blocked', (_, d) => cb(d)),
+  onAppUnblocked: (cb) => ipcRenderer.on('app:unblocked', (_, d) => cb(d || {})),
   startUpdate: (url) => ipcRenderer.invoke('app:update', url),
   onUpdateProgress: (cb) => ipcRenderer.on('app:update-progress', (_, d) => cb(d)),
   onDownload: (cb) => ipcRenderer.on('nlc-download', (_, p) => cb(p)),

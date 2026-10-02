@@ -69,9 +69,10 @@ document.querySelectorAll('#adNav button').forEach((b) => {
   });
 });
 
-// ---------- Downloads: instalátory ze složky NolimitWebsite/Downloads Updates ----------
-// Nová verze = zkopíruješ .exe do téhle složky a pushneš na GitHub. Nic se neuploaduje.
-// Ve složce je vždycky jen to, co se stahuje — a jen ta verze v aplikaci funguje.
+// ---------- Downloads: instalátory z repa mrpaxik99/NolimitCoder-Download ----------
+// Nová verze = auto-push zkopíruje .exe z distu do D:\DEVELOPER\Download New
+// Version a pushne ho. Nic se neuploaduje ručně. V repu je vždycky jen ta
+// jediná verze, která se stahuje — a která jediná funguje v aplikaci.
 async function loadReleases() {
   try {
     const j = await api('/api/admin/releases');
@@ -82,8 +83,8 @@ async function loadReleases() {
         ? '<b>Právě jede: ' + esc(cur.version || '(verze v názvu nenalezena)') + '</b>' +
           '<div class="muted">' + esc(cur.name) + ' · ' + Math.round((cur.size || 0) / 1048576) +
           ' MB · jediná verze, která funguje</div>'
-        : '<b>Ve složce zatím není žádný instalátor.</b>' +
-          '<div class="muted">Zkopíruj .exe do NolimitWebsite/Downloads Updates a pushni na GitHub.</div>';
+        : '<b>V repu zatím není žádný instalátor.</b>' +
+          '<div class="muted">Spusť auto-push, nebo zkopíruj .exe z distu do D:\DEVELOPER\Download New Version a pushni.</div>';
     }
     const fb = document.getElementById('dlFolder');
     if (fb && j.folderUrl) fb.href = j.folderUrl;
@@ -94,7 +95,7 @@ async function loadReleases() {
         '<tr><td class="mono">' + esc(f.name) + '</td>' +
         '<td class="mono">' + (f.version ? esc(f.version) : '<span class="muted">—</span>') + '</td>' +
         '<td class="mono">' + Math.round((f.size || 0) / 1048576) + ' MB</td></tr>'
-      ).join('') : '<tr><td colspan="3" class="muted">Složka je prázdná.</td></tr>';
+      ).join('') : '<tr><td colspan="3" class="muted">V repu zatím žádný instalátor.</td></tr>';
     }
   } catch (e) { /* ticho — sekce není kritická */ }
 }

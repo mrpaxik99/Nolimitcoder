@@ -1,8 +1,8 @@
 import { db, ensureSchema } from './_db.js';
 import { currentRelease } from './_releases.js';
 
-// Veřejné stahování: GET /api/download → 302 na instalátor ze složky
-// NolimitWebsite/Downloads Updates (GitHub). Je to ta samá verze, která jediná
+// Veřejné stahování: GET /api/download → 302 na instalátor z repa
+// mrpaxik99/NolimitCoder-Download (GitHub). Je to ta samá verze, která jediná
 // v aplikaci funguje — viz /api/app-status.
 export default async function handler(req, res) {
   try {
