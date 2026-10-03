@@ -2244,7 +2244,11 @@ function runCmdLong(cmd, cwd, timeoutMs, cancelKey) {
     try {
       child = execFile(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
         process.platform === 'win32' ? ['/d', '/s', '/c', cmd] : ['-c', cmd],
-        { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true, encoding: 'buffer' },
+        // BEZ verbatim Node escapuje vnitrni uvozovky (\") a cmd /s je pak rozbije:
+        // `taskkill /IM "Moje App.exe"` padalo na Invalid argument 'App' a kill nikdy
+        // neprobehl (proto vzdy selhalo az DRUHE sestaveni — zamek drzela prezivsi instance).
+        // Stejne tak citovana cesta k .cmd binarce. S verbatim jde prikaz doslovne.
+        { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true, encoding: 'buffer', ...(process.platform === 'win32' ? { windowsVerbatimArguments: true } : {}) },
         (err, stdout, stderr) => {
           done(() => {
             let out = decodeConsole(stdout);
