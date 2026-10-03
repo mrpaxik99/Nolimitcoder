@@ -2479,7 +2479,8 @@ async function execBuildExe(dir, opts) {
   // --- inventura odkazu z index.html ---
   let refs = [];
   try { refs = collectHtmlRefs(fs.readFileSync(htmlAbs, 'utf8')); } catch {}
-  step('Inventura odkazu', true, refs.length ? refs.join(', ') : 'zadne lokalni (vse inline)');
+  // Inventura: loguj JEN když jsou lokální reference (inline = normální, nemusí se logovat)
+  if (refs.length) step('Inventura odkazu', true, refs.join(', '));
   const missing = refs.filter(r => !fs.existsSync(path.join(dir, r)));
   if (missing.length) return fail('Chybi soubory, na ktere odkazuje index.html: ' + missing.join(', ') + '. Napis je (write_file) a zavolej build_exe znovu.');
   step('Vsechny odkazovane soubory existuji', true);
