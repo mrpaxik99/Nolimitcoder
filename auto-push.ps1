@@ -5,6 +5,11 @@
 # Bezi skryte na pozadi (spoustec po prihlaseni: Startup\NolimitCoderV2-AutoPush.bat).
 # Log: $env:TEMP\nolimit-autopush.log
 $ErrorActionPreference = 'Continue'
+# Nikdy zadne interaktivni okno/dotaz: na pozadi by helper-selector / login visel
+# donekonecna a dale by to vypadalo jako "zamrzly push". Bez credentialu to spadne
+# hned s jasnou hlaskou v logu (push FAIL) a zkusi se to znova priste.
+$env:GIT_TERMINAL_PROMPT = '0'
+$env:GCM_INTERACTIVE = 'never'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Git = 'C:\Users\PAXI\Tools\Git\cmd\git.exe'
 $Log = Join-Path $env:TEMP 'nolimit-autopush.log'

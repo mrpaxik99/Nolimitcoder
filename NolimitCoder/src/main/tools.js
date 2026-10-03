@@ -2610,6 +2610,8 @@ async function execBuildExe(dir, opts) {
   // --- Pockat na odemceni app.asar (Explorer nahled / antivirus / dobihajici proces) ---
   // Slepy build do zamku jen plytva minutami. Nejdriv probe, pak teprve builder.
   // (Sem se dojde, jen kdyz zadny prezivsi proces nebyl zamitnut — jinak by to uz skoncilo vyse.)
+  // outName: normalne "dist", pri trvalem zamku bez procesu nouzove "dist2".
+  let outName = 'dist';
   try {
     const lockProbe = [
       path.join(dir, 'dist', 'win-unpacked', 'resources', 'app.asar')
@@ -2651,13 +2653,37 @@ async function execBuildExe(dir, opts) {
             break;
           }
         }
-        return fail('Soubor je po 5 minutach porad zamceny: ' + locked.join(', ') + '.'
-          + (still.length ? ' Porad bezi: ' + still.join(', ') + ' — zavri je ve Spravci uloh.' : ' Zadny exe uz nebezi. Zamek tak dlouho drzi typicky antivirus — pridej slozku projektu do vyluk Windows Defenderu (spustit jako spravce) a zavri okno Exploreru se slozkou dist.')
-          + ' DULEZITE: chyba NENI v kodu — NEUPRAVUJ zadne soubory (ani index.html), nic to nespravi. Jen pockej a zavolej build_exe znovu.');
+        // NOUZOVKA dist2: ani po 5 minutach se nepustil a zadny proces nebezi.
+        // Misto padu (a slepeho mazani dist modelem) se postavi vedle do dist2 —
+        // exe proste vznikne, jen v jine slozce. Stare dist2 se nejdriv smaze.
+        if (!still.length) {
+          outName = 'dist2';
+          step('dist zamcen bez procesu', true, 'staví se nouzově do dist2 (hlavní dist něco drží)');
+          try { fs.rmSync(path.join(dir, 'dist2'), { recursive: true, force: true }); } catch {}
+          const d2asar = path.join(dir, 'dist2', 'win-unpacked', 'resources', 'app.asar');
+          if (fs.existsSync(d2asar) && isFileLocked(d2asar)) {
+            outName = 'dist';
+            return fail('Zamcene je i zalozni dist2 — obe slozky neco drzi. Zavri okno Exploreru, pockej na konec scanu antiviru a zavolej build_exe znovu.'
+              + ' DULEZITE: chyba NENI v kodu — NEUPRAVUJ zadne soubory (ani index.html), nic to nespravi.');
+          }
+          try {
+            pkg.build = pkg.build || {};
+            pkg.build.directories = pkg.build.directories || {};
+            pkg.build.directories.output = 'dist2';
+            fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2), 'utf8');
+            step('Vystup prepojen', true, 'tento build jde do dist2');
+          } catch (e) {
+            outName = 'dist';
+            return fail('Nouzovy dist2 se nedal nastavit: ' + (e && e.message));
+          }
+          break;
+        }
+        return fail('Beziaci proces ' + still.join(', ') + ' se nedal ukoncit — zavri ho rucne ve Spravci uloh a zavolej build_exe znovu.'
+          + ' DULEZITE: chyba NENI v kodu — NEUPRAVUJ zadne soubory (ani index.html), nic to nespravi.');
       }
     }
   } catch (e) { if (String((e && e.message) || '').includes('BUILD SELHAL')) throw e; }
-  // --- PLNY rebuild ---
+  // --- PLNY rebuild (do dist, nouzove do dist2 — viz outName vyse) ---
   const target = String(opts.target || '').toLowerCase();
   const distCmd = target && ['nsis', 'portable', 'dir'].includes(target)
     ? `npx electron-builder --win ${target}`
@@ -2683,15 +2709,17 @@ async function execBuildExe(dir, opts) {
     await new Promise(r => setTimeout(r, 3000));
   }
   // (původní volání nahrazeno retry smyčkou výše)
+  // package.json se pro dist2 docasne prepsal (output) — vratit, at v nem nezustane bordel.
+  if (outName !== 'dist') { try { fs.writeFileSync(pkgFile, pkgTextNow, 'utf8'); step('package.json vracen', true, 'output zase dist'); } catch {} }
   if (!bld.ok) return fail('Build selhal (' + distCmd + '):\n' + bld.output);
   step('Build (' + distCmd + ')', true, Math.round((Date.now() - t0) / 1000) + ' s');
-  // --- verifikace vystupu ---
-  const distDir = path.join(dir, 'dist');
-  if (!fs.existsSync(distDir)) return fail('Build dobehl, ale slozka dist/ nevznikla.');
+  // --- verifikace vystupu (dist, nouzove dist2) ---
+  const distDir = path.join(dir, outName);
+  if (!fs.existsSync(distDir)) return fail('Build dobehl, ale slozka ' + outName + '/ nevznikla. Konec vystupu buildu:\n' + String(bld.output).slice(-2000));
   const exes = listExeFiles(distDir);
-  if (!exes.length) return fail('V dist/ neni zadne .exe. Vystup buildu:\n' + String(bld.output).slice(-2000));
+  if (!exes.length) return fail('V ' + outName + '/ neni zadne .exe. Vystup buildu:\n' + String(bld.output).slice(-2000));
   const fresh = exes.filter(e => e.mtime >= t0 - 120000);
-  if (!fresh.length) return fail('EXE v dist/ je STARE (build nic noveho nevytvoril).');
+  if (!fresh.length) return fail('EXE v ' + outName + '/ je STARE (build nic noveho nevytvoril). Konec vystupu buildu:\n' + String(bld.output).slice(-2000));
   for (const e of fresh) step('EXE cerstve', true, path.basename(e.path) + ' (' + (e.size / 1048576).toFixed(1) + ' MB)');
   // --- asar obsahuje vsechny soubory? (Electron umi cist asar primo pres fs) ---
   const canAsar = !!(process.versions && process.versions.electron);
@@ -2730,6 +2758,7 @@ async function execBuildExe(dir, opts) {
     fs.writeFileSync(path.join(distDir, BUILD_STATE), JSON.stringify({ hash: curHash, exe: stExe, size: stSize, mtime: stMtime, time: new Date().toISOString() }), 'utf8');
   } catch {}
   log.push('');
+  if (outName !== 'dist') log.push('[WARN] Hlavni dist byl zamceny, takze se stavilo do dist2. Aplikace je plnohodnotna, jen lezi jinde. Az hlavni dist odemkne (zavri Explorer/scan), priste se stavi zase tam.');
   log.push('HOTOVO - 100%: ' + main.path + ' (' + (main.size / 1048576).toFixed(1) + ' MB)');
   return { ok: true, output: log.join('\n') };
 }
