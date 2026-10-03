@@ -2521,6 +2521,57 @@ async function execBuildExe(dir, opts) {
     log.push('HOTOVO - 100% (bez rebuildu, usetreno ~10 min): ' + skipExe);
     return { ok: true, output: log.join('\n') };
   }
+  // Rucni build mimo build_exe (shell `npm run dist`) nezapise BUILD_STATE —
+  // pak by nasledne build_exe stavilo ZNOVU, i kdyz je exe cerstve. Proto zalozni
+  // test: je-li nejake exe v dist/dist2 NOVEJSI nez vsechny zdroje, nic se nezmenilo
+  // a rebuild se preskoci (stav se pri tom dopise, takze priste staci primarni test).
+  if (!skipBuild) {
+    try {
+      let maxSrc = 0, nSrc = 0;
+      const walkSrc = (d) => {
+        let entries;
+        try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          if (nSrc > 5000) return;
+          if (e.name.startsWith('.') && e.name !== '.env') {
+            if (e.name === '.git') continue;
+          }
+          const p = path.join(d, e.name);
+          try {
+            if (e.isDirectory()) {
+              if (SKIP_TREE.has(e.name)) continue;
+              walkSrc(p); continue;
+            }
+            const st = fs.statSync(p);
+            if (!st.isFile()) continue;
+            nSrc++;
+            if (st.mtimeMs > maxSrc) maxSrc = st.mtimeMs;
+          } catch {}
+        }
+      };
+      walkSrc(dir);
+      let best = null;
+      for (const dd of [distDirEarly, dist2DirEarly]) {
+        try {
+          for (const e of listExeFiles(dd)) {
+            if (/setup|uninstall/i.test(path.basename(e.path))) continue;
+            if (!best || e.mtime > best.mtime) best = e;
+          }
+        } catch {}
+      }
+      if (best && maxSrc && best.mtime > maxSrc + 2000) {
+        step('Beze zmeny', true, 'exe je novejsi nez vsechny zdroje (postaveno rucne mimo build_exe) - rebuild preskocen');
+        step('EXE aktualni', true, best.path + ' (' + (best.size / 1048576).toFixed(1) + ' MB)');
+        try {
+          fs.writeFileSync(path.join(path.dirname(best.path).includes('dist2') ? dist2DirEarly : distDirEarly, BUILD_STATE),
+            JSON.stringify({ hash: curHash, exe: best.path, size: best.size, mtime: best.mtime, time: new Date().toISOString() }), 'utf8');
+        } catch {}
+        log.push('');
+        log.push('HOTOVO - 100% (bez rebuildu, usetreno ~10 min): ' + best.path);
+        return { ok: true, output: log.join('\n') };
+      }
+    } catch {}
+  }
   // --- npm install, kdyz je potreba (dist se bez nej nevytvori) ---
   // Rozhoduje OBSAH zavislosti, ne datum package.json — to se meni i pri editaci
   // verzi/skriptu, ktera na node_modules nema vliv. Jinak by se pri kazdem pokusu
