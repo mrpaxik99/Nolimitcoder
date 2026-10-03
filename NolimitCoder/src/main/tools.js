@@ -2460,6 +2460,14 @@ async function execBuildExe(dir, opts) {
   pkg.build = pkg.build || {};
   pkg.build.directories = pkg.build.directories || {};
   if (!pkg.build.directories.output) { pkg.build.directories.output = 'dist'; fixed.push('directories.output'); }
+  // Vystup MUSI byt dist (pripadne nouzove dist2) — cela pipeline (probe zamku,
+  // skip pri beze zmeny, verifikace, BUILD_STATE) pocita jen s nimi. Cizi output
+  // (napr. release) by znamenalo: build jinam + build_exe hlasi stare dist.
+  // (Stalo se: agent prepsal output na release a exe skoncilo mimo dist.)
+  else if (pkg.build.directories.output !== 'dist' && pkg.build.directories.output !== 'dist2') {
+    fixed.push('directories.output ' + pkg.build.directories.output + ' -> dist');
+    pkg.build.directories.output = 'dist';
+  }
   const wantFiles = new Set([entry, 'index.html', ...refs]);
   try { if (fs.existsSync(path.join(dir, 'preload.js'))) wantFiles.add('preload.js'); } catch {}
   for (const extra of ['src', 'vendor', 'assets', 'public']) {

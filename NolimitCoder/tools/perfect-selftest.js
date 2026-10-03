@@ -124,6 +124,7 @@ ok('lock probe pred rebuildem', tsrc.includes('lockProbe'));
 ok('lokalni builder bin (.bin)', tsrc.includes('.bin') && tsrc.includes('electron-builder.cmd'));
 ok('zadne hole npx (sileny major)', !/npx electron-builder/.test(tsrc));
 ok('plny vystup do souboru (build-fail-)', tsrc.includes('build-fail-'));
+ok('output vzdy dist (ne release)', tsrc.includes("directories.output ' + pkg.build.directories.output + ' -> dist") || tsrc.includes('directories.output -> dist'));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
