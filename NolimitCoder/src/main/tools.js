@@ -2416,6 +2416,27 @@ async function execBuildExe(dir, opts) {
   };
   const fail = (msg) => ({ ok: false, output: log.join('\n') + '\n\nBUILD SELHAL: ' + msg });
   if (!fs.existsSync(dir)) return fail('Slozka neexistuje: ' + dir);
+
+  // LOCK: pokud byl build dokončen před méně než 60 s se stejným targetem, VRÁTÍME OK OKAMŽITĚ
+  // Zabraňuje AI agent smyčce, která volá build_exe opakovaně po úspěchu.
+  try {
+    const lockFile = path.join(dir, 'dist', '.nlc-build-lock.json');
+    if (fs.existsSync(lockFile)) {
+      const lock = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+      const elapsed = Date.now() - (lock.doneAt || 0);
+      const sameTarget = String(lock.target || '') === String(opts.target || '');
+      if (elapsed < 60000 && sameTarget && lock.exe && fs.existsSync(lock.exe)) {
+        const age = (elapsed / 1000).toFixed(1);
+        step('Zámek aktivní', true, 'build byl dokončen před ' + age + ' s — přeskočeno (target: ' + (opts.target || 'nsis') + ')');
+        log.push('');
+        log.push('HOTOVO - 100% (zámek): ' + lock.exe);
+        return { ok: true, output: log.join('\n') };
+      }
+      // Zámek vypršel nebo jiný target → smažeme ho, povolíme nový build
+      try { fs.rmSync(lockFile, { force: true }); } catch {}
+    }
+  } catch {}
+
   // Odpad z minulych zamcenych buildu (dist odlozeny stranou, ale nepodarilo se ho smazat)
   // a DEDICNE zabaleny dist2 (stary nouzovy vystup — uz se nepouziva, jen matil).
   // Vzdy se uklidi hned — jinak by lezel ve zdrojich a kazil preskoceni rebuildu.
@@ -2868,10 +2889,19 @@ async function execBuildExe(dir, opts) {
     // postavil — prave to byla ta "druha kompilace hned po uspesne".
     let finalHash = curHash;
     try { finalHash = hashProjectState(dir, fs.readFileSync(pkgFile, 'utf8'), stateFiles, opts.target || ''); } catch {}
-    fs.writeFileSync(path.join(distDir, BUILD_STATE), JSON.stringify({ hash: finalHash, exe: stExe, size: stSize, mtime: stMtime, time: new Date().toISOString() }), 'utf8');
+    const buildState = { hash: finalHash, exe: stExe, size: stSize, mtime: stMtime, time: new Date().toISOString() };
+    fs.writeFileSync(path.join(distDir, BUILD_STATE), JSON.stringify(buildState), 'utf8');
+    // LOCK: zabránit okamžitému opakovanému spuštění build_exe (AI agent smyčka)
+    // Uložíme čas dokončení — pokud je build_exe zavolán znovu do 60 s se stejným cílem,
+    // vrátíme OK okamžitě BEZ jakéhokoliv buildu.
+    try {
+      const lock = { doneAt: Date.now(), target: opts.target || '', exe: stExe, hash: finalHash };
+      fs.writeFileSync(path.join(distDir, '.nlc-build-lock.json'), JSON.stringify(lock), 'utf8');
+    } catch {}
   } catch {}
   log.push('');
   log.push('HOTOVO - 100%: ' + main.path + ' (' + (main.size / 1048576).toFixed(1) + ' MB)');
+  log.push('[LOCK] Build dokončen — nespouštět build_exe znovu (zámek 60 s).');
   return { ok: true, output: log.join('\n') };
 }
 
