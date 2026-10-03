@@ -121,6 +121,9 @@ ok('stav se uklada (.nlc-build.json)', tsrc.includes('.nlc-build.json'));
 ok('kill pred rebuildem', tsrc.includes('killNames') || tsrc.includes('killBeforeBuild'));
 ok('retry pri zamku (bldAttempt)', tsrc.includes('bldAttempt'));
 ok('lock probe pred rebuildem', tsrc.includes('lockProbe'));
+ok('lokalni builder bin (.bin)', tsrc.includes('.bin') && tsrc.includes('electron-builder.cmd'));
+ok('zadne hole npx (sileny major)', !/npx electron-builder/.test(tsrc));
+ok('plny vystup do souboru (build-fail-)', tsrc.includes('build-fail-'));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

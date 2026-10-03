@@ -2520,6 +2520,13 @@ async function execBuildExe(dir, opts) {
     catch { return ''; }
   };
   let needInstall = !fs.existsSync(path.join(nmDir, 'electron', 'package.json')) || !fs.existsSync(path.join(nmDir, 'electron-builder', 'package.json'));
+  // Samotne package.json nestaci — chybi-li spustitelny .bin (napr. po rucnim mazani node_modules),
+  // `npx` by potichu stáhnul CIZÍ major verzi builderu a build by padl záhadně.
+  // Kontroluje se proto i binárka; spouští se pak přímo lokální binárka, nikdy holé npx.
+  if (!needInstall) {
+    const localBin = path.join(nmDir, '.bin', process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder');
+    if (!fs.existsSync(localBin)) needInstall = true;
+  }
   try {
     if (!needInstall) {
       const st = JSON.parse(fs.readFileSync(path.join(nmDir, DEPS_STATE), 'utf8'));
@@ -2685,8 +2692,14 @@ async function execBuildExe(dir, opts) {
   } catch (e) { if (String((e && e.message) || '').includes('BUILD SELHAL')) throw e; }
   // --- PLNY rebuild (do dist, nouzove do dist2 — viz outName vyse) ---
   const target = String(opts.target || '').toLowerCase();
+  // VŽDY lokální binárka z node_modules — holé `npx` by při chybějícím .bin potichu
+  // stáhlo CIZÍ major verzi builderu (stalo se: 26.15.3 místo 25.x) a build by padl záhadně.
+  const localBuilder = path.join(nmDir, '.bin', process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder');
+  if (target && ['nsis', 'portable', 'dir'].includes(target) && !fs.existsSync(localBuilder)) {
+    return fail('Chybí lokální electron-builder (.bin) — spusť nejdřív npm install a pak build_exe znovu. (Schválně se nevolá holé npx, to by stáhlo cizí verzi.)');
+  }
   const distCmd = target && ['nsis', 'portable', 'dir'].includes(target)
-    ? `npx electron-builder --win ${target}`
+    ? `"${localBuilder}" --win ${target}`
     : 'npm run dist';
   const t0 = Date.now();
   // Retry pri zamku souboru: kdyz builder nemuze prepsat app.asar, protoze stara
@@ -2711,7 +2724,19 @@ async function execBuildExe(dir, opts) {
   // (původní volání nahrazeno retry smyčkou výše)
   // package.json se pro dist2 docasne prepsal (output) — vratit, at v nem nezustane bordel.
   if (outName !== 'dist') { try { fs.writeFileSync(pkgFile, pkgTextNow, 'utf8'); step('package.json vracen', true, 'output zase dist'); } catch {} }
-  if (!bld.ok) return fail('Build selhal (' + distCmd + '):\n' + bld.output);
+  // Plny vystup builderu do souboru — do hlasky se vejde jen kousek, ale priste
+  // chceme vedet PRESNE proc to padlo (stalo se: useknuty log skryl pricinu).
+  const dumpBuildLog = () => {
+    try {
+      const dir0 = require('./errlog').logsDir();
+      if (!dir0) return '';
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const fp = path.join(dir0, 'build-fail-' + stamp + '.log');
+      fs.writeFileSync(fp, 'dir: ' + dir + '\ncmd: ' + distCmd + '\nattempts: ' + bldAttempt + '\n\n' + String((bld && bld.output) || ''), 'utf8');
+      return fp;
+    } catch { return ''; }
+  };
+  if (!bld.ok) { const fp = dumpBuildLog(); return fail('Build selhal (' + distCmd + '):\n' + bld.output + (fp ? '\n\nPlny vystup je v souboru: ' + fp : '')); }
   step('Build (' + distCmd + ')', true, Math.round((Date.now() - t0) / 1000) + ' s');
   // --- verifikace vystupu (dist, nouzove dist2) ---
   const distDir = path.join(dir, outName);
