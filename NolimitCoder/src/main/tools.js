@@ -367,6 +367,35 @@ function decodeConsole(buf) {
    `rmdir /s /q "%TEMP%"` - v shellu se %TEMP% expanduje na SKUTECNY Windows Temp
    a prikaz zacal mazat cely docasny adresar systemu. Tohle se nesmi stat nikdy.
    Vraci text zamitnuti, nebo null. */
+// Kriticke systemove procesy se pres taskkill/Stop-Process NESMI — model v zoufalstvi
+// (zamek app.asar) zkousel zabijet i explorer.exe. Seznam se kontroluje u /IM i /FI filtru.
+const CRITICAL_PROC = new Set(['system', 'registry', 'memory compression', 'smss.exe', 'csrss.exe',
+  'wininit.exe', 'winlogon.exe', 'services.exe', 'lsass.exe', 'svchost.exe', 'dwm.exe', 'explorer.exe',
+  'sihost.exe', 'taskhostw.exe', 'runtimebroker.exe', 'shellhost.exe', 'startmenuexperiencehost.exe',
+  'searchhost.exe', 'searchindexer.exe', 'fontdrvhost.exe', 'conhost.exe', 'cmd.exe', 'powershell.exe',
+  'pwsh.exe', 'windowsterminal.exe', 'wt.exe', 'nolimitcoder.exe', 'electron.exe']);
+function criticalProcGuard(cmd) {
+  const c = String(cmd || '');
+  const targets = [];
+  let m;
+  const reIM = /taskkill(?:\.exe)?\s+(?:\/[a-z]+\s+)*?\/IM\s+("([^"]+)"|(\S+))/gi;
+  while ((m = reIM.exec(c))) targets.push(m[2] || m[3]);
+  const reFI = /IMAGENAME\s+eq\s+("([^"]+)"|(\S+))/gi;
+  while ((m = reFI.exec(c))) targets.push(m[2] || m[3]);
+  const reSP = /Stop-Process\s+(?:-[A-Za-z]+\s+\S+\s+)*-Name\s+("([^"]+)"|'([^']+)'|([^\s;,]+))/gi;
+  while ((m = reSP.exec(c))) targets.push(m[2] || m[3] || m[4]);
+  for (let t of targets) {
+    t = String(t || '').toLowerCase().replace(/["',;]+$/, '');
+    if (!t) continue;
+    if (t.includes('*')) return 'ZAMITNUTO - taskkill s hvezdickou (*) by zabil vsechno. Mir vzdycky na jedno konkretni exe aplikace z dist/.';
+    const base = t.split(/[\\/]/).filter(Boolean).pop() || t;
+    const name = /\.exe$/i.test(base) ? base.toLowerCase() : (base + '.exe').toLowerCase();
+    if (CRITICAL_PROC.has(name)) {
+      return 'ZAMITNUTO - proces "' + base + '" je systemovy (Plocha/okna/konzole/samotna aplikace). Jeho ukonceni by shodilo Windows nebo zabilo vlastni terminal. Zabijej jen jedno konkretni exe aplikace z dist/.';
+    }
+  }
+  return null;
+}
 function destructiveShellGuard(cmd) {
   const c = String(cmd || '');
   if (!/\b(rmdir|rd|del|erase|format|takeown|icacls)\b/i.test(c)) return null;
@@ -579,7 +608,7 @@ function runArgv(exe, args, cwd, timeoutMs) {
    bere `&&`/`||`/`&` a `%VAR%`, `if exist`. PowerShell bere `;`, `$env:`, `$()`,
    `` ` ``, `if (…)`, `| Select-Object`. Bez toho se mixed příkaz spustí v cmd,
    `;` zůstane v argumentu a program dostane "bad option: -v;". */
-const PS_ONLY = /(^|[^\\])\$env:|\$\(|\$_|\bSelect-Object\b|\bWhere-Object\b|\bForEach-Object\b|\bWrite-Host\b|\bNew-Object\b|\bGet-ChildItem\b|\bGet-Content\b|\bSet-Location\b|\bTest-Path\b|\bRemove-Item\b|`|\bif\s*\(/i;
+const PS_ONLY = /(^|[^\\])\$env:|\$\(|\$_|^\s*powershell(\.exe)?\b|^\s*pwsh(\.exe)?\b|\bSelect-Object\b|\bWhere-Object\b|\bForEach-Object\b|\bWrite-Host\b|\bNew-Object\b|\bGet-ChildItem\b|\bGet-Content\b|\bSet-Location\b|\bTest-Path\b|\bRemove-Item\b|`|\bif\s*\(/i;
 const CMD_ONLY = /\bif\s+exist\b|\bif\s+errorlevel\b|%[A-Za-z_][A-Za-z0-9_]*%|&&|\|\||\bdel\s+\/|\bdir\s+\/b\b|\btaskkill\s+\/|\bstart\s+""/i;
 function preferredShellOrder(cmd) {
   const c = String(cmd || '');
@@ -2684,6 +2713,9 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       // Destruktivni mazani systemu (rmdir /s /q na Temp/Windows/profil) = nikdy.
       const dguard = destructiveShellGuard(rawCmd);
       if (dguard) return { ok: false, output: dguard };
+      // Zabijeni systemovych procesu (explorer, dwm, konzole, nase appka) = nikdy.
+      const cguard = criticalProcGuard(rawCmd);
+      if (cguard) return { ok: false, output: cguard };
       // Zápis obsahu souboru přes shell = jistá chyba (limit 8191 zn., here-string terminátor).
       const guard = shellFileWriteGuard(rawCmd);
       if (guard) {
