@@ -2485,17 +2485,22 @@ async function execBuildExe(dir, opts) {
   try { if (fs.existsSync(path.join(dir, 'preload.js'))) stateFiles.push('preload.js'); } catch {}
   const curHash = hashProjectState(dir, pkgTextNow, stateFiles, opts.target || '');
   const distDirEarly = path.join(dir, 'dist');
+  const dist2DirEarly = path.join(dir, 'dist2');
   let skipBuild = false, skipExe = null;
-  try {
-    const stRaw = fs.readFileSync(path.join(distDirEarly, BUILD_STATE), 'utf8');
-    const st = JSON.parse(stRaw);
-    if (st && st.hash === curHash && st.exe && fs.existsSync(st.exe)) {
-      const est = fs.statSync(st.exe);
-      if (est.isFile() && Math.abs(est.size - (st.size || 0)) < 2 && Math.abs(est.mtimeMs - (st.mtime || 0)) < 2000) {
-        skipBuild = true; skipExe = st.exe;
+  // Stav se hleda v dist i v dist2 (nouzovy vystup pri zamcenem dist).
+  for (const sp of [path.join(distDirEarly, BUILD_STATE), path.join(dist2DirEarly, BUILD_STATE)]) {
+    try {
+      const stRaw = fs.readFileSync(sp, 'utf8');
+      const st = JSON.parse(stRaw);
+      if (st && st.hash === curHash && st.exe && fs.existsSync(st.exe)) {
+        const est = fs.statSync(st.exe);
+        if (est.isFile() && Math.abs(est.size - (st.size || 0)) < 2 && Math.abs(est.mtimeMs - (st.mtime || 0)) < 2000) {
+          skipBuild = true; skipExe = st.exe;
+          break;
+        }
       }
-    }
-  } catch {}
+    } catch {}
+  }
   if (skipBuild) {
     step('Beze zmeny', true, 'projekt je stejny jako pri poslednim buildu - rebuild preskocen');
     step('EXE aktualni', true, skipExe + ' (' + (fs.statSync(skipExe).size / 1048576).toFixed(1) + ' MB)');
