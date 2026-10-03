@@ -2135,12 +2135,23 @@ function rememberPid(key, pid) {
   } catch {}
 }
 // Snapshot procesu: pid -> {img, cmd}. Jedno volani na zacatku buildu (~1 s).
+// POZOR: powershell.exe se spousti PRIMO pres execFile, NIKDY pres cmd.exe —
+// cmd vrstva sezere `$_` a zbyde ".ProcessId" (overeno testy: primo OK, pres cmd KO).
 async function procsSnapshot() {
   const map = new Map();
   try {
-    const t = await runCmdLong('powershell -NoProfile -Command "Get-CimInstance Win32_Process | ForEach-Object { ($_.ProcessId).ToString() + chr(124) + $_.Name + chr(124) + $_.CommandLine }"', process.cwd(), 30000);
-    if (!t || t.ok !== true) return map;
-    for (const line of String(t.output || '').split('\n')) {
+    const out = await new Promise((resolve) => {
+      try {
+        require('child_process').execFile('powershell.exe',
+          ['-NoProfile', '-Command', 'Get-CimInstance Win32_Process | ForEach-Object { $_.ProcessId.ToString() + [char]124 + $_.Name + [char]124 + $_.CommandLine }'],
+          { timeout: 30000, windowsHide: true, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
+          (err, stdout) => {
+            if (err) { resolve(''); return; }
+            resolve(String(stdout || ''));
+          });
+      } catch { resolve(''); }
+    });
+    for (const line of String(out || '').split('\n')) {
       const a = line.indexOf('|'), b = line.indexOf('|', a + 1);
       if (a < 0 || b < 0) continue;
       const pid = Number(line.slice(0, a).trim());
@@ -2151,7 +2162,7 @@ async function procsSnapshot() {
   return map;
 }
 // Pobij sirotky PO NASICH predchozich buildech ve slozce. Zabiji se jen procesy,
-// kterekazdym coulem vypadaji jako nase buildry (node s electron-builder/npm v cmdline,
+// ktere kazdym coulem vypadaji jako nase buildry (node s electron-builder/npm v cmdline,
 // launch-test exe s cestou projektu) — nikdy nic ciziho. PID se na Windows recykluje,
 // takze samotne cislo nestaci, vzdy se overuje i prikazova radka.
 async function killOwnOrphans(dir) {

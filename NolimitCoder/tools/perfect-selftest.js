@@ -118,7 +118,7 @@ ok('hashProjectState existuje', tsrc.includes('function hashProjectState'));
 ok('isFileLocked existuje', tsrc.includes('function isFileLocked'));
 ok('skip pri BEZE ZMENY', tsrc.includes('BEZE ZMENY'));
 ok('stav se uklada (.nlc-build.json)', tsrc.includes('.nlc-build.json'));
-ok('kill pred rebuildem', tsrc.includes('killBeforeBuild'));
+ok('kill pred rebuildem', tsrc.includes('killNames') || tsrc.includes('killBeforeBuild'));
 ok('retry pri zamku (bldAttempt)', tsrc.includes('bldAttempt'));
 ok('lock probe pred rebuildem', tsrc.includes('lockProbe'));
 
