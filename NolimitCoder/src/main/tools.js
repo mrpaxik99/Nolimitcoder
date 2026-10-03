@@ -579,7 +579,7 @@ function runArgv(exe, args, cwd, timeoutMs) {
    bere `&&`/`||`/`&` a `%VAR%`, `if exist`. PowerShell bere `;`, `$env:`, `$()`,
    `` ` ``, `if (…)`, `| Select-Object`. Bez toho se mixed příkaz spustí v cmd,
    `;` zůstane v argumentu a program dostane "bad option: -v;". */
-const PS_ONLY = /(^|[^\\])\$env:|\$\(|\bSelect-Object\b|\bWhere-Object\b|\bForEach-Object\b|\bWrite-Host\b|\bNew-Object\b|\bGet-ChildItem\b|\bGet-Content\b|\bSet-Location\b|\bTest-Path\b|\bRemove-Item\b|`|\bif\s*\(/i;
+const PS_ONLY = /(^|[^\\])\$env:|\$\(|\$_|\bSelect-Object\b|\bWhere-Object\b|\bForEach-Object\b|\bWrite-Host\b|\bNew-Object\b|\bGet-ChildItem\b|\bGet-Content\b|\bSet-Location\b|\bTest-Path\b|\bRemove-Item\b|`|\bif\s*\(/i;
 const CMD_ONLY = /\bif\s+exist\b|\bif\s+errorlevel\b|%[A-Za-z_][A-Za-z0-9_]*%|&&|\|\||\bdel\s+\/|\bdir\s+\/b\b|\btaskkill\s+\/|\bstart\s+""/i;
 function preferredShellOrder(cmd) {
   const c = String(cmd || '');
