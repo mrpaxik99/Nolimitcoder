@@ -590,7 +590,7 @@ function preferredShellOrder(cmd) {
   return ['cmd', 'powershell', 'pwsh'];
 }
 
-function runCmdKind(kind, cmd, cwd, timeoutMs) {
+function runCmdKind(kind, cmd, cwd, timeoutMs, cancelKey) {
   return new Promise((resolve) => {
     const lite = kind === "powershell" || kind === "pwsh";
     const c2 = normalizeShell(cmd, lite);
@@ -2105,25 +2105,68 @@ function findHtmlDuplicates(html) {
   }
   return dups;
 }
-function runCmdLong(cmd, cwd, timeoutMs) {
+// Bezici shell procesy: cid -> {child, pid, key}. Stop tlacitko je pres
+// cancelToolsFor zabije (klic = projektova slozka).
+const activeProcs = new Map();
+// Kooperativni stop pro build_exe (faze bez child procesu, napr. cekani na zamek):
+// rootKey -> {cancelled}. tools:cancel nastavi cancelled=true.
+const buildCancelTokens = new Map();
+function runCmdLong(cmd, cwd, timeoutMs, cancelKey) {
   return new Promise((resolve) => {
-    const child = execFile(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
-      process.platform === 'win32' ? ['/d', '/s', '/c', cmd] : ['-c', cmd],
-      { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true, encoding: 'buffer' },
-      (err, stdout, stderr) => {
-        let out = decodeConsole(stdout);
-        const errS = decodeConsole(stderr);
-        if (errS) out += (out ? '\n[stderr]\n' : '') + errS;
-        if (out.length > 12000) out = out.slice(-12000);
-        if (err) {
-          const code = typeof err.code === 'number' ? `exit ${err.code}` : String(err.code || 'error');
-          resolve({ ok: false, code, output: `${out}\n[${code}${err.killed ? ', timeout' : ''}]`.trim() });
-        } else {
-          resolve({ ok: true, code: 'exit 0', output: (out.trim() || '(no output)').slice(-12000) });
-        }
-      });
+    let child;
+    const cid = 'p' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    const done = (fn) => { try { activeProcs.delete(cid); } catch {} try { fn(); } catch {} };
+    try {
+      child = execFile(process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
+        process.platform === 'win32' ? ['/d', '/s', '/c', cmd] : ['-c', cmd],
+        { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true, encoding: 'buffer' },
+        (err, stdout, stderr) => {
+          done(() => {
+            let out = decodeConsole(stdout);
+            const errS = decodeConsole(stderr);
+            if (errS) out += (out ? '\n[stderr]\n' : '') + errS;
+            if (out.length > 12000) out = out.slice(-12000);
+            if (err) {
+              const code = typeof err.code === 'number' ? `exit ${err.code}` : String(err.code || 'error');
+              resolve({ ok: false, code, output: `${out}\n[${code}${err.killed ? ', timeout' : ''}]`.trim() });
+            } else {
+              resolve({ ok: true, code: 'exit 0', output: (out.trim() || '(no output)').slice(-12000) });
+            }
+          });
+        });
+      // Stop tlacitko musi umet zabit i bezici prikaz (jinak agent "furt neco analyzuje").
+      // Klic = projektova slozka, at se nerusi nastroje jinemu projektu.
+      if (child && child.pid) {
+        try { activeProcs.set(cid, { child, pid: child.pid, key: String(cancelKey || cwd || '') }); } catch {}
+      }
+    } catch (e) {
+      done(() => resolve({ ok: false, code: 'error', output: 'Error: ' + (e && e.message) }));
+      return;
+    }
     void child;
   });
+}
+// Stop: zabije bezici shell prikazy projektu (cele stromy pres taskkill /T).
+// Volá se z IPC tools:cancel. Vraci pocet zabitých procesu.
+function cancelToolsFor(rootKey) {
+  const key = String(rootKey || '');
+  let n = 0;
+  for (const [cid, e] of [...activeProcs]) {
+    try {
+      if (key && e.key !== key) continue;
+      n++;
+      try { if (e.child && e.pid) require('child_process').execFile('taskkill.exe', ['/PID', String(e.pid), '/T', '/F'], { timeout: 8000, windowsHide: true }, () => {}); } catch {}
+      try { if (e.child) e.child.kill(); } catch {}
+      try { activeProcs.delete(cid); } catch {}
+    } catch {}
+  }
+  // Kooperativni stop pro build_exe (faze bez child procesu).
+  try {
+    for (const [k, tok] of [...buildCancelTokens]) {
+      if (!key || k === key) { try { tok.cancelled = true; } catch {} }
+    }
+  } catch {}
+  return { killed: n };
 }
 function listExeFiles(distDir) {
   const out = [];
@@ -2950,7 +2993,7 @@ function helperState() {
 module.exports = {
   BLOCKED_PREFIXES, SKIP_DIRS, TEXT_EXT, COMPILERS, TOOLCHAINS, TOOL_GROUPS, TOOL_ALIAS, CMD_TOOL,
   normToolName, foldKey, knownFolders, resolveTarget, canonArgs, splitArgs, normalizeShell,
-  runCmd, runArgv, runCmdAdmin, globWalk, fetchText, diffLines, execTool,
+  runCmd, runArgv, runCmdAdmin, globWalk, fetchText, diffLines, execTool, cancelToolsFor,
   scanEnv, envReport, ensureTools, ensureForShell, detectProject, detectIntent, requiredForCommand, resolveNeed, installTool,
   setProgressHook, cancelDownload, dbgLog,
   execBuildExe, collectHtmlRefs, findHtmlDuplicates, launchTestExe, listExeFiles, runCmdLong,
