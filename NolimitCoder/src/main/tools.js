@@ -2780,8 +2780,10 @@ async function execBuildExe(dir, opts) {
   if (target && ['nsis', 'portable', 'dir'].includes(target) && !fs.existsSync(localBuilder)) {
     return fail('Chybí lokální electron-builder (.bin) — spusť nejdřív npm install a pak build_exe znovu. (Schválně se nevolá holé npx, to by stáhlo cizí verzi.)');
   }
+  // Only quote the path if it contains spaces (cmd.exe requirement)
+  const builderCmd = localBuilder.includes(' ') ? `"${localBuilder}"` : localBuilder;
   const distCmd = target && ['nsis', 'portable', 'dir'].includes(target)
-    ? `"${localBuilder}" --win ${target}`
+    ? `${builderCmd} --win ${target}`
     : 'npm run dist';
   const t0 = Date.now();
   // Retry pri zamku souboru: kdyz builder nemuze prepsat app.asar, protoze stara
