@@ -910,8 +910,9 @@ ipcMain.handle('tools:exec', async (_, data) => {
       // do logu by se jen hromadily a přehlušily skutečné problémy.
       // ZAM[ÍI]TNUTO: guardy píšou ZAMITNUTO bez diakritiky, musí to sedět obojí.
       const intentional = /^\s*ZAM[ÍI]TNUTO|not launching \(no system dialog\)|does not exist/i.test(out);
-      // Sonda ("dir /b x 2>nul") končí exit 1 záměrně, když složka není — to není chyba.
-      const probe = d.tool === 'shell' && /\b2>nul\b|\/dev\/null|\bif exist\b|\bwhere\b|\bwhich\b/i.test(cmd);
+      // Sonda ("dir /b x 2>nul", "tasklist | findstr ...") končí exit 1 záměrně, když nic
+      // nenajde — to není chyba, jen odpověď "nebeží / neexistuje".
+      const probe = d.tool === 'shell' && /\b2>nul\b|\/dev\/null|\bif exist\b|\bwhere\b|\bwhich\b|\bfindstr\b/i.test(cmd);
       // `git rev-parse` mimo repo končí exit 128 ("not a git repository") — běžný
       // stav u projektu bez gitu, ne chyba aplikace (v logu to dělalo jen šum).
       const notRepo = d.tool === 'shell' && /(^|\s)git\s+rev-parse/i.test(cmd) && /\[exit 128\]/i.test(out);

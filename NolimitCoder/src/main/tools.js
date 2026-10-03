@@ -218,7 +218,18 @@ function expandEnvVars(p) {
   return s;
 }
 function resolveTarget(root, p, fullAccess) {
-  const raw = expandEnvVars(String(p || ''));
+  let raw = expandEnvVars(String(p || ''));
+  if (!path.isAbsolute(raw) && root) {
+    // Model občas zopakuje jméno projektové složky ("PAXI 1/main.js" při rootu
+    // "...\PAXI 1") → vznikla by vnořená složka PAXI 1\PAXI 1 a zápis "se neuložil".
+    // První segment shodný se jménem rootu se škrtá (legitimní vnořená složka
+    // stejného jména je prakticky vyloučená; známé složky typu Documents se neškrtají).
+    const pre = raw.replace(/\\/g, '/').split('/').filter(s => s && s !== '.');
+    const base0 = path.basename(path.resolve(String(root))).toLowerCase();
+    if (pre.length > 1 && base0 && pre[0].toLowerCase() === base0 && !knownFolders()[foldKey(pre[0])]) {
+      raw = pre.slice(1).join('/');
+    }
+  }
   let abs;
   if (path.isAbsolute(raw)) {
     abs = path.normalize(raw);
@@ -2314,19 +2325,55 @@ async function execBuildExe(dir, opts) {
     step('node_modules OK', true, 'instalace se nepreskakuje, jen neni potreba');
   }
   // --- Zabij bezici instance aplikace (builder jinak neprepise app.asar: "file is used by another process") ---
+  // taskkill muze selhat potichu (napr. proces bezi jako SPRAVCE a my ne -> "Access denied").
+  // Proto se po killu OVERUJE pres tasklist, jestli proces fakt skoncil. Kdyz prezil
+  // a taskkill hlasil odepreni pristupu, nema smysl cekat 60 s — rovnou se rekne proc.
+  const deniedKill = new Set();
+  const taskkillOne = async (kn) => {
+    try {
+      const k = await runCmdLong(`taskkill /IM "${kn}" /F`, dir, 10000);
+      const o = String((k && k.output) || '');
+      if (/access denied|odep[řr]en/i.test(o)) { deniedKill.add(kn); return 'denied'; }
+      if (/SUCCESS|ÚSPĚCH/i.test(o)) return 'killed';
+      return 'missing';
+    } catch { return 'error'; }
+  };
+  // tasklist je lokalizovany do cestiny ("Nazev bitove kopie"), takze se na nazvy
+  // sloupcu neda spolehnout. CSV format je ale vsude stejny: "jmeno.exe","PID",...
+  // POZOR: /FI "IMAGENAME eq ..." se nesmi pouzit — pres cmd.exe /s /c se vnitrni
+  // uvozovky rozbiji a tasklist hlasi "Invalid argument/option - 'eq'". Misto toho
+  // se vypise vsechno a hleda se v tom (vystup ma par desitek radku).
+  const procRunning = async (kn) => {
+    try {
+      const t = await runCmdLong('tasklist /FO CSV /NH', dir, 15000);
+      if (!t || t.ok !== true) return true; // tasklist selhal -> konzervativne "asi bezi"
+      return String(t.output || '').toLowerCase().includes('"' + String(kn).toLowerCase() + '"');
+    } catch { return true; }
+  };
+  let survivors = [];
   try {
     const killBeforeBuild = new Set();
     try { for (const e of listExeFiles(path.join(dir, 'dist'))) killBeforeBuild.add(path.basename(e.path)); } catch {}
     const prodName = String((pkg.build && pkg.build.productName) || pkg.productName || pkg.name || '').trim();
     if (prodName) { killBeforeBuild.add(prodName + '.exe'); killBeforeBuild.add(prodName.replace(/[^A-Za-z0-9]+/g, '') + '.exe'); }
     for (const kn of killBeforeBuild) {
-      try { await runCmdLong(`taskkill /IM "${kn}" /F`, dir, 10000); } catch {}
+      try { await taskkillOne(kn); } catch {}
     }
     if (killBeforeBuild.size) step('Bezici instance ukonceny', true, [...killBeforeBuild].join(', '));
     await new Promise(r => setTimeout(r, 800));
-  } catch {}
+    for (const kn of killBeforeBuild) {
+      try { if (await procRunning(kn)) survivors.push(kn); } catch {}
+    }
+    // Proces prezil a system odmitl kill (bezi jako spravce) -> 60s cekani by jen
+    // zralo kola modelu. Fail hned, s presnym duvodem.
+    const deniedSurv = survivors.filter(n => deniedKill.has(n));
+    if (deniedSurv.length) {
+      return fail('Beziaci proces ' + deniedSurv.join(', ') + ' se nedal ukoncit (system odmitl pristup — proces bezi jako SPRAVCE). Zavri ho rucne ve Spravci uloh, nebo spust NolimitCoder jako spravce a build_exe zavolej znovu. Cekani by nepomohlo, proto se neceka.');
+    }
+  } catch (e) { if (String((e && e.message) || '').includes('BUILD SELHAL')) throw e; }
   // --- Pockat na odemceni app.asar (Explorer nahled / antivirus / dobihajici proces) ---
   // Slepy build do zamku jen plytva minutami. Nejdriv probe, pak teprve builder.
+  // (Sem se dojde, jen kdyz zadny prezivsi proces nebyl zamitnut — jinak by to uz skoncilo vyse.)
   try {
     const lockProbe = [
       path.join(dir, 'dist', 'win-unpacked', 'resources', 'app.asar')
@@ -2335,10 +2382,18 @@ async function execBuildExe(dir, opts) {
       const locked = lockProbe.filter(p => isFileLocked(p));
       if (!locked.length) break;
       step('Soubor zamcen', true, path.basename(locked[0]) + ' drzi jiny proces - cekam ' + ((li + 1) * 10) + ' s (pokus ' + (li + 1) + '/6)');
-      try { for (const e of listExeFiles(path.join(dir, 'dist'))) { try { await runCmdLong(`taskkill /IM "${path.basename(e.path)}" /F`, dir, 10000); } catch {} } } catch {}
+      try { for (const e of listExeFiles(path.join(dir, 'dist'))) { try { await taskkillOne(path.basename(e.path)); } catch {} } } catch {}
       await new Promise(r => setTimeout(r, 10000));
       if (li === 5 && lockProbe.some(p => isFileLocked(p))) {
-        return fail('Soubor je po 60 s porad zamceny: ' + locked.join(', ') + '. Zavri aplikaci a okno Exploreru se slozkou dist a spust build_exe znovu.');
+        const still = [];
+        try {
+          const names = new Set();
+          try { for (const e of listExeFiles(path.join(dir, 'dist'))) names.add(path.basename(e.path)); } catch {}
+          for (const kn of names) { try { if (await procRunning(kn)) still.push(kn); } catch {} }
+        } catch {}
+        return fail('Soubor je po 60 s porad zamceny: ' + locked.join(', ') + '.'
+          + (still.length ? ' Porad bezi: ' + still.join(', ') + ' — zavri je ve Spravci uloh.' : ' Zadny exe uz nebezi, takze zamek drzi neco jineho (okno Exploreru se slozkou dist, nahled, antivirus).')
+          + ' Pak spust build_exe znovu.');
       }
     }
   } catch (e) { if (String((e && e.message) || '').includes('BUILD SELHAL')) throw e; }

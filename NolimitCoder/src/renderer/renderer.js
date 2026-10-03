@@ -1084,7 +1084,6 @@ async function renderSideTab(tab) {
 async function renderRunCard(body, abs, autoLaunch) {
   const name = baseName(abs);
   const short = name.replace(/\.exe$/i, '');
-  const escRx = short.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   body.innerHTML = '<div class="sp-run"><div class="sp-run-name">' + escapeHtml(name) + '</div>'
     + '<div class="sp-run-status" data-st>Stav: zjišťuji…</div>'
     + '<div class="sp-run-row"><button class="primary-btn" data-a="run">Spustit</button>'
@@ -1093,8 +1092,10 @@ async function renderRunCard(body, abs, autoLaunch) {
   const st = body.querySelector('[data-st]');
   const refresh = async () => {
     try {
-      const r = await window.api.toolsExec({ tool: 'shell', args: { command: 'tasklist /FI "IMAGENAME eq ' + short + '.exe"' }, root: prefs.activeProject, fullAccess: true });
-      const on = r && r.ok && new RegExp(escRx + '\\.exe', 'i').test(String(r.output || ''));
+      // Bez /FI filtru: ten se pres cmd.exe rozbiji na citacich ("Invalid argument/option").
+      // Vypise se vsechno (CSV) a hleda se presne "jmeno.exe" v uvozovkach.
+      const r = await window.api.toolsExec({ tool: 'shell', args: { command: 'tasklist /FO CSV /NH' }, root: prefs.activeProject, fullAccess: true });
+      const on = r && r.ok && String(r.output || '').toLowerCase().includes('"' + String(short).toLowerCase() + '.exe"');
       if (st) { st.textContent = on ? 'Stav: běží ✓' : 'Stav: neběží'; st.classList.toggle('on', !!on); }
       return !!on;
     } catch { if (st) st.textContent = 'Stav: neznámý'; return false; }
