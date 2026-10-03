@@ -125,6 +125,7 @@ ok('lokalni builder bin (.bin)', tsrc.includes('.bin') && tsrc.includes('electro
 ok('zadne hole npx (sileny major)', !/npx electron-builder/.test(tsrc));
 ok('plny vystup do souboru (build-fail-)', tsrc.includes('build-fail-'));
 ok('output vzdy dist (ne release)', tsrc.includes("directories.output ' + pkg.build.directories.output + ' -> dist") || tsrc.includes('directories.output -> dist'));
+ok('manual build poznan (exe novejsi nez zdroje)', tsrc.includes('novejsi nez vsechny zdroje'));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
