@@ -1854,6 +1854,12 @@ async function runAgent(convo, intent) {
   const didWork = convoDidWork(convo);
   const isQuestion = intent === 'chat' && !didWork;
   const effMode = isQuestion ? 'chat' : 'build';
+  // Otazka uprostred pracovni konverzace (napr. "kde je .exe?"): model ma plne
+  // nastroje, ale ODPOVIDAT ma, ne stavet. Bez toho zacne misto odpovedi prohledavat
+  // disk a zapisovat nesouvisejici soubory.
+  const QA_DIRECTIVE = (intent === 'chat' && didWork)
+    ? '\n[OTÁZKA, ne úkol: uživatel se na něco ptá — ODPOVĚZ stručně textem. Nic nezapisuj (žádné write_file/append_file/edit_file), nic nebuilduj (žádné build_exe/scaffold_electron), nic neinstaluj. Cesty k souborům si ověř čtením (list_dir/glob_file/file_info), ne hádáním. Když se ptá, kde je výsledek, najdi ho a napiš přesnou cestu.]'
+    : '';
   // u otázky běží build agent s omezenou sadou nástrojů (jen čtení + dotaz)
   let toolSet = (effMode === 'build') ? ALL_TOOLS.slice() : READ_TOOLS.slice();
   if (didWork && intent === 'chat') dlog('intent', { convoId: convo.id, was: 'chat', forced: 'build', why: 'conversation already has write/exec calls' });
@@ -1919,7 +1925,7 @@ async function runAgent(convo, intent) {
       // Poslední krok: nástroje zmizí, model jen shrňuje.
       const lastStep = rounds >= maxRounds;
       // System message = jen kontext projektu (prázdné se do promptu vůbec nedává).
-      const sysText = projCtx + stepNotice(rounds);
+      const sysText = projCtx + QA_DIRECTIVE + stepNotice(rounds);
       const msgs = sysText ? [{ role: 'system', content: sysText }] : [];
       // Model má 1M kontextu — posíláme mu mnohem víc historie než dřív (bylo jen 30 zpráv,
       // tedy ~2 % okna). Navíc hlídáme odhad velikosti promptu, aby se to nevešlo do limitu.
@@ -2224,7 +2230,7 @@ async function runAgent(convo, intent) {
             paintActivity('Zkouším to znovu…');
             continue;
           }
-          const s = buildRunSummary(runToolMsgs(convo), lastErr, lastUserText(convo));
+          const s = buildRunSummary(runToolMsgs(convo), lastErr, lastUserText(convo), true);
           if (s) { finalText = s; dlog('final', { kind: 'stale-break', rounds }); break; }
         }
       }
@@ -2379,9 +2385,10 @@ async function runAgent(convo, intent) {
   }
 }
 /* Deterministické shrnutí úkolu Z DAT (bez modelu — ten by zase jen něco slíbil) */
-function buildRunSummary(toolMsgs, lastErr, userText) {
+function buildRunSummary(toolMsgs, lastErr, userText, stuck) {
   /* Závěrečný souhrn běhu — vždy s emoji, co se stalo a co se udělalo,
-     každá položka na vlastním řádku. Lehce delší, lidsky, česky. */
+     každá položka na vlastním řádku. Lehce delší, lidsky, česky.
+     stuck=true (stale-break): NIKDY netvrdit hotovo — jen kde to vázne a kde co je. */
   const ms = (toolMsgs || []).filter(m => !m.skipped);
   if (!ms.length) return '';
   const uniq = (a) => [...new Set(a)];
@@ -2413,8 +2420,14 @@ function buildRunSummary(toolMsgs, lastErr, userText) {
     lines.push('');
     lines.push('💡 Zkus to poslat znovu — nebo napiš, co má být jinak.');
   } else if (didWork) {
-    lines.push('✅ Hotovo! ' + (req ? 'Požadavek "' + req + '" je splněný.' : 'Práce je hotová.'));
-    lines.push('');
+    if (stuck) {
+      lines.push('⚠️ Nedokončeno — zasekl jsem se v kruhu (opakované hledání/čtení bez výsledku).');
+      if (req) lines.push('📩 Požadavek byl: "' + req + '"');
+      lines.push('');
+    } else {
+      lines.push('✅ Hotovo! ' + (req ? 'Požadavek "' + req + '" je splněný.' : 'Práce je hotová.'));
+      lines.push('');
+    }
     if (writes.length) {
       lines.push(writes.length === 1 ? '📝 Zapsaný soubor:' : '📝 Zapsané soubory (' + writes.length + '):');
       writes.forEach(w => lines.push('• ' + w));

@@ -623,8 +623,15 @@ function runCmdKind(kind, cmd, cwd, timeoutMs, cancelKey) {
         resolve({ ok: true, output: (out.trim() || "(no output)") + "\n[exit 0]", launched: true, incompatible });
       });
     // Stop tlacitko: bezici prikaz musi jit zabit (viz cancelToolsFor).
+    // PID se pamatuje i pro pristi build (sirotci po Stopu uprostred buildu).
     let cid = null;
-    try { if (child && child.pid) { cid = 'k' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36); activeProcs.set(cid, { child, pid: child.pid, key: String(cancelKey || cwd || '') }); } } catch {}
+    try {
+      if (child && child.pid) {
+        cid = 'k' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+        activeProcs.set(cid, { child, pid: child.pid, key: String(cancelKey || cwd || '') });
+        rememberPid(cancelKey || cwd, child.pid);
+      }
+    } catch {}
     void child;
   });
 }
@@ -2112,6 +2119,65 @@ function findHtmlDuplicates(html) {
 // Bezici shell procesy: cid -> {child, pid, key}. Stop tlacitko je pres
 // cancelToolsFor zabije (klic = projektova slozka).
 const activeProcs = new Map();
+// Vsechny PIDs, ktere jsme pro slozku kdy spustili (i davno skoncene).
+// build_exe je na zacatku pobije — resi sirotky po Stopu uprostred buildu
+// (stary builder by jinak drzel app.asar a KAZDY dalsi build by padl na zamku).
+const dirProcs = new Map(); // rootKey -> Set<pid>
+function rememberPid(key, pid) {
+  try {
+    if (!pid) return;
+    const k = String(key || '');
+    if (!k) return;
+    let s = dirProcs.get(k);
+    if (!s) { s = new Set(); dirProcs.set(k, s); }
+    s.add(Number(pid));
+    if (s.size > 200) { const a = [...s].slice(-200); dirProcs.set(k, new Set(a)); }
+  } catch {}
+}
+// Snapshot procesu: pid -> {img, cmd}. Jedno volani na zacatku buildu (~1 s).
+async function procsSnapshot() {
+  const map = new Map();
+  try {
+    const t = await runCmdLong('powershell -NoProfile -Command "Get-CimInstance Win32_Process | ForEach-Object { ($_.ProcessId).ToString() + chr(124) + $_.Name + chr(124) + $_.CommandLine }"', process.cwd(), 30000);
+    if (!t || t.ok !== true) return map;
+    for (const line of String(t.output || '').split('\n')) {
+      const a = line.indexOf('|'), b = line.indexOf('|', a + 1);
+      if (a < 0 || b < 0) continue;
+      const pid = Number(line.slice(0, a).trim());
+      if (!pid) continue;
+      map.set(pid, { img: line.slice(a + 1, b).trim().toLowerCase(), cmd: line.slice(b + 1) });
+    }
+  } catch {}
+  return map;
+}
+// Pobij sirotky PO NASICH predchozich buildech ve slozce. Zabiji se jen procesy,
+// kterekazdym coulem vypadaji jako nase buildry (node s electron-builder/npm v cmdline,
+// launch-test exe s cestou projektu) — nikdy nic ciziho. PID se na Windows recykluje,
+// takze samotne cislo nestaci, vzdy se overuje i prikazova radka.
+async function killOwnOrphans(dir) {
+  const key = String(dir || '');
+  const set = dirProcs.get(key);
+  if (!set || !set.size) return 0;
+  let n = 0;
+  try {
+    const snap = await procsSnapshot();
+    for (const pid of [...set]) {
+      try {
+        const e = snap.get(Number(pid));
+        if (!e) continue; // uz nebezi
+        const cmd = String(e.cmd || '');
+        const ours = (e.img === 'node.exe' && /electron-builder|npm/i.test(cmd))
+          || ((e.img === 'cmd.exe' || e.img === 'powershell.exe' || e.img === 'pwsh.exe') && /npm install|electron-builder/i.test(cmd))
+          || (e.img !== '' && /electron/i.test(e.img) && cmd.toLowerCase().includes(key.toLowerCase()));
+        if (!ours) continue;
+        try { require('child_process').execFile('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { timeout: 8000, windowsHide: true }, () => {}); n++; } catch {}
+      } catch {}
+    }
+  } catch {}
+  try { dirProcs.delete(key); } catch {}
+  if (n) await new Promise(r => setTimeout(r, 800));
+  return n;
+}
 // Kooperativni stop pro build_exe (faze bez child procesu, napr. cekani na zamek):
 // rootKey -> {cancelled}. tools:cancel nastavi cancelled=true.
 const buildCancelTokens = new Map();
@@ -2140,8 +2206,10 @@ function runCmdLong(cmd, cwd, timeoutMs, cancelKey) {
         });
       // Stop tlacitko musi umet zabit i bezici prikaz (jinak agent "furt neco analyzuje").
       // Klic = projektova slozka, at se nerusi nastroje jinemu projektu.
+      // PID se pamatuje i pro pristi build (sirotci po Stopu uprostred buildu).
       if (child && child.pid) {
         try { activeProcs.set(cid, { child, pid: child.pid, key: String(cancelKey || cwd || '') }); } catch {}
+        try { rememberPid(cancelKey || cwd, child.pid); } catch {}
       }
     } catch (e) {
       done(() => resolve({ ok: false, code: 'error', output: 'Error: ' + (e && e.message) }));
@@ -2393,6 +2461,22 @@ async function execBuildExe(dir, opts) {
   } catch {}
   const isCancelled = () => { try { return !!(opts.cancelled && opts.cancelled()); } catch { return false; } };
   const failCancel = () => fail('Zruseno uzivatelem (Stop). Rozdelany build se zahodil, dist zustal jak byl.');
+  // Jmena, pod kterymi muze bezet stara instance (dist exe + productName varianty).
+  // Pouziva se pro kill i pro overeni — drive se overovala jen jmena z dist a prezivsi
+  // proces s jinym jmenem (treba bez mezery) prosel jako "zadny exe nebezi".
+  const killNames = new Set();
+  try { for (const e of listExeFiles(path.join(dir, 'dist'))) killNames.add(path.basename(e.path)); } catch {}
+  try {
+    const pn0 = String((pkg.build && pkg.build.productName) || pkg.productName || pkg.name || '').trim();
+    if (pn0) { killNames.add(pn0 + '.exe'); killNames.add(pn0.replace(/[^A-Za-z0-9]+/g, '') + '.exe'); }
+  } catch {}
+  // Sirotci po predchozich buildech (Stop uprostred buildu, padly kill) drzi app.asar
+  // a kazdy dalsi build by padl na zamku. Pobijeme je driv, nez cokoliv saha na dist.
+  try {
+    const orph = await killOwnOrphans(dir);
+    if (orph > 0) step('Sirotci po minulych buildech ukonceni', true, orph + '× proces');
+  } catch {}
+  if (isCancelled()) return failCancel();
   if (isCancelled()) return failCancel();
   if (needInstall) {
     step('npm install potreba', true, 'node_modules chybi nebo je starsi nez package.json');
@@ -2431,16 +2515,12 @@ async function execBuildExe(dir, opts) {
   };
   let survivors = [];
   try {
-    const killBeforeBuild = new Set();
-    try { for (const e of listExeFiles(path.join(dir, 'dist'))) killBeforeBuild.add(path.basename(e.path)); } catch {}
-    const prodName = String((pkg.build && pkg.build.productName) || pkg.productName || pkg.name || '').trim();
-    if (prodName) { killBeforeBuild.add(prodName + '.exe'); killBeforeBuild.add(prodName.replace(/[^A-Za-z0-9]+/g, '') + '.exe'); }
-    for (const kn of killBeforeBuild) {
+    for (const kn of killNames) {
       try { await taskkillOne(kn); } catch {}
     }
-    if (killBeforeBuild.size) step('Bezici instance ukonceny', true, [...killBeforeBuild].join(', '));
+    if (killNames.size) step('Bezici instance ukonceny', true, [...killNames].join(', '));
     await new Promise(r => setTimeout(r, 800));
-    for (const kn of killBeforeBuild) {
+    for (const kn of killNames) {
       try { if (await procRunning(kn)) survivors.push(kn); } catch {}
     }
     // Proces prezil a system odmitl kill (bezi jako spravce) -> 60s cekani by jen
@@ -2462,7 +2542,7 @@ async function execBuildExe(dir, opts) {
       if (!locked.length) break;
       if (isCancelled()) return failCancel();
       step('Soubor zamcen', true, path.basename(locked[0]) + ' drzi jiny proces - cekam ' + ((li + 1) * 10) + ' s (pokus ' + (li + 1) + '/6)');
-      try { for (const e of listExeFiles(path.join(dir, 'dist'))) { try { await taskkillOne(path.basename(e.path)); } catch {} } } catch {}
+      try { for (const kn of killNames) { try { await taskkillOne(kn); } catch {} } } catch {}
       // 10 s cekani po 1 s, at Stop zabere do sekundy (ne az po deseti).
       for (let s = 0; s < 10; s++) {
         await new Promise(r => setTimeout(r, 1000));
@@ -2472,9 +2552,7 @@ async function execBuildExe(dir, opts) {
       if (li === 5 && lockProbe.some(p => isFileLocked(p))) {
         const still = [];
         try {
-          const names = new Set();
-          try { for (const e of listExeFiles(path.join(dir, 'dist'))) names.add(path.basename(e.path)); } catch {}
-          for (const kn of names) { try { if (await procRunning(kn)) still.push(kn); } catch {} }
+          for (const kn of killNames) { try { if (await procRunning(kn)) still.push(kn); } catch {} }
         } catch {}
         return fail('Soubor je po 60 s porad zamceny: ' + locked.join(', ') + '.'
           + (still.length ? ' Porad bezi: ' + still.join(', ') + ' — zavri je ve Spravci uloh.' : ' Zadny exe uz nebezi, takze zamek drzi neco jineho (okno Exploreru se slozkou dist, nahled, antivirus).')
@@ -3045,7 +3123,7 @@ function helperState() {
 module.exports = {
   BLOCKED_PREFIXES, SKIP_DIRS, TEXT_EXT, COMPILERS, TOOLCHAINS, TOOL_GROUPS, TOOL_ALIAS, CMD_TOOL,
   normToolName, foldKey, knownFolders, resolveTarget, canonArgs, splitArgs, normalizeShell,
-  runCmd, runArgv, runCmdAdmin, globWalk, fetchText, diffLines, execTool, cancelToolsFor,
+  runCmd, runArgv, runCmdAdmin, globWalk, fetchText, diffLines, execTool, cancelToolsFor, killOwnOrphans, hashProjectState,
   scanEnv, envReport, ensureTools, ensureForShell, detectProject, detectIntent, requiredForCommand, resolveNeed, installTool,
   setProgressHook, cancelDownload, dbgLog,
   execBuildExe, collectHtmlRefs, findHtmlDuplicates, launchTestExe, listExeFiles, runCmdLong,
