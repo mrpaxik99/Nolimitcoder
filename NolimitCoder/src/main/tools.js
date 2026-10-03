@@ -2460,11 +2460,11 @@ async function execBuildExe(dir, opts) {
   pkg.build = pkg.build || {};
   pkg.build.directories = pkg.build.directories || {};
   if (!pkg.build.directories.output) { pkg.build.directories.output = 'dist'; fixed.push('directories.output'); }
-  // Vystup MUSI byt dist (pripadne nouzove dist2) — cela pipeline (probe zamku,
-  // skip pri beze zmeny, verifikace, BUILD_STATE) pocita jen s nimi. Cizi output
-  // (napr. release) by znamenalo: build jinam + build_exe hlasi stare dist.
+  // Vystup MUSI byt dist — cela pipeline (probe zamku, skip pri beze zmeny,
+  // verifikace, BUILD_STATE) pocita jen s nim. Cizi output (release, dist2)
+  // by znamenal: build jinam + build_exe hlasi stare dist.
   // (Stalo se: agent prepsal output na release a exe skoncilo mimo dist.)
-  else if (pkg.build.directories.output !== 'dist' && pkg.build.directories.output !== 'dist2') {
+  else if (pkg.build.directories.output !== 'dist') {
     fixed.push('directories.output ' + pkg.build.directories.output + ' -> dist');
     pkg.build.directories.output = 'dist';
   }
@@ -2497,10 +2497,8 @@ async function execBuildExe(dir, opts) {
   try { if (fs.existsSync(path.join(dir, 'preload.js'))) stateFiles.push('preload.js'); } catch {}
   const curHash = hashProjectState(dir, pkgTextNow, stateFiles, opts.target || '');
   const distDirEarly = path.join(dir, 'dist');
-  const dist2DirEarly = path.join(dir, 'dist2');
   let skipBuild = false, skipExe = null;
-  // Stav se hleda v dist i v dist2 (nouzovy vystup pri zamcenem dist).
-  for (const sp of [path.join(distDirEarly, BUILD_STATE), path.join(dist2DirEarly, BUILD_STATE)]) {
+  for (const sp of [path.join(distDirEarly, BUILD_STATE)]) {
     try {
       const stRaw = fs.readFileSync(sp, 'utf8');
       const st = JSON.parse(stRaw);
@@ -2523,7 +2521,7 @@ async function execBuildExe(dir, opts) {
   }
   // Rucni build mimo build_exe (shell `npm run dist`) nezapise BUILD_STATE —
   // pak by nasledne build_exe stavilo ZNOVU, i kdyz je exe cerstve. Proto zalozni
-  // test: je-li nejake exe v dist/dist2 NOVEJSI nez vsechny zdroje, nic se nezmenilo
+  // test: je-li nejake exe v dist NOVEJSI nez vsechny zdroje, nic se nezmenilo
   // a rebuild se preskoci (stav se pri tom dopise, takze priste staci primarni test).
   if (!skipBuild) {
     try {
@@ -2551,7 +2549,7 @@ async function execBuildExe(dir, opts) {
       };
       walkSrc(dir);
       let best = null;
-      for (const dd of [distDirEarly, dist2DirEarly]) {
+      for (const dd of [distDirEarly]) {
         try {
           for (const e of listExeFiles(dd)) {
             if (/setup|uninstall/i.test(path.basename(e.path))) continue;
@@ -2563,7 +2561,7 @@ async function execBuildExe(dir, opts) {
         step('Beze zmeny', true, 'exe je novejsi nez vsechny zdroje (postaveno rucne mimo build_exe) - rebuild preskocen');
         step('EXE aktualni', true, best.path + ' (' + (best.size / 1048576).toFixed(1) + ' MB)');
         try {
-          fs.writeFileSync(path.join(path.dirname(best.path).includes('dist2') ? dist2DirEarly : distDirEarly, BUILD_STATE),
+          fs.writeFileSync(path.join(distDirEarly, BUILD_STATE),
             JSON.stringify({ hash: curHash, exe: best.path, size: best.size, mtime: best.mtime, time: new Date().toISOString() }), 'utf8');
         } catch {}
         log.push('');
