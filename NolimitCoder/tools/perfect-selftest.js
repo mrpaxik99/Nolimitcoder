@@ -126,6 +126,10 @@ ok('zadne hole npx (sileny major)', !/npx electron-builder/.test(tsrc));
 ok('plny vystup do souboru (build-fail-)', tsrc.includes('build-fail-'));
 ok('output vzdy dist (ne release)', tsrc.includes("directories.output ' + pkg.build.directories.output + ' -> dist") || tsrc.includes('directories.output -> dist'));
 ok('manual build poznan (exe novejsi nez zdroje)', tsrc.includes('novejsi nez vsechny zdroje'));
+// dist2 musi byt PRYC i z kodu (nejen z komentaru) — jinak by se vystup zase roztahal.
+ok('zadne dist2 v kodu (promenne/prirazy)', !/(outName|'dist2'|"dist2")/.test(tsrc));
+ok('hash se pocita az po buildu (finalHash)', tsrc.includes('finalHash'));
+ok('zamceny dist se odlozi stranou (ne dist2)', tsrc.includes('nlc-dist-aside') && tsrc.includes('nlc-dist-old'));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
