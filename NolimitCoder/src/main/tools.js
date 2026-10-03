@@ -2505,15 +2505,22 @@ async function execBuildExe(dir, opts) {
     return { ok: true, output: log.join('\n') };
   }
   // --- npm install, kdyz je potreba (dist se bez nej nevytvori) ---
+  // Rozhoduje OBSAH zavislosti, ne datum package.json — to se meni i pri editaci
+  // verzi/skriptu, ktera na node_modules nema vliv. Jinak by se pri kazdem pokusu
+  // (treba po padlem buildu) zbytecne preinstalovavalo.
   const nmDir = path.join(dir, 'node_modules');
+  const DEPS_STATE = '.nlc-deps.json';
+  const depsKey = () => {
+    try { return JSON.stringify({ d: (pkg && pkg.dependencies) || {}, dd: (pkg && pkg.devDependencies) || {} }); }
+    catch { return ''; }
+  };
   let needInstall = !fs.existsSync(path.join(nmDir, 'electron', 'package.json')) || !fs.existsSync(path.join(nmDir, 'electron-builder', 'package.json'));
   try {
     if (!needInstall) {
-      const pkgT = fs.statSync(pkgFile).mtimeMs;
-      const nmT = fs.statSync(nmDir).mtimeMs;
-      if (pkgT > nmT) needInstall = true;
+      const st = JSON.parse(fs.readFileSync(path.join(nmDir, DEPS_STATE), 'utf8'));
+      if (!st || st.key !== depsKey()) needInstall = true;
     }
-  } catch {}
+  } catch { needInstall = true; }
   const isCancelled = () => { try { return !!(opts.cancelled && opts.cancelled()); } catch { return false; } };
   const failCancel = () => fail('Zruseno uzivatelem (Stop). Rozdelany build se zahodil, dist zustal jak byl.');
   // Jmena, pod kterymi muze bezet stara instance (dist exe + productName varianty).
@@ -2534,13 +2541,14 @@ async function execBuildExe(dir, opts) {
   if (isCancelled()) return failCancel();
   if (isCancelled()) return failCancel();
   if (needInstall) {
-    step('npm install potreba', true, 'node_modules chybi nebo je starsi nez package.json');
+    step('npm install potreba', true, 'node_modules chybi nebo se zmenily zavislosti');
     const ins = await runCmdLong('npm install', dir, 600000, dir);
     if (isCancelled()) return failCancel();
     if (!ins.ok) return fail('npm install selhal:\n' + ins.output);
+    try { fs.writeFileSync(path.join(nmDir, DEPS_STATE), JSON.stringify({ key: depsKey(), time: new Date().toISOString() }), 'utf8'); } catch {}
     step('npm install', true);
   } else {
-    step('node_modules OK', true, 'instalace se nepreskakuje, jen neni potreba');
+    step('node_modules OK', true, 'zavislosti stejne — instalace netreba');
   }
   // --- Zabij bezici instance aplikace (builder jinak neprepise app.asar: "file is used by another process") ---
   // taskkill muze selhat potichu (napr. proces bezi jako SPRAVCE a my ne -> "Access denied").
@@ -2562,10 +2570,19 @@ async function execBuildExe(dir, opts) {
   // uvozovky rozbiji a tasklist hlasi "Invalid argument/option - 'eq'". Misto toho
   // se vypise vsechno a hleda se v tom (vystup ma par desitek radku).
   const procRunning = async (kn) => {
+    // findstr predfiltr: plny tasklist ma pres 12 KB a runCmdLong ho orizne,
+    // takze by proces mohl chybet. Filtrovany vypis je maly a vejde se vzdy.
+    // Presna shoda se overuje v JS vcetne uvozovek ("x.exe" neni "x Setup 1.0.exe").
+    // findstr exit 1 = nenasel nic = proces nebezi (neni to chyba).
+    // Jmeno se escapuje pro findstr regex (tecka/zavorky v nazvu exe).
+    const esc = String(kn).replace(/([.[\]^$*\\])/g, '\\$1');
     try {
-      const t = await runCmdLong('tasklist /FO CSV /NH', dir, 15000);
-      if (!t || t.ok !== true) return true; // tasklist selhal -> konzervativne "asi bezi"
-      return String(t.output || '').toLowerCase().includes('"' + String(kn).toLowerCase() + '"');
+      const t = await runCmdLong(`tasklist /FO CSV /NH | findstr /I /C:"${esc}"`, dir, 15000);
+      const out = String((t && t.output) || '');
+      if (out.toLowerCase().includes('"' + String(kn).toLowerCase() + '"')) return true;
+      if (t && t.ok === false && String(t.code || '') === 'exit 1' && !/\[stderr\]/i.test(out)) return false;
+      if (t && t.ok === true) return false;
+      return true; // nejiste (timeout/chyba) -> konzervativne "asi bezi"
     } catch { return true; }
   };
   let survivors = [];
@@ -2609,8 +2626,28 @@ async function execBuildExe(dir, opts) {
         try {
           for (const kn of killNames) { try { if (await procRunning(kn)) still.push(kn); } catch {} }
         } catch {}
-        return fail('Soubor je po 60 s porad zamceny: ' + locked.join(', ') + '.'
-          + (still.length ? ' Porad bezi: ' + still.join(', ') + ' — zavri je ve Spravci uloh.' : ' Zadny exe uz nebezi, takze zamek drzi neco jineho (okno Exploreru se slozkou dist, nahled, antivirus).')
+        // Zadne exe nebezi a zamek drzi dal? Typicky docasny scan (Defender prochazi
+        // cerstvy build, indexace) — ten sam prejde. Misto padu a slepeho retry kola
+        // modelu (kazdy pokus = nove kolo + npm install) se pocka az 4 minuty v jednom
+        // volani. Kola modelu se nezrou a build pak rovnou probehne.
+        if (!still.length) {
+          let extra = 0;
+          for (; extra < 8; extra++) {
+            step('Soubor porad zamcen (bez procesu)', true, 'ceka se na uvolneni — ' + ((extra + 1) * 30) + ' s (scan to vetsinou pusti sam)');
+            for (let s = 0; s < 30; s++) {
+              await new Promise(r => setTimeout(r, 1000));
+              if (isCancelled()) return failCancel();
+              if (!lockProbe.some(p => isFileLocked(p))) break;
+            }
+            if (!lockProbe.some(p => isFileLocked(p))) break;
+          }
+          if (!lockProbe.some(p => isFileLocked(p))) {
+            step('Soubor odemcen', true, 'scan skoncil, pokracuje se v buildu');
+            break;
+          }
+        }
+        return fail('Soubor je po 5 minutach porad zamceny: ' + locked.join(', ') + '.'
+          + (still.length ? ' Porad bezi: ' + still.join(', ') + ' — zavri je ve Spravci uloh.' : ' Zadny exe uz nebezi. Zamek tak dlouho drzi typicky antivirus — pridej slozku projektu do vyluk Windows Defenderu (spustit jako spravce) a zavri okno Exploreru se slozkou dist.')
           + ' DULEZITE: chyba NENI v kodu — NEUPRAVUJ zadne soubory (ani index.html), nic to nespravi. Jen pockej a zavolej build_exe znovu.');
       }
     }

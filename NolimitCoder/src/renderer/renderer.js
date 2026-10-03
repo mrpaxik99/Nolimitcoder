@@ -82,7 +82,7 @@ const READ_TOOLS = [
    interrogative form wins over the infinitive, a direct command is always a task. Unclear = question.
    DVOJJAZYČNĚ (CS + EN): uživatel píše česky, ale slovník akcí byl jen anglický —
    české "udělej"/"vytvoř" padalo do chatu, takže model neměl ani jeden zapisovací nástroj. */
-const ACT_WORDS = /(\bmake|\bcreate|\bbuild|\bwrite|\bfix|\brepair|\badd|\bupdate|\bchange|\bremove|\bdelete|\brefactor|\bimplement|\bgenerate|\binstall|\bset up|\buninstall|\bcompile|\brebuild|\bprogram|\brewrite|\bextend|\bfinish|\bcomplete|\brun|\blaunch|\bdeploy|\brename|\bmove|\bcopy|\bdownload|\btest|\bscaffold|\bconvert|\boptimi[sz]e|\btranslate|\bformat|\brename|\bi want you to|\bi need|\bi would like|udělej|udelej|udělat|udelat|vytvoř|vytvor|vytvořit|vytvorit|naprogramuj|naprogramuj|napiš|napis|napsat|napíš|oprav|opravit|přidej|pridej|přidat|pridat|smazat|smaz|uprav|upravit|změň|zmen|změnit|zmenit|přepis|přepiš|prepis|prepiš|dodělej|dodelej|dokonči|dokonci|vygeneruj|vygeneruj|spusť|spust|spustit|nainstaluj|nainstal|stáhni|stahni|stažení|stazeni|přelož|preloz|překlop|preklop|vyhledej|vyhledat|implementuj|refaktoruj|oprav mi|udělej mi|vytvoř mi|napiš mi)/i;
+const ACT_WORDS = /(\bmake|\bcreate|\bbuild|\bwrite|\bfix|\brepair|\badd|\bupdate|\bchange|\bremove|\bdelete|\brefactor|\bimplement|\bgenerate|\binstall|\bset up|\buninstall|\bcompile|\brebuild|\bprogram|\brewrite|\bextend|\bfinish|\bcomplete|\brun|\blaunch|\bdeploy|\brename|\bmove|\bcopy|\bdownload|\btest|\bscaffold|\bconvert|\boptimi[sz]e|\btranslate|\bformat|\brename|\bi want you to|\bi need|\bi would like|udělej|udelej|udělat|udelat|vytvoř|vytvor|vytvořit|vytvorit|naprogramuj|naprogramuj|napiš|napis|napsat|napíš|oprav|opravit|přidej|pridej|přidat|pridat|smazat|smaz|uprav|upravit|změň|zmen|změnit|zmenit|přepis|přepiš|prepis|prepiš|dodělej|dodelej|dokonči|dokonci|vygeneruj|vygeneruj|spusť|spust|spustit|nainstaluj|nainstal|stáhni|stahni|stažení|stazeni|přelož|preloz|překlop|preklop|vyhledej|vyhledat|implementuj|refaktoruj|oprav mi|udělej mi|vytvoř mi|napiš mi|zkompiluj|zkompilovat|kompiluj|kompilovat|sestav|sestavit|sestavení|sestaveni|buildni|buildnout|zbuildi|zbuildit|vybuildi|prebuilduj|prebilduj)/i;
 const ASK_WORDS = /^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know|can you explain|could you explain|is there|are there|should i|would you)\b/i;
 const ASK_WORDS_CS = /^(jak|co|proč|proc|kde|kdy|kdo|kolik|čí|či|jestli|vysvětli|vysvetli|řekni|rekni|popiš|popis|poradíš|poradis|jaký|jakou|jaky|jakou|smí|smi|můžeš|muzes|dokážeš|dokazes|který|ktery|kdovolákterý)\b/i;
 const ASK_MID_CS = /\b(jak|vysvětli|vysvetli|řekni|rekni|popiš|popis|poraď|porad|co znamená|co znamena|co je to|co je|jak se|jaký je|jaky je)\b/i;
@@ -147,7 +147,7 @@ function detectCommercialIntent(raw) {
   if (/^(how|what|why|where|when|who|which|whose|whom|how many|how much|whether|explain|describe|tell me|do you know|jak|co|proč|proc|kde|kdy|kdo|kolik|čí|či|jestli|vysvětli|vysvetli|řekni|rekni|popiš|popis|poradíš|poradis)\b/i.test(noHi)) return 'chat';
   // zadání videa → vždy úkol: video klíčová slova, rozlišení/poměr, délka, akční slovesa, delší popis
   if (/(video|\bad\b|advert|commercial|animat|intro|outro|subscribe|\blike\b|bell|logo|youtube|tiktok|reels|shorts|vertical|square|full[\s-]?hd|\bhd\b|\b4k\b|resolution|\d{3,4}\s*x\s*\d{3,4}|\b(16:9|9:16|1:1|4:3)\b|\b\d+\s*(s|sec|seconds?|min|minutes?)\b|reklam|animac|vide|odběr|odber|vertikál|vertikal|čtverec|ctverec|rozlišen|rozlisen|délk|delk|sekund|vteřin|minut)/i.test(t)) return 'build';
-  if (/(make|create|build|write|fix|repair|add|update|change|remove|delete|refactor|implement|generate|install|run|rename|move|copy|download|test|scaffold|udělej|udelej|vytvoř|vytvor|naprogramuj|napiš|napis|uprav|změň|zmen|přidej|pridej|oprav|dodělej|dodelej|vygeneruj|spusť|spust)/i.test(t)) return 'build';
+  if (/(make|create|build|write|fix|repair|add|update|change|remove|delete|refactor|implement|generate|install|run|rename|move|copy|download|test|scaffold|udělej|udelej|vytvoř|vytvor|naprogramuj|napiš|napis|uprav|změň|zmen|přidej|pridej|oprav|dodělej|dodelej|vygeneruj|spusť|spust|zkompiluj|zkompilovat|kompiluj|kompilovat|sestav|sestavit|sestavení|sestaveni|buildni|buildnout|zbuildi|zbuildit|vybuildi)/i.test(t)) return 'build';
   if (t.length > 40) return 'build'; // delší popis = zadání, ne pokec
   return detectIntent(t); // zbytek podle obecných pravidel
 }
@@ -1096,8 +1096,10 @@ async function renderRunCard(body, abs, autoLaunch) {
   const refresh = async () => {
     try {
       // Bez /FI filtru: ten se pres cmd.exe rozbiji na citacich ("Invalid argument/option").
-      // Vypise se vsechno (CSV) a hleda se presne "jmeno.exe" v uvozovkach.
-      const r = await window.api.toolsExec({ tool: 'shell', args: { command: 'tasklist /FO CSV /NH' }, root: prefs.activeProject, fullAccess: true });
+      // findstr predfiltr: plny tasklist ma pres 12 KB a osekava se, proces by mohl chybet.
+      // Hleda se presne "jmeno.exe" vcetne uvozovek; tecky v nazvu se escapuji pro findstr.
+      const esc = String(short).replace(/([.[\]^$*\\])/g, '\\$1');
+      const r = await window.api.toolsExec({ tool: 'shell', args: { command: 'tasklist /FO CSV /NH | findstr /I /C:"' + esc + '.exe"' }, root: prefs.activeProject, fullAccess: true });
       const on = r && r.ok && String(r.output || '').toLowerCase().includes('"' + String(short).toLowerCase() + '.exe"');
       if (st) { st.textContent = on ? 'Stav: běží ✓' : 'Stav: neběží'; st.classList.toggle('on', !!on); }
       return !!on;
@@ -1853,7 +1855,7 @@ async function runAgent(convo, intent) {
      zápis nebo příkaz, jde o pokračování práce → běží plný build agent. */
   const didWork = convoDidWork(convo);
   const isQuestion = intent === 'chat' && !didWork;
-  const effMode = isQuestion ? 'chat' : 'build';
+  let effMode = isQuestion ? 'chat' : 'build';
   // Otazka uprostred pracovni konverzace (napr. "kde je .exe?"): model ma plne
   // nastroje, ale ODPOVIDAT ma, ne stavet. Bez toho zacne misto odpovedi prohledavat
   // disk a zapisovat nesouvisejici soubory.
@@ -1909,6 +1911,7 @@ async function runAgent(convo, intent) {
     const readCounts = {}; // cesta -> kolikrát čtena
     let readRut = 0; // po sobě jdoucí kola, která nepřinesla nic nového (jen opakované čtení)
     let staleRounds = 0; // po sobě jdoucí kola BEZ skutečného postupu (žádný zápis/spuštění)
+    let permRejects = 0; // kolikrat model volal nastroj mimo svou sadu (pojistka proti spatne detekci)
     let roundProductive = false; // tohle kolo něco skutečně udělalo
     let readNudged = false; // direktiva proti čtecí rutině (max 1x za úkol)
     let writeDirectiveLevel = 0; // 0=žádná, 1=mírná, 2=tvrdá (čtení vypnuto)
@@ -2066,6 +2069,18 @@ async function runAgent(convo, intent) {
           convo.messages.push({ role: 'tool', tool: c.name, args: c.args, result: msg, ok: false });
           paintCard(c.name, c.args, msg, false);
           dlog('perm', { tool: c.name, effect: 'no-tool' });
+          // Pojistka proti spatne detekci: model opakovane vola zapisovaci nastroj,
+          // takze to OTÁZKA neni (napr. "zkompiluj to" spadlo do chatu). Po 2. odmitnuti
+          // mu dame plnou sadu, at nemarni kola — hlidaci pravidla (guardy) plati dal.
+          // Pocitaji se jen ZNÁMÉ nastroje; halucinovany nazev by flip nepomohl.
+          if (ALL_TOOLS.includes(c.name)) permRejects++;
+          if (permRejects >= 2 && effMode === 'chat') {
+            effMode = 'build';
+            toolSet = ALL_TOOLS.slice();
+            convo.messages.push({ role: 'user', internal: true, content: '[Oprava režimu: vypadá to na úkol, ne na otázku — dostal jsi plnou sadu nástrojů. Udělej, co uživatel chce.]' });
+            paintFooter('Rozpoznal jsem úkol — pracuji…');
+            dlog('intent', { convoId: convo.id, was: 'chat', forced: 'build', why: 'model opakovaně volá zapisovací nástroje' });
+          }
           continue;
         }
         if (c.name === 'question') {
