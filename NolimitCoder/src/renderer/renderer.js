@@ -459,6 +459,9 @@ function stopEverything(why, convoId) {
     pendingQueue.length = 0; updateQueue();
     // Zastavíme jen stream tohoto chatu — ostatní chaty v pozadí jedou dál.
     try { window.api.chatStreamAbort({ convoId: cid }); } catch { try { window.api.chatStreamAbort(); } catch {} }
+    // A hlavne: zabij bezici prikazy (shell/build) projektu — jinak agent "furt neco
+    // analyzuje", protoze ceka na nastroj, ktery nikdo nezrusil.
+    try { if (window.api.toolsCancel) window.api.toolsCancel({ root: prefs.activeProject }); } catch {}
     try { window.api.videoAbort(); } catch {}
     videoExporting = false;
     setVideoProgress('');
@@ -1101,8 +1104,14 @@ async function renderRunCard(body, abs, autoLaunch) {
     } catch { if (st) st.textContent = 'Stav: neznámý'; return false; }
   };
   const launch = async () => {
+    // Pres shell+start to hazelo "Windows nemuze nalezt '\\'" (citace/backend).
+    // open_path jde pres shell.openPath — zadne skladani prikazu, zadna chyba.
+    if (!abs) { if (st) st.textContent = 'Stav: není co spustit (prázdná cesta)'; return; }
     if (st) st.textContent = 'Stav: spouštím…';
-    try { await window.api.toolsExec({ tool: 'shell', args: { command: 'start "" "' + abs + '"' }, root: prefs.activeProject, fullAccess: true }); } catch {}
+    try {
+      const r = await window.api.toolsExec({ tool: 'open_path', args: { path: abs }, root: prefs.activeProject, fullAccess: true });
+      if (r && !r.ok) { if (st) st.textContent = 'Stav: nespustilo se (' + String(r.output || '').slice(0, 120) + ')'; return; }
+    } catch (e) { if (st) st.textContent = 'Stav: nespustilo se'; return; }
     setTimeout(refresh, 1500);
   };
   body.querySelector('[data-a="run"]').addEventListener('click', launch);
@@ -2311,9 +2320,16 @@ async function runAgent(convo, intent) {
       }
     }
     finalText = sanitizeResponse(finalText || '');
-    // Uživatel zrušil generování → žádná HTTP chyba, prosté "zastaveno".
+    // Uživatel zrušil generování → žádná HTTP chyba, prosté "zastaveno" + co se stihlo.
     if (chatState.stopRequested) {
-      if (!finalText || looksPromise(finalText) || finalText.length < 12) finalText = 'Generování bylo zastaveno.';
+      if (!finalText || looksPromise(finalText) || finalText.length < 12) {
+        finalText = '⏹ Generování zastaveno.';
+        try {
+          const done = runToolMsgs(convo).filter(m => !m.skipped && m.ok && ['write_file', 'append_file', 'edit_file'].includes(m.tool));
+          const names = [...new Set(done.map(m => String((m.args || {}).path || (m.args || {}).to || '').split(/[\\/]/).slice(-2).join('/')).filter(Boolean))];
+          if (names.length) finalText += '\n\nStihlo se zapsat:\n' + names.map(n => '• ' + n).join('\n');
+        } catch {}
+      }
     } else if (!finalText && lastErr) {
       finalText = 'Nedokončeno — ' + publicErr(lastErr) + ' Zkus to prosím znovu za chvíli.';
     }
@@ -2322,7 +2338,7 @@ async function runAgent(convo, intent) {
     convo.messages.push({ role: 'assistant', content: finalText || 'Nedostala jsem od AI žádnou odpověď (prázdný stream). Zkus to prosím poslat znovu.', thinking: lastThinking });
     saveConvos();
     // Pozadí chat NESMÍ překreslit právě otevřenou konverzaci — šeptalo by do jiného chatu.
-    if (convo.id === activeConvoId) { renderMessages(); paintFooter('Hotovo'); }
+    if (convo.id === activeConvoId) { renderMessages(); paintFooter(chatState.stopRequested ? 'Zastaveno' : 'Hotovo'); }
     renderChatList();
     playDone();
     // Video project: primárním výstupem je MP4 — po každém zápisu reklamy ho rovnou automaticky nahraj

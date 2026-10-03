@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   projectScanAsync: (dirPath) => ipcRenderer.invoke('projects:scanAsync', dirPath),
   openPath: (p) => ipcRenderer.invoke('projects:openPath', p),
   toolsExec: (data) => ipcRenderer.invoke('tools:exec', data),
+  toolsCancel: (data) => ipcRenderer.invoke('tools:cancel', data || {}),
   saveImage: (data) => ipcRenderer.invoke('img:save', data),
   cancelDownload: (id) => ipcRenderer.invoke('tools:cancel-download', id),
   debugLog: (tag, data) => { try { ipcRenderer.send('log:debug', { tag, data }); } catch {} },

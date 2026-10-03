@@ -1,6 +1,6 @@
 {
     "name":  "nolimit-coder",
-    "version":  "1.2.1",
+    "version":  "1.2.2",
     "description":  "Ultra modern Electron chat with NolimitCoder models - everything local, offline after download",
     "main":  "src/main/main.js",
     "type":  "commonjs",

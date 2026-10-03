@@ -608,6 +608,7 @@ function runCmdKind(kind, cmd, cwd, timeoutMs, cancelKey) {
         : { exe: process.platform === "win32" ? "cmd.exe" : "/bin/sh", args: process.platform === "win32" ? ["/d", "/c", c2] : ["-c", c2] };
     const child = execFile(spec.exe, spec.args,
       { cwd, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true, encoding: "buffer", ...(process.platform === "win32" && kind === "cmd" ? { windowsVerbatimArguments: true } : {}) }, (err, stdout, stderr) => {
+        try { if (cid) activeProcs.delete(cid); } catch {}
         if (err && (err.code === "ENOENT" || /not found/i.test(err.message || ""))) { resolve({ ok: false, output: "", launched: false }); return; }
         let out = decodeSmart(stdout);
         const errS = decodeSmart(stderr);
@@ -621,6 +622,9 @@ function runCmdKind(kind, cmd, cwd, timeoutMs, cancelKey) {
         if (err) { resolve({ ok: false, output: (out + "\n[" + String(err.code || "error") + "]").trim(), launched: true, incompatible }); return; }
         resolve({ ok: true, output: (out.trim() || "(no output)") + "\n[exit 0]", launched: true, incompatible });
       });
+    // Stop tlacitko: bezici prikaz musi jit zabit (viz cancelToolsFor).
+    let cid = null;
+    try { if (child && child.pid) { cid = 'k' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36); activeProcs.set(cid, { child, pid: child.pid, key: String(cancelKey || cwd || '') }); } } catch {}
     void child;
   });
 }
@@ -2155,9 +2159,13 @@ function cancelToolsFor(rootKey) {
     try {
       if (key && e.key !== key) continue;
       n++;
-      try { if (e.child && e.pid) require('child_process').execFile('taskkill.exe', ['/PID', String(e.pid), '/T', '/F'], { timeout: 8000, windowsHide: true }, () => {}); } catch {}
-      try { if (e.child) e.child.kill(); } catch {}
+      // Poradi je kriticke: NEJDRIV taskkill /T (cely strom vcetne ping/node vnuku),
+      // teprve pak kill primého potomka. Opacne by vnuk osirel, drzel by pipe
+      // a callback by se ozval az po jeho konci (namereno 29 s misto ~1 s).
+      try { if (e.pid) require('child_process').execFile('taskkill.exe', ['/PID', String(e.pid), '/T', '/F'], { timeout: 8000, windowsHide: true }, () => {}); } catch {}
+      const ch = e.child;
       try { activeProcs.delete(cid); } catch {}
+      setTimeout(() => { try { if (ch && ch.exitCode === null) ch.kill(); } catch {} }, 800);
     } catch {}
   }
   // Kooperativni stop pro build_exe (faze bez child procesu).
@@ -2234,22 +2242,32 @@ function hashProjectState(dir, pkgText, extraFiles, target) {
       if (st.size > 0 && st.size <= 1048576) h.update(fs.readFileSync(abs));
     } catch {}
   }
-  for (const sub of ['src', 'vendor', 'assets', 'public']) {
-    try {
-      const walk = (d) => {
-        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-          const p = path.join(d, e.name);
-          if (e.isDirectory()) { walk(p); continue; }
-          try {
-            const st = fs.statSync(p);
-            h.update('tree:' + path.relative(dir, p) + ':' + st.size + ':' + st.mtimeMs + '\n');
-          } catch {}
+  // Cely strom projektu (mimo node_modules/dist/.git): KAZDA zmena souboru musi
+  // zmenit hash, jinak by build_exe preskocil rebuild a vratil stare exe.
+  // Jen metadata (cesta+velikost+mtime), max 5000 souboru — rychle a staci to.
+  const SKIP_TREE = new Set(['node_modules', 'dist', '.git']);
+  try {
+    let n = 0;
+    const walk = (d) => {
+      let entries;
+      try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (n > 5000) return;
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) {
+          if (SKIP_TREE.has(e.name)) continue;
+          walk(p); continue;
         }
-      };
-      const sd = path.join(dir, sub);
-      if (fs.existsSync(sd)) walk(sd);
-    } catch {}
-  }
+        try {
+          const st = fs.statSync(p);
+          if (!st.isFile()) continue;
+          n++;
+          h.update('tree:' + path.relative(dir, p) + ':' + st.size + ':' + st.mtimeMs + '\n');
+        } catch {}
+      }
+    };
+    walk(dir);
+  } catch {}
   return h.digest('hex').slice(0, 32);
 }
 /* Test zamku souboru: otevreni pro zapis selze (EBUSY/EPERM), kdyz soubor drzi
@@ -2272,7 +2290,21 @@ async function execBuildExe(dir, opts) {
   const fail = (msg) => ({ ok: false, output: log.join('\n') + '\n\nBUILD SELHAL: ' + msg });
   if (!fs.existsSync(dir)) return fail('Slozka neexistuje: ' + dir);
   const pkgFile = path.join(dir, 'package.json');
-  if (!fs.existsSync(pkgFile)) return fail('Chybi package.json - nejdriv scaffold_electron nebo napis package.json (main.js + index.html).');
+  // Klasika: projekt se postavil do PODSLOZKY (scaffold_electron s dir "neco"), ale build
+  // bezi v rootu. Misto sucheho "chybi package.json" rovnou rekneme, kde lezi.
+  if (!fs.existsSync(pkgFile)) {
+    let sub = [];
+    try {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules' || e.name === 'dist') continue;
+        try { if (fs.existsSync(path.join(dir, e.name, 'package.json'))) sub.push(e.name); } catch {}
+      }
+    } catch {}
+    const hint = sub.length === 1
+      ? ' Projekt je ale v podslozce "' + sub[0] + '" — presun soubory do rootu (move_file) a zavolej build_exe znovu. Soubory patri PRIMO do vybrane slozky, nova podslozka jen kdyz to uzivatel vyslovne chce.'
+      : (sub.length > 1 ? ' Kandidati v podslozkach: ' + sub.slice(0, 5).join(', ') + ' — pracuj v jedne z nich, nebo presun soubory do rootu.' : '');
+    return fail('Chybi package.json - nejdriv scaffold_electron nebo napis package.json (main.js + index.html).' + hint);
+  }
   let pkg;
   try { pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8')); }
   catch (e) { return fail('package.json je rozbity JSON: ' + e.message); }
@@ -2359,9 +2391,13 @@ async function execBuildExe(dir, opts) {
       if (pkgT > nmT) needInstall = true;
     }
   } catch {}
+  const isCancelled = () => { try { return !!(opts.cancelled && opts.cancelled()); } catch { return false; } };
+  const failCancel = () => fail('Zruseno uzivatelem (Stop). Rozdelany build se zahodil, dist zustal jak byl.');
+  if (isCancelled()) return failCancel();
   if (needInstall) {
     step('npm install potreba', true, 'node_modules chybi nebo je starsi nez package.json');
-    const ins = await runCmdLong('npm install', dir, 600000);
+    const ins = await runCmdLong('npm install', dir, 600000, dir);
+    if (isCancelled()) return failCancel();
     if (!ins.ok) return fail('npm install selhal:\n' + ins.output);
     step('npm install', true);
   } else {
@@ -2424,9 +2460,15 @@ async function execBuildExe(dir, opts) {
     for (let li = 0; li < 6; li++) {
       const locked = lockProbe.filter(p => isFileLocked(p));
       if (!locked.length) break;
+      if (isCancelled()) return failCancel();
       step('Soubor zamcen', true, path.basename(locked[0]) + ' drzi jiny proces - cekam ' + ((li + 1) * 10) + ' s (pokus ' + (li + 1) + '/6)');
       try { for (const e of listExeFiles(path.join(dir, 'dist'))) { try { await taskkillOne(path.basename(e.path)); } catch {} } } catch {}
-      await new Promise(r => setTimeout(r, 10000));
+      // 10 s cekani po 1 s, at Stop zabere do sekundy (ne az po deseti).
+      for (let s = 0; s < 10; s++) {
+        await new Promise(r => setTimeout(r, 1000));
+        if (isCancelled()) return failCancel();
+        if (!lockProbe.some(p => isFileLocked(p))) break;
+      }
       if (li === 5 && lockProbe.some(p => isFileLocked(p))) {
         const still = [];
         try {
@@ -2449,9 +2491,11 @@ async function execBuildExe(dir, opts) {
   // Retry pri zamku souboru: kdyz builder nemuze prepsat app.asar, protoze stara
   // instance jeste bezi (uzivatel nebo AI ji prave spustila), ukoncime a zkusime znovu.
   let bld = null, bldAttempt = 0;
+  if (isCancelled()) return failCancel();
   while (bldAttempt < 3) {
     bldAttempt++;
-    bld = await runCmdLong(distCmd, dir, 900000);
+    bld = await runCmdLong(distCmd, dir, 900000, dir);
+    if (isCancelled()) return failCancel();
     if (bld.ok) break;
     const lockErr = /used by another process|EBUSY|EPERM|app\.asar|cannot access|nemá přístup/i.test(String(bld.output || ''));
     if (!lockErr || bldAttempt >= 3) break;
@@ -2492,6 +2536,7 @@ async function execBuildExe(dir, opts) {
   // --- launch-test ---
   const testExe = fresh.filter(e => e.unpacked && !/setup|uninstall/i.test(path.basename(e.path)))[0]
     || fresh.filter(e => !/setup|uninstall/i.test(path.basename(e.path)))[0];
+  if (isCancelled()) return failCancel();
   if (testExe) {
     step('Launch-test', true, path.basename(testExe.path) + ' se spousti na 4 s...');
     const lt = await launchTestExe(testExe.path);
@@ -2627,7 +2672,7 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
             }
           } catch {}
         }
-        const r = await runCmdKind(kind, cmd, cwd, tmo);
+        const r = await runCmdKind(kind, cmd, cwd, tmo, base);
         tried.push(kind);
         if (r.launched === false) continue;
         if (!r.incompatible) {
@@ -2820,7 +2865,14 @@ async function execTool({ tool, args = {}, root, fullAccess, fallbackDir, openPa
       const dir = base;
       const target = String(args.target || '').toLowerCase();
       if (target && !['nsis', 'portable', 'dir'].includes(target)) throw new Error('target musi byt nsis, portable nebo dir (nebo vynechat).');
-      return await execBuildExe(dir, { target });
+      // Token pro kooperativni Stop (build_exe ma faze bez child procesu). tools:cancel ho nastavi.
+      const btok = { cancelled: false };
+      try { buildCancelTokens.set(String(dir), btok); } catch {}
+      try {
+        return await execBuildExe(dir, { target, cancelled: () => { try { return !!btok.cancelled; } catch { return false; } } });
+      } finally {
+        try { if (buildCancelTokens.get(String(dir)) === btok) buildCancelTokens.delete(String(dir)); } catch {}
+      }
     }
 if (tool === 'web_fetch') {
       if (!/^https?:\/\//i.test(String(args.url || ''))) throw new Error('URL must start with http(s)://');
