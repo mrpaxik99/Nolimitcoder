@@ -2190,27 +2190,42 @@ async function procsSnapshot() {
   } catch {}
   return map;
 }
-// Pobij sirotky PO NASICH predchozich buildech ve slozce. Zabiji se jen procesy,
-// ktere kazdym coulem vypadaji jako nase buildry (node s electron-builder/npm v cmdline,
-// launch-test exe s cestou projektu) — nikdy nic ciziho. PID se na Windows recykluje,
-// takze samotne cislo nestaci, vzdy se overuje i prikazova radka.
+// Pobij sirotky PO NASICH predchozich buildech ve slozce. Dve vrstvy:
+//  1) PIDs, ktere jsme sami spustili v teto session (dirProcs) — presne, rychle.
+//  2) Sweep: node.exe s electron-builder + cestou projektu v cmdline — chyti i sirotky
+//     z doby pred restartem aplikace (pamet dirProcs se restartem vymaze).
+// Zabiji se jen procesy, ktere kazdym coulem vypadaji jako nase buildry — nikdy nic
+// ciziho. PID se na Windows recykluje, takze samotne cislo nestaci.
 async function killOwnOrphans(dir) {
   const key = String(dir || '');
-  const set = dirProcs.get(key);
-  if (!set || !set.size) return 0;
   let n = 0;
+  const killPid = (pid) => {
+    try { require('child_process').execFile('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { timeout: 8000, windowsHide: true }, () => {}); n++; } catch {}
+  };
   try {
     const snap = await procsSnapshot();
-    for (const pid of [...set]) {
+    const set = dirProcs.get(key);
+    if (set && set.size) {
+      for (const pid of [...set]) {
+        try {
+          const e = snap.get(Number(pid));
+          if (!e) continue; // uz nebezi
+          const cmd = String(e.cmd || '');
+          const ours = (e.img === 'node.exe' && /electron-builder|npm/i.test(cmd))
+            || ((e.img === 'cmd.exe' || e.img === 'powershell.exe' || e.img === 'pwsh.exe') && /npm install|electron-builder/i.test(cmd))
+            || (e.img !== '' && /electron/i.test(e.img) && cmd.toLowerCase().includes(key.toLowerCase()));
+          if (!ours) continue;
+          killPid(pid);
+        } catch {}
+      }
+    }
+    // Sweep napric restartem: builder pro TUTO slozku (cmdline obsahuje cestu projektu).
+    const klow = key.toLowerCase();
+    for (const [pid, e] of snap) {
       try {
-        const e = snap.get(Number(pid));
-        if (!e) continue; // uz nebezi
+        if (e.img !== 'node.exe') continue;
         const cmd = String(e.cmd || '');
-        const ours = (e.img === 'node.exe' && /electron-builder|npm/i.test(cmd))
-          || ((e.img === 'cmd.exe' || e.img === 'powershell.exe' || e.img === 'pwsh.exe') && /npm install|electron-builder/i.test(cmd))
-          || (e.img !== '' && /electron/i.test(e.img) && cmd.toLowerCase().includes(key.toLowerCase()));
-        if (!ours) continue;
-        try { require('child_process').execFile('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { timeout: 8000, windowsHide: true }, () => {}); n++; } catch {}
+        if (/electron-builder/i.test(cmd) && cmd.toLowerCase().includes(klow)) killPid(pid);
       } catch {}
     }
   } catch {}
@@ -2596,7 +2611,7 @@ async function execBuildExe(dir, opts) {
         } catch {}
         return fail('Soubor je po 60 s porad zamceny: ' + locked.join(', ') + '.'
           + (still.length ? ' Porad bezi: ' + still.join(', ') + ' — zavri je ve Spravci uloh.' : ' Zadny exe uz nebezi, takze zamek drzi neco jineho (okno Exploreru se slozkou dist, nahled, antivirus).')
-          + ' Pak spust build_exe znovu.');
+          + ' DULEZITE: chyba NENI v kodu — NEUPRAVUJ zadne soubory (ani index.html), nic to nespravi. Jen pockej a zavolej build_exe znovu.');
       }
     }
   } catch (e) { if (String((e && e.message) || '').includes('BUILD SELHAL')) throw e; }
