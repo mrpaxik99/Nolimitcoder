@@ -926,7 +926,9 @@ ipcMain.handle('tools:exec', async (_, data) => {
       // `git rev-parse` mimo repo končí exit 128 ("not a git repository") — běžný
       // stav u projektu bez gitu, ne chyba aplikace (v logu to dělalo jen šum).
       const notRepo = d.tool === 'shell' && /(^|\s)git\s+rev-parse/i.test(cmd) && /\[exit 128\]/i.test(out);
-      if (!intentional && !notRepo && !(probe && /\[exit 1\]\s*$/i.test(out.trim()) && !/\[stderr\]/i.test(out))) {
+      const notFound = ['file_info', 'read_file', 'list_dir', 'glob_file'].includes(d.tool) &&
+        /ENOENT|no such file|does not exist/i.test(out);
+      if (!intentional && !notRepo && !notFound && !(probe && /\[exit 1\]\s*$/i.test(out.trim()) && !/\[stderr\]/i.test(out))) {
         ERR.logError('tool:' + String(d.tool || '?'), out.slice(0, 2000),
           { args: d.args || {}, root: d.root || '', ms: Date.now() - t0 });
       }

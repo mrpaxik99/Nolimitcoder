@@ -3133,7 +3133,7 @@ function helperState() {
 }
 module.exports = {
   BLOCKED_PREFIXES, SKIP_DIRS, TEXT_EXT, COMPILERS, TOOLCHAINS, TOOL_GROUPS, TOOL_ALIAS, CMD_TOOL,
-  normToolName, foldKey, knownFolders, resolveTarget, canonArgs, splitArgs, normalizeShell,
+  normToolName, foldKey, knownFolders, resolveTarget, canonArgs, splitArgs, normalizeShell, preferredShellOrder,
   runCmd, runArgv, runCmdAdmin, globWalk, fetchText, diffLines, execTool, cancelToolsFor, killOwnOrphans, hashProjectState,
   scanEnv, envReport, ensureTools, ensureForShell, detectProject, detectIntent, requiredForCommand, resolveNeed, installTool,
   setProgressHook, cancelDownload, dbgLog,
